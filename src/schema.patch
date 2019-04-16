@@ -1,0 +1,28 @@
+diff --git a/src/schema.rs b/src/schema.rs
+--- a/src/schema.rs
++++ b/src/schema.rs
+@@ -1,19 +1,19 @@
+ table! {
+     tweets (id) {
+-        id -> Integer,
++        id -> BigInt,
+         text -> Text,
+-        user_id -> Integer,
+-        in_reply_to_status_id -> Nullable<Integer>,
+-        quoted_status_id -> Nullable<Integer>,
++        user_id -> BigInt,
++        in_reply_to_status_id -> Nullable<BigInt>,
++        quoted_status_id -> Nullable<BigInt>,
+     }
+ }
+ 
+ table! {
+     twitter_tokens (id) {
+-        id -> Integer,
++        id -> BigInt,
+         access_token -> Text,
+         access_token_secret -> Text,
+     }
+ }
+ 
+ allow_tables_to_appear_in_same_query!(
