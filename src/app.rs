@@ -100,32 +100,27 @@ impl App {
             return Ok(());
         }
 
-        let tweet_id = tweet.id;
-        let mut queue = RTQueue {
-            tweet: Some(tweet),
-            pending: FuturesUnordered::new(),
-        };
+        let mut pending = FuturesUnordered::new();
 
-        for outbox in self
-            .manifest()
-            .rule
-            .route_tweet(queue.tweet.as_ref().unwrap())
-        {
+        for outbox in self.manifest().rule.route_tweet(&tweet) {
             match outbox {
                 &Outbox::Twitter(user) => {
-                    queue
-                        .pending
-                        .push(twitter::statuses::Retweet::new(tweet_id).send(
-                            self.manifest().twitter.client.as_ref(),
-                            self.core.twitter_token(user).unwrap(),
-                            &self.http_client(),
-                        ));
+                    pending.push(twitter::statuses::Retweet::new(tweet.id).send(
+                        self.manifest().twitter.client.as_ref(),
+                        self.core.twitter_token(user).unwrap(),
+                        &self.http_client(),
+                    ));
                 }
             }
         }
 
-        self.rt_queue.push(queue);
-        self.pending_rts.insert(tweet_id);
+        if !pending.is_empty() {
+            self.pending_rts.insert(tweet.id);
+            self.rt_queue.push(RTQueue {
+                tweet: Some(tweet),
+                pending,
+            });
+        }
 
         Ok(())
     }
