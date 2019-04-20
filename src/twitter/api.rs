@@ -195,6 +195,7 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
                     rate_limit,
                     body: res.into_body().compat().try_concat(),
                 };
+                cx.waker().wake_by_ref();
                 Poll::Pending
             }
             ResponseFutureInner::Body {
