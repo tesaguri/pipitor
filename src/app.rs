@@ -172,8 +172,9 @@ impl Future for App {
         }
 
         while let Poll::Ready(v) = (&mut self.twitter).compat().poll_next_unpin(cx) {
-            if let Some(tweet) = v {
-                let tweet = json::from_str(&tweet?)?;
+            if let Some(result) = v {
+                let json = result.context("error while listening to Twitter's Streaming API");
+                let tweet = json::from_str(&json?)?;
                 self.process_tweet(tweet)?;
             } else {
                 return Poll::Ready(Ok(()));
@@ -187,7 +188,7 @@ impl Future for App {
                 use crate::models::NewTweet;
                 use crate::schema::tweets::dsl::*;
 
-                let retweeted_status = result?;
+                let retweeted_status = result.context("failed to Retweet a Tweet")?;
                 diesel::replace_into(tweets)
                     .values(&NewTweet::from(&retweeted_status))
                     .execute(&*conn)?;
@@ -280,7 +281,8 @@ impl Core {
             let temporary = await!(twitter::oauth::request_token(
                 manifest.twitter.client.as_ref(),
                 &client,
-            ))?;
+            ))
+            .context("error while getting OAuth request token from Twitter")?;
 
             let verifier = loop {
                 println!();
@@ -301,33 +303,27 @@ impl Core {
                 }
             };
 
-            match await!(twitter::oauth::access_token(
+            let (user, token) = await!(twitter::oauth::access_token(
                 &verifier,
                 manifest.twitter.client.as_ref(),
                 temporary.as_ref(),
                 &client,
-            )) {
-                Ok((user, token)) => {
-                    if unauthed_users.remove(&user) {
-                        diesel::replace_into(twitter_tokens)
-                            .values(models::NewTwitterTokens {
-                                id: user,
-                                access_token: &token.key,
-                                access_token_secret: &token.secret,
-                            })
-                            .execute(&*pool.get()?)?;
-                        tokens.insert(user, token.map(Into::into));
-                        println!("Successfully logged in as user_id={}", user);
-                    } else {
-                        println!("Invalid user, try again");
-                        // TODO: invalidate token
-                    }
-                }
-                Err(e) => {
-                    return Err(e)
-                        .context("Error while getting access token")
-                        .map_err(Into::into);
-                }
+            ))
+            .context("error while getting OAuth access token from Twitter")?;
+
+            if unauthed_users.remove(&user) {
+                diesel::replace_into(twitter_tokens)
+                    .values(models::NewTwitterTokens {
+                        id: user,
+                        access_token: &token.key,
+                        access_token_secret: &token.secret,
+                    })
+                    .execute(&*pool.get()?)?;
+                tokens.insert(user, token.map(Into::into));
+                println!("Successfully logged in as user_id={}", user);
+            } else {
+                println!("Invalid user, try again");
+                // TODO: invalidate token
             }
         }
 
@@ -370,7 +366,8 @@ impl Core {
         // `await!` immediately to make sure the later call to `send()` happens after Twitter accepts this request
         let twitter = await!(TwitterStreamBuilder::filter(stream_token)
             .follow(&*twitter_topics)
-            .listen_with_client(&self.client))?;
+            .listen_with_client(&self.client))
+        .context("error while connecting to Twitter's Streaming API")?;
 
         let twitter_backfill = {
             use crate::schema::tweets::dsl::*;

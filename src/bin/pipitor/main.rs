@@ -28,7 +28,7 @@ async fn main() -> Fallible<()> {
     let manifest: Manifest =
         toml::from_slice(&manifest).context("failed to parse `Pipitor.toml`")?;
 
-    let app = await!(App::new(manifest))?;
+    let app = await!(App::new(manifest)).context("failed to initialize the application")?;
 
     await!(app)
 }
