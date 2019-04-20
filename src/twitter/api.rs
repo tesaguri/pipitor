@@ -189,7 +189,8 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
         match self.inner {
             ResponseFutureInner::Resp(ref mut res) => {
                 let res = try_ready!(res.compat().poll_unpin(cx).map_err(Error::Hyper));
-                let rate_limit = rate_limit(&res)?;
+                check_status(&res)?;
+                let rate_limit = rate_limit(&res).ok_or(Error::Unexpected)?;
                 self.inner = ResponseFutureInner::Body {
                     rate_limit,
                     body: res.into_body().compat().try_concat(),
@@ -211,26 +212,33 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
     }
 }
 
-fn rate_limit(res: &hyper::Response<Body>) -> Result<RateLimit> {
+fn check_status<T>(res: &hyper::Response<T>) -> Result<()> {
     let status = res.status();
 
-    fn header(res: &hyper::Response<Body>, name: &str) -> Result<u64> {
-        res.headers()
-            .get(name)
-            .and_then(|value| atoi::atoi(value.as_bytes()))
-            .ok_or(Error::Unexpected)
-    }
-
     match status.as_u16() {
-        200 => Ok(RateLimit {
-            limit: header(&res, "x-rate-limit-limit")?,
-            remaining: header(&res, "x-rate-limit-remaining")?,
-            reset: header(&res, "x-rate-limit-reset")?,
-        }),
+        200 => return Ok(()),
         // Enhance Your Calm | Too Many Requests
         420 | 429 => {
-            header(&res, "x-rate-limit-reset").and_then(|reset| Err(Error::RateLimit(reset)))
+            if let Some(reset) = header(res, "x-rate-limit-reset") {
+                return Err(Error::RateLimit(reset));
+            }
         }
-        _ => Err(Error::StatusCode(status)),
+        _ => (),
     }
+
+    Err(Error::StatusCode(status))
+}
+
+fn rate_limit<T>(res: &hyper::Response<T>) -> Option<RateLimit> {
+    Some(RateLimit {
+        limit: header(&res, "x-rate-limit-limit")?,
+        remaining: header(&res, "x-rate-limit-remaining")?,
+        reset: header(&res, "x-rate-limit-reset")?,
+    })
+}
+
+fn header<T>(res: &hyper::Response<T>, name: &str) -> Option<u64> {
+    res.headers()
+        .get(name)
+        .and_then(|value| atoi::atoi(value.as_bytes()))
 }

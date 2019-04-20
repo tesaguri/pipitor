@@ -34,7 +34,7 @@ where
 
     let res =
         await!(client.request(req.body(Default::default()).unwrap())).map_err(Error::Hyper)?;
-    let _ = super::rate_limit(&res)?;
+    super::check_status(&res)?;
 
     let body = await!(res.into_body().compat().try_concat()).map_err(Error::Hyper)?;
 
@@ -83,7 +83,7 @@ where
 
     let res =
         await!(client.request(req.body(Default::default()).unwrap())).map_err(Error::Hyper)?;
-    let _ = super::rate_limit(&res)?;
+    super::check_status(&res)?;
 
     let body = await!(res.into_body().compat().try_concat()).map_err(Error::Hyper)?;
 
