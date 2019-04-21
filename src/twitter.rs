@@ -9,7 +9,7 @@ use std::borrow::Borrow;
 
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Credentials<T = String> {
     pub key: T,
     pub secret: T,

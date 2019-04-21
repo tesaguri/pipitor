@@ -4,14 +4,14 @@ use serde::Deserialize;
 use crate::rules::RuleMap;
 use crate::twitter::Credentials;
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Manifest {
     pub database_url: Option<Box<str>>,
     pub rule: RuleMap,
     pub twitter: Twitter,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Twitter {
     pub client: Credentials<Box<str>>,
     pub user: i64,

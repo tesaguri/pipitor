@@ -92,7 +92,7 @@ enum ResponseFutureInner {
     },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct RateLimit {
     pub limit: u64,
     pub remaining: u64,

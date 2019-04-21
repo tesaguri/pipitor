@@ -1,6 +1,6 @@
 use crate::schema::*;
 
-#[derive(Identifiable, Queryable)]
+#[derive(Clone, Debug, Identifiable, Queryable)]
 pub struct Tweet {
     pub id: i64,
     pub text: String,
@@ -10,7 +10,7 @@ pub struct Tweet {
     pub quoted_status_text: Option<String>,
 }
 
-#[derive(Insertable)]
+#[derive(Clone, Debug, Insertable)]
 #[table_name = "tweets"]
 pub struct NewTweet<'a> {
     pub id: i64,
@@ -20,14 +20,14 @@ pub struct NewTweet<'a> {
     pub quoted_status_id: Option<i64>,
 }
 
-#[derive(Identifiable, Queryable)]
+#[derive(Clone, Debug, Identifiable, Queryable)]
 pub struct TwitterToken {
     pub id: i64,
     pub access_token: String,
     pub access_token_secret: String,
 }
 
-#[derive(Insertable)]
+#[derive(Clone, Debug, Insertable)]
 #[table_name = "twitter_tokens"]
 pub struct NewTwitterTokens<'a> {
     pub id: i64,

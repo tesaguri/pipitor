@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::{self, Formatter};
+use std::fmt::{self, Debug, Formatter};
 use std::ops::DerefMut;
 
 use regex::Regex;
@@ -9,7 +9,7 @@ use smallvec::{smallvec, SmallVec};
 use crate::twitter::Tweet;
 
 mod private {
-    #[derive(Clone, serde::Deserialize, PartialEq, Eq, Hash)]
+    #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq, Hash)]
     pub enum Never {}
 }
 
@@ -18,7 +18,7 @@ pub struct RuleMap {
     map: HashMap<TopicId, SmallVec<[Rule; 1]>>,
 }
 
-#[derive(Clone, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash)]
 #[serde(untagged)]
 pub enum TopicId {
     Twitter(i64),
@@ -26,13 +26,13 @@ pub enum TopicId {
     _NonExhaustive(private::Never),
 }
 
-#[derive(Clone, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash)]
 #[serde(untagged)]
 pub enum Outbox {
     Twitter(i64),
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Rule {
     #[serde(default)]
     filter: Filter,
@@ -40,12 +40,12 @@ pub struct Rule {
     outbox: SmallVec<[Outbox; 1]>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Filter {
     inner: Option<MatcherInner>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct MatcherInner {
     title: Regex,
     text: Option<Regex>,
@@ -105,6 +105,12 @@ impl RuleMap {
             .flatten()
             .filter(move |r| r.filter.matches_tweet(tweet))
             .flat_map(|r| &r.outbox)
+    }
+}
+
+impl Debug for RuleMap {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&self.map, f)
     }
 }
 

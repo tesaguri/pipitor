@@ -1,6 +1,6 @@
 use serde::{de, Deserialize};
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Tweet {
     pub id: i64,
     pub text: Box<str>,
@@ -15,12 +15,12 @@ pub struct Tweet {
     pub retweeted_status: Option<de::IgnoredAny>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct User {
     pub id: i64,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct QuotedStatus {
     pub id: i64,
 }
