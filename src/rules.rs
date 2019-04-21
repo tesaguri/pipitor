@@ -42,11 +42,11 @@ pub struct Rule {
 
 #[derive(Clone, Debug, Default)]
 pub struct Filter {
-    inner: Option<MatcherInner>,
+    inner: Option<FilterInner>,
 }
 
 #[derive(Clone, Debug)]
-struct MatcherInner {
+struct FilterInner {
     title: Regex,
     text: Option<Regex>,
 }
@@ -183,7 +183,7 @@ impl Rule {
 impl Filter {
     pub fn from_title(title: Regex) -> Self {
         Filter {
-            inner: Some(MatcherInner { title, text: None }),
+            inner: Some(FilterInner { title, text: None }),
         }
     }
 
@@ -215,8 +215,8 @@ impl<'de> Deserialize<'de> for Filter {
 
         Option::<Prototype>::deserialize(d).map(|o| Filter {
             inner: o.map(|m| match m {
-                Prototype::Title(title) => MatcherInner { title, text: None },
-                Prototype::Composite { title, text } => MatcherInner { title, text },
+                Prototype::Title(title) => FilterInner { title, text: None },
+                Prototype::Composite { title, text } => FilterInner { title, text },
             }),
         })
     }
