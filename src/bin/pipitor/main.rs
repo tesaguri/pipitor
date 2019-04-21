@@ -3,6 +3,7 @@
 
 mod common;
 mod run;
+mod twitter_login;
 
 use failure::Fallible;
 use structopt::StructOpt;
@@ -26,6 +27,8 @@ pub struct Opt {
 enum Cmd {
     #[structopt(name = "run", about = "Start running the bot")]
     Run(run::Opt),
+    #[structopt(name = "twitter-login", about = "")]
+    TwitterLogin(twitter_login::Opt),
 }
 
 #[runtime::main(runtime_tokio::Tokio)]
@@ -36,5 +39,6 @@ async fn main() -> Fallible<()> {
 
     match cmd {
         Cmd::Run(subopt) => await!(run::main(opt, subopt)),
+        Cmd::TwitterLogin(subopt) => await!(twitter_login::main(opt, subopt)),
     }
 }

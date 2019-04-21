@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Write};
 use std::pin::Pin;
 use std::task::Context;
 
@@ -7,8 +6,8 @@ use diesel::prelude::*;
 use diesel::SqliteConnection;
 use failure::{Fallible, ResultExt};
 use futures::compat::Stream01CompatExt;
-use futures::future::{self, FusedFuture, Future, FutureExt};
-use futures::stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt};
+use futures::future::{FusedFuture, Future, FutureExt};
+use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use futures::Poll;
 use hyper::client::{Client, HttpConnector};
 use hyper::StatusCode;
@@ -55,7 +54,7 @@ impl App {
     pub async fn new(manifest: Manifest) -> Fallible<Self> {
         trace_fn!(App::new);
 
-        let core = await!(Core::authenticate(manifest))?;
+        let core = await!(Core::new(manifest))?;
         let (twitter_backfill, twitter) = await!(core.init_twitter())?;
 
         Ok(App {
@@ -210,21 +209,14 @@ impl Future for App {
 }
 
 impl Core {
-    async fn authenticate(manifest: Manifest) -> Fallible<Self> {
-        trace_fn!(Core::authenticate);
-
-        use crate::schema::twitter_tokens::dsl::*;
+    async fn new(manifest: Manifest) -> Fallible<Self> {
+        trace_fn!(Core::new);
 
         let pool = Pool::new(ConnectionManager::new(manifest.database_url()))?;
         let client = Client::builder()
             .build(HttpsConnector::new(4).context("failed to initialize TLS client")?);
 
-        enum TwitterUser {
-            Authed(i64, twitter::Credentials<Box<str>>),
-            Unauthed(i64),
-        }
-
-        let twitter_users: FuturesUnordered<_> = manifest
+        let twitter_tokens: FuturesUnordered<_> = manifest
             .rule
             .outboxes()
             .filter_map(|outbox| match outbox {
@@ -233,6 +225,8 @@ impl Core {
             .chain(Some(manifest.twitter.user))
             .unique()
             .map(|user| {
+                use crate::schema::twitter_tokens::dsl::*;
+
                 let token = twitter_tokens
                     .find(&user)
                     .get_result::<models::TwitterToken>(&*pool.get()?)
@@ -246,9 +240,9 @@ impl Core {
                         match await!(twitter::account::VerifyCredentials::new().send(
                             manifest.twitter.client.as_ref(),
                             (&token).into(),
-                            &client,
+                            client,
                         )) {
-                            Ok(_) => return Ok(TwitterUser::Authed(user, token.into())),
+                            Ok(_) => return Ok((user, token.into())),
                             Err(twitter::Error::StatusCode(StatusCode::UNAUTHORIZED)) => (),
                             Err(e) => {
                                 return Err(e)
@@ -259,69 +253,20 @@ impl Core {
                         }
                     }
 
-                    Ok(TwitterUser::Unauthed(user))
+                    Err(failure::err_msg(
+                        "not all Twitter users are authorized; please run `pipitor twitter-login`",
+                    ))
                 })
             })
             .collect::<Fallible<_>>()?;
 
-        let (mut tokens, mut unauthed_users) = await!(twitter_users.try_fold(
-            (HashMap::new(), HashSet::new()),
-            |(mut authed, mut unauthed), user| {
-                match user {
-                    TwitterUser::Authed(user, token) => {
-                        trace!("authorized user: {}", user);
-                        authed.insert(user, token);
-                    }
-                    TwitterUser::Unauthed(user) => {
-                        unauthed.insert(user);
-                    }
-                }
-                future::ok((authed, unauthed))
-            }
-        ))?;
-
-        let stdin = tokio_file_unix::File::new_nb(tokio_file_unix::raw_stdin()?)?
-            .into_io(&Default::default())?;
-        let mut stdin = tokio::io::lines(io::BufReader::new(stdin)).compat();
-
-        while !unauthed_users.is_empty() {
-            let temporary = await!(twitter::oauth::request_token(
-                manifest.twitter.client.as_ref(),
-                &client,
-            ))
-            .context("error while getting OAuth request token from Twitter")?;
-
-            let verifier = await!(input_verifier(&mut stdin, &temporary.key, &unauthed_users,))?;
-
-            let (user, token) = await!(twitter::oauth::access_token(
-                &verifier,
-                manifest.twitter.client.as_ref(),
-                temporary.as_ref(),
-                &client,
-            ))
-            .context("error while getting OAuth access token from Twitter")?;
-
-            if unauthed_users.remove(&user) {
-                diesel::replace_into(twitter_tokens)
-                    .values(models::NewTwitterTokens {
-                        id: user,
-                        access_token: &token.key,
-                        access_token_secret: &token.secret,
-                    })
-                    .execute(&*pool.get()?)?;
-                tokens.insert(user, token.map(Into::into));
-                println!("Successfully logged in as user_id={}", user);
-            } else {
-                println!("Invalid user, try again");
-                // TODO: invalidate token
-            }
-        }
+        let twitter_tokens = await!(twitter_tokens.try_collect())?;
 
         Ok(Core {
             manifest,
             pool,
             client,
-            twitter_tokens: tokens,
+            twitter_tokens,
         })
     }
 
@@ -413,42 +358,5 @@ impl Future for RTQueue {
 impl FusedFuture for RTQueue {
     fn is_terminated(&self) -> bool {
         self.tweet.is_none()
-    }
-}
-
-async fn input_verifier<'a, S, I, E>(
-    stdin: &'a mut S,
-    token: &'a str,
-    users: I,
-) -> Result<String, E>
-where
-    S: Stream<Item = Result<String, E>> + Unpin,
-    I: IntoIterator<Item = &'a i64> + Copy,
-{
-    loop {
-        {
-            let stdout = io::stdout();
-            let mut stdout = stdout.lock();
-            write!(
-                stdout,
-                "\n\
-                 Open the following URL in a Web browser:\n\
-                 https://api.twitter.com/oauth/authorize?force_login=true&oauth_token={}\n\
-                 Log into an account with one of the following `user_id`s:\n",
-                token,
-            )
-            .unwrap();
-            for user in users {
-                writeln!(stdout, "{}", user).unwrap();
-            }
-            stdout
-                .write_all(b"And enter the PIN code given by Twitter:\n>")
-                .unwrap();
-            stdout.flush().unwrap();
-        }
-
-        if let Some(input) = await!(stdin.next()) {
-            return input;
-        }
     }
 }
