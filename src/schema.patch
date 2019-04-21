@@ -1,7 +1,7 @@
-diff --git a/src/schema.rs b/src/schema.rs
+diff a/src/schema.rs b/src/schema.rs
 --- a/src/schema.rs
 +++ b/src/schema.rs
-@@ -1,19 +1,19 @@
+@@ -1,10 +1,10 @@
  table! {
      tweets (id) {
 -        id -> Integer,
@@ -16,6 +16,7 @@ diff --git a/src/schema.rs b/src/schema.rs
      }
  }
  
+@@ -11,8 +11,8 @@
  table! {
      twitter_tokens (id) {
 -        id -> Integer,
@@ -25,4 +26,3 @@ diff --git a/src/schema.rs b/src/schema.rs
      }
  }
  
- allow_tables_to_appear_in_same_query!(
