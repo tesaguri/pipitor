@@ -346,19 +346,13 @@ impl Core {
     async fn init_twitter(&self) -> Fallible<(Option<TwitterBackfill>, TwitterStream)> {
         trace_fn!(Core::init_twitter);
 
-        let token = {
-            use crate::schema::twitter_tokens::dsl::*;
-            twitter_tokens
-                .find(&self.manifest.twitter.user)
-                .get_result::<models::TwitterToken>(&*self.pool.get()?)
-                .context("failed to load token from the database")?
-        };
+        let token = self.twitter_token(self.manifest.twitter.user).unwrap();
 
         let stream_token = twitter_stream::Token {
             consumer_key: &*self.manifest.twitter.client.key,
             consumer_secret: &*self.manifest.twitter.client.secret,
-            access_key: &*token.access_token,
-            access_secret: &*token.access_token_secret,
+            access_key: token.key,
+            access_secret: token.secret,
         };
 
         let mut twitter_topics: Vec<_> = self
@@ -389,16 +383,13 @@ impl Core {
                     .first::<Option<i64>>(&*self.pool.get()?)?
                     .map(|since_id| {
                         trace!("timeline backfilling enabled");
+                        let response = twitter::lists::Statuses::new(list)
+                            .since_id(Some(since_id))
+                            .send(self.manifest.twitter.client.as_ref(), token, &self.client);
                         TwitterBackfill {
                             list,
                             since_id,
-                            response: twitter::lists::Statuses::new(list)
-                                .since_id(Some(since_id))
-                                .send(
-                                    self.manifest.twitter.client.as_ref(),
-                                    (&token).into(),
-                                    &self.client,
-                                ),
+                            response,
                         }
                     })
             } else {

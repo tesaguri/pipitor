@@ -191,34 +191,33 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<Response<T>>> {
         trace_fn!(ResponseFuture::<T>::poll);
 
-        match self.inner {
-            ResponseFutureInner::Resp(ref mut res) => {
-                let res = try_ready!(res.compat().poll_unpin(cx).map_err(Error::Hyper));
-                trace!("response={:?}", res);
-                check_status(&res)?;
-                let rate_limit = rate_limit(&res);
-                self.inner = ResponseFutureInner::Body {
-                    rate_limit,
-                    body: res.into_body().compat().try_concat(),
-                };
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-            ResponseFutureInner::Body {
+        if let ResponseFutureInner::Resp(ref mut res) = self.inner {
+            let res = try_ready!(res.compat().poll_unpin(cx).map_err(Error::Hyper));
+            trace!("response={:?}", res);
+            check_status(&res)?;
+
+            let rate_limit = rate_limit(&res);
+
+            self.inner = ResponseFutureInner::Body {
                 rate_limit,
-                ref mut body,
-            } => {
-                let json = try_ready!(body.poll_unpin(cx).map_err(Error::Hyper));
-                trace!("done reading response body");
-                Poll::Ready(
-                    json::from_slice(&json)
-                        .map_err(Error::Deserializing)
-                        .map(|response| Response {
-                            response,
-                            rate_limit,
-                        }),
-                )
-            }
+                body: res.into_body().compat().try_concat(),
+            };
+        }
+
+        if let ResponseFutureInner::Body {
+            rate_limit,
+            ref mut body,
+        } = self.inner
+        {
+            let json = try_ready!(body.poll_unpin(cx).map_err(Error::Hyper));
+            trace!("done reading response body");
+            let response = json::from_slice(&json).map_err(Error::Deserializing)?;
+            Poll::Ready(Ok(Response {
+                response,
+                rate_limit,
+            }))
+        } else {
+            unreachable!();
         }
     }
 }

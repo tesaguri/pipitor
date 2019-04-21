@@ -126,7 +126,8 @@ impl<'de> Deserialize<'de> for RuleMap {
             }
 
             fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-                let mut map = HashMap::with_capacity(seq.size_hint().unwrap_or(0));
+                let map = HashMap::with_capacity(seq.size_hint().unwrap_or(0));
+                let mut ret = RuleMap { map };
 
                 #[derive(Deserialize)]
                 struct RulePrototype {
@@ -138,15 +139,13 @@ impl<'de> Deserialize<'de> for RuleMap {
                 while let Some(RulePrototype { mut topics, rule }) = seq.next_element()? {
                     if let Some(last) = topics.pop() {
                         for topic in topics {
-                            map.entry(topic)
-                                .or_insert_with(SmallVec::new)
-                                .push(rule.clone());
+                            ret.insert(topic, rule.clone());
                         }
-                        map.entry(last).or_insert_with(SmallVec::new).push(rule);
+                        ret.insert(last, rule);
                     }
                 }
 
-                Ok(RuleMap { map })
+                Ok(ret)
             }
         }
 
