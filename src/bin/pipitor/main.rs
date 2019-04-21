@@ -1,9 +1,5 @@
 #![feature(async_await, await_macro, futures_api)]
 
-extern crate oauth1_request as oauth1;
-#[macro_use]
-extern crate tokio_async_await;
-
 use std::fs;
 use std::io;
 
