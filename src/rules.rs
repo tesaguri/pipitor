@@ -100,7 +100,7 @@ impl RuleMap {
     }
 
     pub fn route_tweet<'a>(&'a self, tweet: &'a Tweet) -> impl Iterator<Item = &'a Outbox> {
-        self.get(&TopicId::Twitter(tweet.id))
+        self.get(&TopicId::Twitter(tweet.user.id))
             .into_iter()
             .flatten()
             .filter(move |r| r.filter.matches_tweet(tweet))
