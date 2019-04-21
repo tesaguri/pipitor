@@ -31,6 +31,7 @@ pub mod schema;
 pub mod twitter;
 
 mod app;
+mod util;
 
 pub use app::App;
 pub use manifest::Manifest;

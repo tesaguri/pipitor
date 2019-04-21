@@ -22,6 +22,7 @@ use twitter_stream::{TwitterStream, TwitterStreamBuilder};
 use crate::models;
 use crate::rules::{Outbox, TopicId};
 use crate::twitter::{self, Request as _};
+use crate::util::Maybe;
 use crate::Manifest;
 
 pub struct App {
@@ -179,8 +180,9 @@ impl Future for App {
         while let Poll::Ready(v) = (&mut self.twitter).compat().poll_next_unpin(cx) {
             if let Some(result) = v {
                 let json = result.context("error while listening to Twitter's Streaming API");
-                let tweet = json::from_str(&json?)?;
-                self.process_tweet(tweet)?;
+                if let Maybe::Just(tweet) = json::from_str(&json?)? {
+                    self.process_tweet(tweet)?;
+                }
             } else {
                 return Poll::Ready(Ok(()));
             }
