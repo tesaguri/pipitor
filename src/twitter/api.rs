@@ -151,6 +151,9 @@ pub trait Request: OAuth1Authorize {
             &*oauth1::Options::new().token(token_credentials.key),
         );
 
+        trace!("{} {}", Self::METHOD, Self::URI);
+        trace!("data: {}", data);
+
         let mut req = hyper::Request::builder();
         req.method(Self::METHOD)
             .header(AUTHORIZATION, authorization);
@@ -186,9 +189,12 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
     type Output = Result<Response<T>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<Response<T>>> {
+        trace_fn!(ResponseFuture::<T>::poll);
+
         match self.inner {
             ResponseFutureInner::Resp(ref mut res) => {
                 let res = try_ready!(res.compat().poll_unpin(cx).map_err(Error::Hyper));
+                trace!("response={:?}", res);
                 check_status(&res)?;
                 let rate_limit = rate_limit(&res).ok_or(Error::Unexpected)?;
                 self.inner = ResponseFutureInner::Body {
@@ -201,14 +207,18 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
             ResponseFutureInner::Body {
                 rate_limit,
                 ref mut body,
-            } => Poll::Ready(
-                json::from_slice(&try_ready!(body.poll_unpin(cx).map_err(Error::Hyper)))
-                    .map_err(Error::Deserializing)
-                    .map(|response| Response {
-                        response,
-                        rate_limit,
-                    }),
-            ),
+            } => {
+                let json = try_ready!(body.poll_unpin(cx).map_err(Error::Hyper));
+                trace!("done reading response body");
+                Poll::Ready(
+                    json::from_slice(&json)
+                        .map_err(Error::Deserializing)
+                        .map(|response| Response {
+                            response,
+                            rate_limit,
+                        }),
+                )
+            }
         }
     }
 }

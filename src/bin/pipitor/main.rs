@@ -12,6 +12,8 @@ use pipitor::{App, Manifest};
 
 #[runtime::main(runtime_tokio::Tokio)]
 async fn main() -> Fallible<()> {
+    env_logger::init();
+
     let manifest = match fs::read("Pipitor.toml") {
         Ok(f) => f,
         Err(e) => {

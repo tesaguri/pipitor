@@ -52,6 +52,8 @@ struct RTQueue {
 
 impl App {
     pub async fn new(manifest: Manifest) -> Fallible<Self> {
+        trace_fn!(App::new);
+
         let core = await!(Core::authenticate(manifest))?;
         let (twitter_backfill, twitter) = await!(core.init_twitter())?;
 
@@ -90,6 +92,8 @@ impl App {
     }
 
     pub fn process_tweet(&mut self, tweet: twitter::Tweet) -> Fallible<()> {
+        trace_fn!(App::process_tweet, "tweet={:?}", tweet);
+
         use crate::schema::tweets::dsl::*;
         use diesel::dsl::*;
 
@@ -97,12 +101,15 @@ impl App {
             select(exists(tweets.find(&tweet.id))).get_result(&*self.database_pool().get()?)?;
 
         if already_processed || self.pending_rts.contains(&tweet.id) {
+            trace!("the Tweet has already been processed");
             return Ok(());
         }
 
         let mut pending = FuturesUnordered::new();
 
         for outbox in self.manifest().rule.route_tweet(&tweet) {
+            debug!("sending a Tweet to outbox {:?}", outbox);
+
             match outbox {
                 &Outbox::Twitter(user) => {
                     pending.push(twitter::statuses::Retweet::new(tweet.id).send(
@@ -130,9 +137,12 @@ impl Future for App {
     type Output = Fallible<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Fallible<()>> {
+        trace_fn!(App::poll);
+
         if let Some(ref mut backfill) = self.twitter_backfill {
             if let Poll::Ready(tweets) = backfill.response.poll_unpin(cx)? {
                 if tweets.is_empty() {
+                    trace!("timeline backfilling completed");
                     self.twitter_backfill = None;
                 } else {
                     let max_id = tweets.iter().map(|t| t.id).min().map(|id| id - 1);
@@ -199,6 +209,8 @@ impl Future for App {
 
 impl Core {
     async fn authenticate(manifest: Manifest) -> Fallible<Self> {
+        trace_fn!(Core::authenticate);
+
         use crate::schema::twitter_tokens::dsl::*;
 
         let pool = Pool::new(ConnectionManager::new(manifest.database_url()))?;
@@ -255,6 +267,7 @@ impl Core {
             |(mut authed, mut unauthed), user| {
                 match user {
                     TwitterUser::Authed(user, token) => {
+                        trace!("authorized user: {}", user);
                         authed.insert(user, token);
                     }
                     TwitterUser::Unauthed(user) => {
@@ -331,6 +344,8 @@ impl Core {
     }
 
     async fn init_twitter(&self) -> Fallible<(Option<TwitterBackfill>, TwitterStream)> {
+        trace_fn!(Core::init_twitter);
+
         let token = {
             use crate::schema::twitter_tokens::dsl::*;
             twitter_tokens
@@ -372,16 +387,19 @@ impl Core {
                 tweets
                     .select(max(id))
                     .first::<Option<i64>>(&*self.pool.get()?)?
-                    .map(|since_id| TwitterBackfill {
-                        list,
-                        since_id,
-                        response: twitter::lists::Statuses::new(list)
-                            .since_id(Some(since_id))
-                            .send(
-                                self.manifest.twitter.client.as_ref(),
-                                (&token).into(),
-                                &self.client,
-                            ),
+                    .map(|since_id| {
+                        trace!("timeline backfilling enabled");
+                        TwitterBackfill {
+                            list,
+                            since_id,
+                            response: twitter::lists::Statuses::new(list)
+                                .since_id(Some(since_id))
+                                .send(
+                                    self.manifest.twitter.client.as_ref(),
+                                    (&token).into(),
+                                    &self.client,
+                                ),
+                        }
                     })
             } else {
                 None
@@ -402,6 +420,8 @@ impl Future for RTQueue {
     type Output = Result<twitter::Tweet, twitter::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        trace_fn!(RTQueue::poll);
+
         while let Poll::Ready(v) = self.pending.poll_next_unpin(cx) {
             if let Some(result) = v {
                 result?;
