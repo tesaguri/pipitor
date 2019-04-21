@@ -76,7 +76,7 @@ use super::Credentials;
 
 pub struct Response<T> {
     pub response: T,
-    pub rate_limit: RateLimit,
+    pub rate_limit: Option<RateLimit>,
 }
 
 pub struct ResponseFuture<T> {
@@ -87,7 +87,7 @@ pub struct ResponseFuture<T> {
 enum ResponseFutureInner {
     Resp(HyperResponseFuture),
     Body {
-        rate_limit: RateLimit,
+        rate_limit: Option<RateLimit>,
         body: TryConcat<Compat01As03<Body>>,
     },
 }
@@ -196,7 +196,7 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
                 let res = try_ready!(res.compat().poll_unpin(cx).map_err(Error::Hyper));
                 trace!("response={:?}", res);
                 check_status(&res)?;
-                let rate_limit = rate_limit(&res).ok_or(Error::Unexpected)?;
+                let rate_limit = rate_limit(&res);
                 self.inner = ResponseFutureInner::Body {
                     rate_limit,
                     body: res.into_body().compat().try_concat(),
