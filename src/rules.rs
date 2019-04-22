@@ -30,6 +30,8 @@ pub enum TopicId {
 #[serde(untagged)]
 pub enum Outbox {
     Twitter(i64),
+    #[doc(hidden)]
+    _NonExhaustive(private::Never),
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -87,16 +89,30 @@ impl RuleMap {
         self.map.remove(topic)
     }
 
-    pub fn topics<'a>(&'a self) -> impl Iterator<Item = &'a TopicId> {
+    pub fn topics(&self) -> impl Iterator<Item = &TopicId> {
         self.map.keys()
     }
 
-    pub fn rules<'a>(&'a self) -> impl Iterator<Item = &'a Rule> {
+    pub fn twitter_topics<'a>(&'a self) -> impl Iterator<Item = i64> + 'a {
+        self.topics().filter_map(|topic| match *topic {
+            TopicId::Twitter(user) => Some(user),
+            _ => None,
+        })
+    }
+
+    pub fn rules(&self) -> impl Iterator<Item = &Rule> {
         self.map.values().flatten()
     }
 
-    pub fn outboxes<'a>(&'a self) -> impl Iterator<Item = &'a Outbox> {
+    pub fn outboxes(&self) -> impl Iterator<Item = &Outbox> {
         self.rules().flat_map(|rule| &rule.outbox)
+    }
+
+    pub fn twitter_outboxes<'a>(&'a self) -> impl Iterator<Item = i64> + 'a {
+        self.outboxes().filter_map(|outbox| match *outbox {
+            Outbox::Twitter(user) => Some(user),
+            _ => None,
+        })
     }
 
     pub fn route_tweet<'a>(&'a self, tweet: &'a Tweet) -> impl Iterator<Item = &'a Outbox> {

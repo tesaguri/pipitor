@@ -16,10 +16,7 @@ where
 {
     const URI: &str = "https://api.twitter.com/oauth/request_token";
 
-    let oauth1::Request {
-        authorization,
-        data: _,
-    } = ().authorize_form(
+    let oauth1::Request { authorization, .. } = ().authorize_form(
         "POST",
         URI,
         client_credentials.key,
@@ -63,10 +60,7 @@ where
 {
     const URI: &str = "https://api.twitter.com/oauth/access_token";
 
-    let oauth1::Request {
-        authorization,
-        data: _,
-    } = ().authorize_form(
+    let oauth1::Request { authorization, .. } = ().authorize_form(
         "POST",
         URI,
         client_credentials.key,

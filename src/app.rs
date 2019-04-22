@@ -19,7 +19,7 @@ use serde::de;
 use twitter_stream::{TwitterStream, TwitterStreamBuilder};
 
 use crate::models;
-use crate::rules::{Outbox, TopicId};
+use crate::rules::Outbox;
 use crate::twitter::{self, Request as _};
 use crate::util::Maybe;
 use crate::Manifest;
@@ -110,14 +110,15 @@ impl App {
         for outbox in self.manifest().rule.route_tweet(&tweet) {
             debug!("sending a Tweet to outbox {:?}", outbox);
 
-            match outbox {
-                &Outbox::Twitter(user) => {
+            match *outbox {
+                Outbox::Twitter(user) => {
                     pending.push(twitter::statuses::Retweet::new(tweet.id).send(
                         self.manifest().twitter.client.as_ref(),
                         self.core.twitter_token(user).unwrap(),
                         &self.http_client(),
                     ));
                 }
+                _ => unimplemented!(),
             }
         }
 
@@ -218,10 +219,7 @@ impl Core {
 
         let twitter_tokens: FuturesUnordered<_> = manifest
             .rule
-            .outboxes()
-            .filter_map(|outbox| match outbox {
-                &Outbox::Twitter(user) => Some(user),
-            })
+            .twitter_outboxes()
             .chain(Some(manifest.twitter.user))
             .unique()
             .map(|user| {
@@ -285,11 +283,8 @@ impl Core {
         let mut twitter_topics: Vec<_> = self
             .manifest
             .rule
-            .topics()
-            .filter_map(|topic| match topic {
-                &TopicId::Twitter(user) => Some(user as u64),
-                _ => None,
-            })
+            .twitter_topics()
+            .map(|id| id as u64)
             .collect();
         twitter_topics.sort();
         twitter_topics.dedup();

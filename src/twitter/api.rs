@@ -3,12 +3,14 @@ macro_rules! api_requests {
     ($method:ident $($rest:tt)+) => { api_requests! { @inner false; $method $($rest)+ } };
     (
         @inner $form:expr; $method:ident $uri:expr => $Data:ty;
+        $(#[$attr:meta])*
         pub struct $Name:ident {
             $($(#[$req_attr:meta])* $required:ident: $req_ty:ty),*;
             $($(#[$opt_attr:meta])* $optional:ident: $opt_ty:ty $(= $default:expr)?),* $(,)?
         }
         $($rest:tt)*
     ) => {
+        $(#[$attr])*
         #[derive(oauth1_request_derive::OAuth1Authorize)]
         pub struct $Name {
             $($(#[$req_attr])* $required: $req_ty,)*

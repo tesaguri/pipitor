@@ -12,7 +12,6 @@ use hyper::StatusCode;
 use hyper_tls::HttpsConnector;
 use itertools::Itertools;
 use pipitor::models;
-use pipitor::rules::Outbox;
 use pipitor::twitter::{self, Request as _};
 use r2d2::Pool;
 use r2d2_diesel::ConnectionManager;
@@ -34,10 +33,7 @@ pub async fn main(opt: crate::Opt, _subopt: Opt) -> Fallible<()> {
 
     let unauthed_users: FuturesUnordered<_> = manifest
         .rule
-        .outboxes()
-        .filter_map(|outbox| match outbox {
-            &Outbox::Twitter(user) => Some(user),
-        })
+        .twitter_outboxes()
         .chain(Some(manifest.twitter.user))
         .unique()
         .map(|user| {
