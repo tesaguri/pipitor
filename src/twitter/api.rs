@@ -237,6 +237,12 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
     }
 }
 
+impl TwitterErrors {
+    pub fn codes<'a>(&'a self) -> impl Iterator<Item = u32> + 'a {
+        self.errors.iter().map(|e| e.code)
+    }
+}
+
 impl Display for TwitterErrors {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "status: {}", self.status)?;
@@ -254,6 +260,11 @@ impl Display for TwitterErrors {
 }
 
 impl error::Error for TwitterErrors {}
+
+impl ErrorCode {
+    pub const NO_STATUS_FOUND_WITH_THAT_ID: u32 = 144;
+    pub const YOU_HAVE_ALREADY_RETWEETED_THIS_TWEET: u32 = 327;
+}
 
 impl Display for ErrorCode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {

@@ -338,7 +338,17 @@ impl Future for RTQueue {
 
         while let Poll::Ready(v) = self.pending.poll_next_unpin(cx) {
             if let Some(result) = v {
-                result?;
+                if let Err(e) = result {
+                    if let twitter::Error::Twitter(ref e) = e {
+                        if e.codes().any(|c| {
+                            c == twitter::ErrorCode::YOU_HAVE_ALREADY_RETWEETED_THIS_TWEET
+                                || c == twitter::ErrorCode::NO_STATUS_FOUND_WITH_THAT_ID
+                        }) {
+                            continue;
+                        }
+                    }
+                    return Poll::Ready(Err(e));
+                }
             } else {
                 return Poll::Ready(Ok(self
                     .tweet
