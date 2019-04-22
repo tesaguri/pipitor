@@ -58,6 +58,8 @@ pub mod lists;
 pub mod oauth;
 pub mod statuses;
 
+use std::error;
+use std::fmt::{self, Display, Formatter};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -72,7 +74,7 @@ use hyper::client::{Client, ResponseFuture as HyperResponseFuture};
 use hyper::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use hyper::{Body, Method, StatusCode, Uri};
 use oauth1::OAuth1Authorize;
-use serde::de;
+use serde::{de, Deserialize};
 
 use super::Credentials;
 
@@ -89,6 +91,7 @@ pub struct ResponseFuture<T> {
 enum ResponseFutureInner {
     Resp(HyperResponseFuture),
     Body {
+        status: StatusCode,
         rate_limit: Option<RateLimit>,
         body: TryConcat<Compat01As03<Body>>,
     },
@@ -107,12 +110,23 @@ pub enum Error {
     Deserializing(#[cause] json::Error),
     #[fail(display = "HTTP error")]
     Hyper(#[cause] hyper::Error),
-    #[fail(display = "Rate limit exceeded. Resets at {}.", _0)]
-    RateLimit(u64),
-    #[fail(display = "Invalid HTTP status code: {}", _0)]
-    StatusCode(StatusCode),
+    #[fail(display = "Twitter returned error(s)")]
+    Twitter(#[cause] TwitterErrors),
     #[fail(display = "Unexpected error occured.")]
     Unexpected,
+}
+
+#[derive(Debug)]
+pub struct TwitterErrors {
+    pub status: StatusCode,
+    pub errors: Vec<ErrorCode>,
+    pub rate_limit: Option<RateLimit>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ErrorCode {
+    pub code: u32,
+    pub message: String,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -196,27 +210,26 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
         if let ResponseFutureInner::Resp(ref mut res) = self.inner {
             let res = try_ready!(res.compat().poll_unpin(cx).map_err(Error::Hyper));
             trace!("response={:?}", res);
-            check_status(&res)?;
-
-            let rate_limit = rate_limit(&res);
 
             self.inner = ResponseFutureInner::Body {
-                rate_limit,
+                status: res.status(),
+                rate_limit: rate_limit(&res),
                 body: res.into_body().compat().try_concat(),
             };
         }
 
         if let ResponseFutureInner::Body {
+            status,
             rate_limit,
             ref mut body,
         } = self.inner
         {
             let json = try_ready!(body.poll_unpin(cx).map_err(Error::Hyper));
+
             trace!("done reading response body");
-            let response = json::from_slice(&json).map_err(Error::Deserializing)?;
-            Poll::Ready(Ok(Response {
-                response,
-                rate_limit,
+
+            Poll::Ready(make_response(status, rate_limit, &json, |json| {
+                json::from_slice(json).map_err(Error::Deserializing)
             }))
         } else {
             unreachable!();
@@ -224,21 +237,59 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
     }
 }
 
-fn check_status<T>(res: &hyper::Response<T>) -> Result<()> {
-    let status = res.status();
+impl Display for TwitterErrors {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "status: {}", self.status)?;
 
-    match status.as_u16() {
-        200 => return Ok(()),
-        // Enhance Your Calm | Too Many Requests
-        420 | 429 => {
-            if let Some(reset) = header(res, "x-rate-limit-reset") {
-                return Err(Error::RateLimit(reset));
+        let mut errors = self.errors.iter();
+        if let Some(e) = errors.next() {
+            write!(f, "; errors: {}", e)?;
+            for e in errors {
+                write!(f, ", {}", e)?;
             }
         }
-        _ => (),
-    }
 
-    Err(Error::StatusCode(status))
+        Ok(())
+    }
+}
+
+impl error::Error for TwitterErrors {}
+
+impl Display for ErrorCode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.code, self.message)
+    }
+}
+
+fn make_response<T, F>(
+    status: StatusCode,
+    rate_limit: Option<RateLimit>,
+    body: &[u8],
+    parse: F,
+) -> Result<Response<T>>
+where
+    F: FnOnce(&[u8]) -> Result<T>,
+{
+    if let StatusCode::OK = status {
+        parse(body).map(|response| Response {
+            response,
+            rate_limit,
+        })
+    } else {
+        #[derive(Default, Deserialize)]
+        struct Errors {
+            errors: Vec<ErrorCode>,
+        }
+        json::from_slice(body)
+            .or_else(|_| Ok(Errors::default()))
+            .and_then(|errors| {
+                Err(Error::Twitter(TwitterErrors {
+                    status,
+                    errors: errors.errors,
+                    rate_limit,
+                }))
+            })
+    }
 }
 
 fn rate_limit<T>(res: &hyper::Response<T>) -> Option<RateLimit> {

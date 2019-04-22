@@ -5,12 +5,12 @@ use hyper::header::AUTHORIZATION;
 use hyper::{Client, Uri};
 use oauth1::OAuth1Authorize;
 
-use super::{Credentials, Error, Result};
+use super::{Credentials, Error, Response, Result};
 
 pub async fn request_token<'a, C>(
     client_credentials: Credentials<&'a str>,
     client: &'a Client<C>,
-) -> Result<Credentials>
+) -> Result<Response<Credentials>>
 where
     C: Connect + Sync + 'static,
 {
@@ -31,8 +31,9 @@ where
 
     let res =
         await!(client.request(req.body(Default::default()).unwrap())).map_err(Error::Hyper)?;
-    super::check_status(&res)?;
 
+    let status = res.status();
+    let rate_limit = super::rate_limit(&res);
     let body = await!(res.into_body().compat().try_concat()).map_err(Error::Hyper)?;
 
     #[derive(serde::Deserialize)]
@@ -41,12 +42,14 @@ where
         oauth_token_secret: String,
     }
 
-    let Token {
-        oauth_token: key,
-        oauth_token_secret: secret,
-    } = serde_urlencoded::from_bytes::<Token>(&body).map_err(|_| Error::Unexpected)?;
+    super::make_response(status, rate_limit, &body, |body| {
+        let Token {
+            oauth_token: key,
+            oauth_token_secret: secret,
+        } = serde_urlencoded::from_bytes::<Token>(&body).map_err(|_| Error::Unexpected)?;
 
-    Ok(Credentials { key, secret })
+        Ok(Credentials { key, secret })
+    })
 }
 
 pub async fn access_token<'a, C>(
@@ -54,7 +57,7 @@ pub async fn access_token<'a, C>(
     client_credentials: Credentials<&'a str>,
     temporary_credentials: Credentials<&'a str>,
     client: &'a Client<C>,
-) -> Result<(i64, Credentials)>
+) -> Result<Response<(i64, Credentials)>>
 where
     C: Connect + Sync + 'static,
 {
@@ -77,8 +80,9 @@ where
 
     let res =
         await!(client.request(req.body(Default::default()).unwrap())).map_err(Error::Hyper)?;
-    super::check_status(&res)?;
 
+    let status = res.status();
+    let rate_limit = super::rate_limit(&res);
     let body = await!(res.into_body().compat().try_concat()).map_err(Error::Hyper)?;
 
     #[derive(serde::Deserialize)]
@@ -88,11 +92,13 @@ where
         user_id: i64,
     }
 
-    let Token {
-        oauth_token: key,
-        oauth_token_secret: secret,
-        user_id,
-    } = serde_urlencoded::from_bytes::<Token>(&body).map_err(|_| Error::Unexpected)?;
+    super::make_response(status, rate_limit, &body, |body| {
+        let Token {
+            oauth_token: key,
+            oauth_token_secret: secret,
+            user_id,
+        } = serde_urlencoded::from_bytes::<Token>(body).map_err(|_| Error::Unexpected)?;
 
-    Ok((user_id, Credentials { key, secret }))
+        Ok((user_id, Credentials { key, secret }))
+    })
 }

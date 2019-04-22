@@ -241,7 +241,8 @@ impl Core {
                             client,
                         )) {
                             Ok(_) => return Ok((user, token.into())),
-                            Err(twitter::Error::StatusCode(StatusCode::UNAUTHORIZED)) => (),
+                            Err(twitter::Error::Twitter(ref e))
+                                if e.status == StatusCode::UNAUTHORIZED => {}
                             Err(e) => {
                                 return Err(e)
                                     .context("error while verifying Twitter credentials")

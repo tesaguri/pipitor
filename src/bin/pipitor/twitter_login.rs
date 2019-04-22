@@ -53,7 +53,8 @@ pub async fn main(opt: crate::Opt, _subopt: Opt) -> Fallible<()> {
                         &client,
                     )) {
                         Ok(_) => return Ok(None),
-                        Err(twitter::Error::StatusCode(StatusCode::UNAUTHORIZED)) => (),
+                        Err(twitter::Error::Twitter(ref e))
+                            if e.status == StatusCode::UNAUTHORIZED => {}
                         Err(e) => {
                             return Err(e)
                                 .context("error while verifying Twitter credentials")
@@ -95,7 +96,8 @@ pub async fn main(opt: crate::Opt, _subopt: Opt) -> Fallible<()> {
             temporary.as_ref(),
             &client,
         ))
-        .context("error while getting OAuth access token from Twitter")?;
+        .context("error while getting OAuth access token from Twitter")?
+        .response;
 
         if unauthed_users.remove(&user) {
             diesel::replace_into(twitter_tokens)
