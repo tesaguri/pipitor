@@ -29,12 +29,8 @@ serde_regex = "0.3"
 serde_urlencoded = "0.5"
 smallvec = { version = "0.6", features = ["serde"] }
 structopt = "0.2"
-tokio = { version = "0.1", features = ["async-await-preview"] }
-tokio-async-await = "0.1"
+tokio = { version = "0.1.19", features = ["async-await-preview"] }
+tokio-async-await = "0.1.7"
 tokio-file-unix = "0.5"
 toml = "0.5"
 twitter-stream = { version = "0.9", default-features = false }
-
-[patch.crates-io]
-tokio = { git = "https://github.com/tokio-rs/tokio" }
-tokio-async-await = { git = "https://github.com/tokio-rs/tokio" }
