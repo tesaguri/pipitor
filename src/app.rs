@@ -9,9 +9,9 @@ use futures::compat::Stream01CompatExt;
 use futures::future::{FusedFuture, Future, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use futures::Poll;
-use hyper::client::{Client, HttpConnector};
+use hyper::client::connect::Connect;
+use hyper::Client;
 use hyper::StatusCode;
-use hyper_tls::HttpsConnector;
 use itertools::Itertools;
 use r2d2::Pool;
 use r2d2_diesel::ConnectionManager;
@@ -24,18 +24,18 @@ use crate::twitter::{self, Request as _};
 use crate::util::Maybe;
 use crate::Manifest;
 
-pub struct App {
-    core: Core,
+pub struct App<C> {
+    core: Core<C>,
     twitter_backfill: Option<TwitterBackfill>,
     twitter: TwitterStream,
     rt_queue: FuturesUnordered<RTQueue>,
     pending_rts: HashSet<i64>,
 }
 
-struct Core {
+struct Core<C> {
     manifest: Manifest,
     pool: Pool<ConnectionManager<SqliteConnection>>,
-    client: Client<HttpsConnector<HttpConnector>>,
+    client: Client<C>,
     twitter_tokens: HashMap<i64, twitter::Credentials<Box<str>>>,
 }
 
@@ -50,11 +50,25 @@ struct RTQueue {
     pending: FuturesUnordered<twitter::ResponseFuture<de::IgnoredAny>>,
 }
 
-impl App {
+#[cfg(feature = "native-tls")]
+impl App<hyper_tls::HttpsConnector<hyper::client::HttpConnector>> {
     pub async fn new(manifest: Manifest) -> Fallible<Self> {
-        trace_fn!(App::new);
+        let conn = hyper_tls::HttpsConnector::new(4).context("failed to initialize TLS client")?;
+        let client = Client::builder().build(conn);
+        await!(Self::with_http_client(client, manifest))
+    }
+}
 
-        let core = await!(Core::new(manifest))?;
+impl<C: Connect> App<C>
+where
+    C: Connect + Sync + 'static,
+    C::Transport: 'static,
+    C::Future: 'static,
+{
+    pub async fn with_http_client(client: Client<C>, manifest: Manifest) -> Fallible<Self> {
+        trace_fn!(App::<C>::with_http_client);
+
+        let core = await!(Core::new(manifest, client))?;
         let (twitter_backfill, twitter) = await!(core.init_twitter())?;
 
         Ok(App {
@@ -66,33 +80,8 @@ impl App {
         })
     }
 
-    pub fn manifest(&self) -> &Manifest {
-        &self.core.manifest
-    }
-
-    pub fn manifest_mut(&mut self) -> &mut Manifest {
-        &mut self.core.manifest
-    }
-
-    pub fn database_pool(&self) -> &Pool<ConnectionManager<SqliteConnection>> {
-        &self.core.pool
-    }
-
-    pub fn http_client(&self) -> &Client<HttpsConnector<HttpConnector>> {
-        &self.core.client
-    }
-
-    pub async fn reset(&mut self) -> Fallible<()> {
-        let (twitter_backfill, twitter) = await!(self.core.init_twitter())?;
-        self.twitter_backfill = twitter_backfill;
-        self.twitter = twitter;
-        self.rt_queue = FuturesUnordered::new();
-        self.pending_rts.clear();
-        Ok(())
-    }
-
     pub fn process_tweet(&mut self, tweet: twitter::Tweet) -> Fallible<()> {
-        trace_fn!(App::process_tweet, "tweet={:?}", tweet);
+        trace_fn!(App::<C>::process_tweet, "tweet={:?}", tweet);
 
         use crate::schema::tweets::dsl::*;
         use diesel::dsl::*;
@@ -132,13 +121,45 @@ impl App {
 
         Ok(())
     }
+
+    pub async fn reset(&mut self) -> Fallible<()> {
+        let (twitter_backfill, twitter) = await!(self.core.init_twitter())?;
+        self.twitter_backfill = twitter_backfill;
+        self.twitter = twitter;
+        self.rt_queue = FuturesUnordered::new();
+        self.pending_rts.clear();
+        Ok(())
+    }
 }
 
-impl Future for App {
+impl<C> App<C> {
+    pub fn manifest(&self) -> &Manifest {
+        &self.core.manifest
+    }
+
+    pub fn manifest_mut(&mut self) -> &mut Manifest {
+        &mut self.core.manifest
+    }
+
+    pub fn database_pool(&self) -> &Pool<ConnectionManager<SqliteConnection>> {
+        &self.core.pool
+    }
+
+    pub fn http_client(&self) -> &Client<C> {
+        &self.core.client
+    }
+}
+
+impl<C> Future for App<C>
+where
+    C: Connect + Sync + 'static,
+    C::Transport: 'static,
+    C::Future: 'static,
+{
     type Output = Fallible<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Fallible<()>> {
-        trace_fn!(App::poll);
+        trace_fn!(App::<C>::poll);
 
         if let Some(ref mut backfill) = self.twitter_backfill {
             if let Poll::Ready(tweets) = backfill.response.poll_unpin(cx)? {
@@ -209,13 +230,16 @@ impl Future for App {
     }
 }
 
-impl Core {
-    async fn new(manifest: Manifest) -> Fallible<Self> {
-        trace_fn!(Core::new);
+impl<C> Core<C>
+where
+    C: Connect + Sync + 'static,
+    C::Transport: 'static,
+    C::Future: 'static,
+{
+    async fn new(manifest: Manifest, client: Client<C>) -> Fallible<Self> {
+        trace_fn!(Core::<C>::new);
 
         let pool = Pool::new(ConnectionManager::new(manifest.database_url()))?;
-        let client = Client::builder()
-            .build(HttpsConnector::new(4).context("failed to initialize TLS client")?);
 
         let twitter_tokens: FuturesUnordered<_> = manifest
             .rule
@@ -270,7 +294,7 @@ impl Core {
     }
 
     async fn init_twitter(&self) -> Fallible<(Option<TwitterBackfill>, TwitterStream)> {
-        trace_fn!(Core::init_twitter);
+        trace_fn!(Core::<C>::init_twitter);
 
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
 
