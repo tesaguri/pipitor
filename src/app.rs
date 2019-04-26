@@ -107,6 +107,10 @@ where
                 .execute(&*self.database_pool().get()?)?;
         }
 
+        if tweet.retweeted_status.is_some() {
+            return Ok(());
+        }
+
         let mut pending = FuturesUnordered::new();
 
         for outbox in self.manifest().rule.route_tweet(&tweet) {
