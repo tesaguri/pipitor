@@ -1,4 +1,11 @@
 table! {
+    last_tweet (id) {
+        id -> BigInt,
+        status_id -> BigInt,
+    }
+}
+
+table! {
     tweets (id) {
         id -> BigInt,
         text -> Text,
@@ -17,6 +24,7 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(
+    last_tweet,
     tweets,
     twitter_tokens,
 );

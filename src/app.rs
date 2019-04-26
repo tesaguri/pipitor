@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::task::Context;
 
 use diesel::prelude::*;
+use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
 use failure::{Fallible, ResultExt};
 use futures::compat::Stream01CompatExt;
@@ -83,15 +84,27 @@ where
     pub fn process_tweet(&mut self, tweet: twitter::Tweet) -> Fallible<()> {
         trace_fn!(App::<C>::process_tweet, "tweet={:?}", tweet);
 
-        use crate::schema::tweets::dsl::*;
-        use diesel::dsl::*;
+        let already_processed = {
+            use crate::schema::tweets::dsl::*;
+            use diesel::dsl::*;
 
-        let already_processed: bool =
-            select(exists(tweets.find(&tweet.id))).get_result(&*self.database_pool().get()?)?;
+            self.pending_rts.contains(&tweet.id)
+                || select(exists(tweets.find(&tweet.id)))
+                    .get_result::<bool>(&*self.database_pool().get()?)?
+        };
 
-        if already_processed || self.pending_rts.contains(&tweet.id) {
+        if already_processed {
             trace!("the Tweet has already been processed");
             return Ok(());
+        }
+
+        {
+            use crate::schema::last_tweet::dsl::*;
+
+            diesel::update(last_tweet)
+                .filter(status_id.lt(tweet.id))
+                .set(status_id.eq(tweet.id))
+                .execute(&*self.database_pool().get()?)?;
         }
 
         let mut pending = FuturesUnordered::new();
@@ -283,6 +296,22 @@ where
             })
             .collect::<Fallible<_>>()?;
 
+        {
+            use crate::schema::last_tweet::dsl::*;
+
+            diesel::insert_into(last_tweet)
+                .values(&models::NewLastTweet {
+                    id: 0,
+                    status_id: 0,
+                })
+                .execute(&*pool.get()?)
+                .map(|_| ())
+                .or_else(|e| match e {
+                    QueryError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => Ok(()),
+                    e => Err(e),
+                })?;
+        }
+
         let twitter_tokens = await!(twitter_tokens.try_collect())?;
 
         Ok(Core {
@@ -321,13 +350,15 @@ where
         .context("error while connecting to Twitter's Streaming API")?;
 
         let twitter_backfill = {
-            use crate::schema::tweets::dsl::*;
-            use diesel::dsl::*;
+            use crate::schema::last_tweet::dsl::*;
 
             if let Some(list) = self.manifest.twitter.list {
-                tweets
-                    .select(max(id))
-                    .first::<Option<i64>>(&*self.pool.get()?)?
+                last_tweet
+                    .find(&0)
+                    .select(status_id)
+                    .first::<i64>(&*self.pool.get()?)
+                    .optional()?
+                    .filter(|&n| n > 0)
                     .map(|since_id| {
                         trace!("timeline backfilling enabled");
                         let response = twitter::lists::Statuses::new(list)
