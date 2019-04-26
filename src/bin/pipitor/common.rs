@@ -4,8 +4,8 @@ use std::io;
 use failure::{Fail, Fallible, ResultExt};
 use pipitor::Manifest;
 
-pub fn open_manifest(manifest_path: Option<&str>) -> Fallible<Manifest> {
-    let manifest = if let Some(ref manifest_path) = manifest_path {
+pub fn open_manifest(opt: &crate::Opt) -> Fallible<Manifest> {
+    let manifest = if let Some(ref manifest_path) = opt.manifest_path {
         let manifest = match fs::read(manifest_path) {
             Ok(f) => f,
             Err(e) => {

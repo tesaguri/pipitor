@@ -7,7 +7,7 @@ use crate::common::open_manifest;
 pub struct Opt {}
 
 pub async fn main(opt: crate::Opt, _subopt: Opt) -> Fallible<()> {
-    let manifest = open_manifest(opt.manifest_path.as_ref().map(|s| &**s))?;
+    let manifest = open_manifest(&opt)?;
     let app = await!(App::new(manifest)).context("failed to initialize the application")?;
     await!(app)
 }

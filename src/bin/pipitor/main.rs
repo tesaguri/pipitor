@@ -3,6 +3,7 @@
 
 mod common;
 mod run;
+mod twitter_list_sync;
 mod twitter_login;
 
 use failure::Fallible;
@@ -27,6 +28,8 @@ pub struct Opt {
 enum Cmd {
     #[structopt(name = "run", about = "Start running the bot")]
     Run(run::Opt),
+    #[structopt(name = "twitter-list-sync", about = "")]
+    TwitterListSync(twitter_list_sync::Opt),
     #[structopt(name = "twitter-login", about = "")]
     TwitterLogin(twitter_login::Opt),
 }
@@ -39,6 +42,7 @@ async fn main() -> Fallible<()> {
 
     match cmd {
         Cmd::Run(subopt) => await!(run::main(opt, subopt)),
+        Cmd::TwitterListSync(subopt) => await!(twitter_list_sync::main(opt, subopt)),
         Cmd::TwitterLogin(subopt) => await!(twitter_login::main(opt, subopt)),
     }
 }
