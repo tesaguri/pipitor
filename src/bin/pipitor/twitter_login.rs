@@ -18,10 +18,10 @@ use r2d2_diesel::ConnectionManager;
 
 use crate::common::open_manifest;
 
-#[derive(structopt::StructOpt)]
+#[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
 
-pub async fn main(opt: crate::Opt, _subopt: Opt) -> Fallible<()> {
+pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let manifest = open_manifest(&opt)?;
 
     use pipitor::schema::twitter_tokens::dsl::*;

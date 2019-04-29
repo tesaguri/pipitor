@@ -12,6 +12,7 @@ required-features = ["native-tls"]
 [dependencies]
 atoi = "0.3"
 diesel = { version = "1", default-features = false, features = ["sqlite"] }
+diesel_migrations = { version = "1", default-features = false, features = ["sqlite"] }
 dotenv = "0.13"
 env_logger = "0.6"
 failure = "0.1"

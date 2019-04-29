@@ -9,35 +9,23 @@ A Twitter bot that gathers Tweets from a specified set of accounts, filters and 
 
 ## Usage
 
-Run the following to install the required program:
+Run the following to install (requires Nightly Rust):
 
 ```shell
-cargo install diesel-cli
+cargo install pipitor
 ```
 
-(If this fails, run `cargo install diesel_cli --no-default-features --features sqlite`.)
+Create a manifest file named `Pipitor.toml` in the working directory.
+Manifest format is shown in [`Pipitor.example.toml`](Pipitor.example.toml).
 
-And run the following:
-
-```shell
-git clone https://github.com/tesaguri/pipitor
-cd pipitor
-diesel setup
-```
-
-Create a manifest file named `Pipitor.toml`. Manifest format is shown in [`Pipitor.example.toml`](Pipitor.example.toml).
-
-Then, run the following:
+Then, run the following, and follow the instructions on the command line:
 
 ```shell
-cargo run --release -- twitter-login
-# The following is only required only if you have set `twitter.list` in the manifest.
-# You have to run this again everytime you modify `rule.topics` in the manifest.
-cargo run --release -- twitter-list-sync
+pipitor setup
 ```
 
 Now, you're all set! Run the following to start the bot:
 
 ```shell
-cargo run --release -- run
+pipitor run
 ```

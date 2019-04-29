@@ -1,8 +1,15 @@
 #![feature(async_await, await_macro)]
 #![recursion_limit = "128"]
 
+#[macro_use]
+extern crate diesel_migrations;
+
+embed_migrations!();
+
 mod common;
+mod migration;
 mod run;
+mod setup;
 mod twitter_list_sync;
 mod twitter_login;
 
@@ -26,8 +33,12 @@ pub struct Opt {
 
 #[derive(StructOpt)]
 enum Cmd {
+    #[structopt(name = "migration", about = "Run database migrations")]
+    Migration(migration::Opt),
     #[structopt(name = "run", about = "Start running the bot")]
     Run(run::Opt),
+    #[structopt(name = "setup", about = "")]
+    Setup(setup::Opt),
     #[structopt(name = "twitter-list-sync", about = "")]
     TwitterListSync(twitter_list_sync::Opt),
     #[structopt(name = "twitter-login", about = "")]
@@ -41,8 +52,10 @@ async fn main() -> Fallible<()> {
     let Args { opt, cmd } = Args::from_args();
 
     match cmd {
-        Cmd::Run(subopt) => await!(run::main(opt, subopt)),
-        Cmd::TwitterListSync(subopt) => await!(twitter_list_sync::main(opt, subopt)),
-        Cmd::TwitterLogin(subopt) => await!(twitter_login::main(opt, subopt)),
+        Cmd::Migration(subopt) => migration::main(&opt, subopt),
+        Cmd::Run(subopt) => await!(run::main(&opt, subopt)),
+        Cmd::Setup(subopt) => await!(setup::main(&opt, subopt)),
+        Cmd::TwitterListSync(subopt) => await!(twitter_list_sync::main(&opt, subopt)),
+        Cmd::TwitterLogin(subopt) => await!(twitter_login::main(&opt, subopt)),
     }
 }

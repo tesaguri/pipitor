@@ -13,17 +13,19 @@ use r2d2_diesel::ConnectionManager;
 
 use crate::common::open_manifest;
 
-#[derive(structopt::StructOpt)]
+#[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
 
-pub async fn main(opt: crate::Opt, _subopt: Opt) -> Fallible<()> {
+pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     use pipitor::schema::twitter_tokens::dsl::*;
 
     let manifest = open_manifest(&opt)?;
-    let list_id = manifest
-        .twitter
-        .list
-        .ok_or_else(|| failure::err_msg("missing `twitter.list` value in the manifest"))?;
+    let list_id = if let Some(list) = manifest.twitter.list {
+        list
+    } else {
+        println!("`twitter.list` is not set in the manifest");
+        return Ok(());
+    };
 
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = Pool::new(manager)?;
