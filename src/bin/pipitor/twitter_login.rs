@@ -28,8 +28,8 @@ pub async fn main(opt: crate::Opt, _subopt: Opt) -> Fallible<()> {
 
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = Pool::new(manager)?;
-    let client =
-        Client::builder().build(HttpsConnector::new(4).context("failed to initialize TLS client")?);
+    let conn = HttpsConnector::new(4).context("failed to initialize TLS client")?;
+    let client = Client::builder().build(conn);
 
     let unauthed_users: FuturesUnordered<_> = manifest
         .rule
@@ -88,7 +88,7 @@ pub async fn main(opt: crate::Opt, _subopt: Opt) -> Fallible<()> {
         ))
         .context("error while getting OAuth request token from Twitter")?;
 
-        let verifier = await!(input_verifier(&mut stdin, &temporary.key, &unauthed_users,))?;
+        let verifier = await!(input_verifier(&mut stdin, &temporary.key, &unauthed_users))?;
 
         let (user, token) = await!(twitter::oauth::access_token(
             &verifier,

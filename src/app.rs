@@ -84,13 +84,14 @@ where
     pub fn process_tweet(&mut self, tweet: twitter::Tweet) -> Fallible<()> {
         trace_fn!(App::<C>::process_tweet, "tweet={:?}", tweet);
 
+        let conn = self.database_pool().get()?;
+
         let already_processed = {
             use crate::schema::tweets::dsl::*;
             use diesel::dsl::*;
 
             self.pending_rts.contains(&tweet.id)
-                || select(exists(tweets.find(&tweet.id)))
-                    .get_result::<bool>(&*self.database_pool().get()?)?
+                || select(exists(tweets.find(&tweet.id))).get_result::<bool>(&*conn)?
         };
 
         if already_processed {
@@ -104,7 +105,7 @@ where
             diesel::update(last_tweet)
                 .filter(status_id.lt(tweet.id))
                 .set(status_id.eq(tweet.id))
-                .execute(&*self.database_pool().get()?)?;
+                .execute(&*conn)?;
         }
 
         if tweet.retweeted_status.is_some() {
@@ -396,8 +397,9 @@ impl Future for RTQueue {
         trace_fn!(RTQueue::poll);
 
         while let Poll::Ready(v) = self.pending.poll_next_unpin(cx) {
-            if let Some(result) = v {
-                if let Err(e) = result {
+            match v {
+                Some(Ok(_)) => {}
+                Some(Err(e)) => {
                     if let twitter::Error::Twitter(ref e) = e {
                         if e.codes().any(|c| {
                             c == twitter::ErrorCode::YOU_HAVE_ALREADY_RETWEETED_THIS_TWEET
@@ -408,11 +410,12 @@ impl Future for RTQueue {
                     }
                     return Poll::Ready(Err(e));
                 }
-            } else {
-                return Poll::Ready(Ok(self
-                    .tweet
-                    .take()
-                    .expect("polled `RTQueue` after completion")));
+                None => {
+                    return Poll::Ready(Ok(self
+                        .tweet
+                        .take()
+                        .expect("polled `RTQueue` after completion")));
+                }
             }
         }
 
