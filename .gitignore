@@ -1,2 +1,4 @@
 /target
 **/*.rs.bk
+/Pipitor.toml
+/pipitor.sqlite3
