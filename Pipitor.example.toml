@@ -1,0 +1,22 @@
+[twitter]
+user = 0 # `user_id` of the account used to retrieve Tweets
+list = 0 # `list_id` of the list used to backfill timeline (optional)
+
+[twitter.client]
+key = "Your application's API key"
+secret = "Your application's API secret"
+
+[[rule]]
+topics = [
+    # `user_id`s of accounts to retrieve Tweets from
+    783214, # @Twitter
+    12, # @jack
+]
+filter = "regex|to|filter the|Tweets"
+outbox = 0 # `user_id` of the account to Retweet filtered Tweets
+
+[[rule]]
+topics = [
+    17874544, # @TwitterSupport
+]
+filter = "(?i)Another filter|This regex is case insensitive"
