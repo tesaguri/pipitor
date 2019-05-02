@@ -5,9 +5,10 @@ use std::task::Context;
 use diesel::prelude::*;
 use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
-use failure::{Fallible, ResultExt};
+use failure::{Fail, Fallible, ResultExt};
 use futures::compat::Stream01CompatExt;
-use futures::future::{FusedFuture, Future, FutureExt};
+use futures::future::{self, FusedFuture, Future, FutureExt};
+use futures::ready;
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use futures::Poll;
 use hyper::client::connect::Connect;
@@ -29,6 +30,7 @@ pub struct App<C> {
     core: Core<C>,
     twitter_backfill: Option<TwitterBackfill>,
     twitter: TwitterStream,
+    twitter_done: bool,
     rt_queue: FuturesUnordered<RTQueue>,
     pending_rts: HashSet<i64>,
 }
@@ -76,6 +78,7 @@ where
             core,
             twitter_backfill,
             twitter,
+            twitter_done: false,
             rt_queue: FuturesUnordered::new(),
             pending_rts: HashSet::new(),
         })
@@ -141,12 +144,102 @@ where
     }
 
     pub async fn reset(&mut self) -> Fallible<()> {
-        let (twitter_backfill, twitter) = await!(self.core.init_twitter())?;
+        let twitter_backfill = if self.twitter_done {
+            let (bf, t) = await!(self.core.init_twitter())?;
+            self.twitter = t;
+            self.twitter_done = false;
+            bf
+        } else {
+            None
+        };
+
+        await!(future::poll_fn(|cx| -> Poll<Fallible<()>> {
+            match (self.poll_twitter_backfill(cx)?, self.poll_rt_queue(cx)?) {
+                (Poll::Ready(()), Poll::Ready(())) => Poll::Ready(Ok(())),
+                _ => Poll::Pending,
+            }
+        }))?;
+        debug_assert!(self.pending_rts.is_empty());
+
         self.twitter_backfill = twitter_backfill;
-        self.twitter = twitter;
-        self.rt_queue = FuturesUnordered::new();
-        self.pending_rts.clear();
+
         Ok(())
+    }
+
+    fn poll_twitter_backfill(&mut self, cx: &mut Context) -> Poll<Fallible<()>> {
+        let backfill = if let Some(ref mut bf) = self.twitter_backfill {
+            bf
+        } else {
+            return Poll::Ready(Ok(()));
+        };
+
+        let tweets = match ready!(backfill.response.poll_unpin(cx)) {
+            Ok(resp) => resp.response,
+            Err(e) => {
+                self.twitter_backfill = None;
+                return Poll::Ready(Err(e.into()));
+            }
+        };
+
+        if tweets.is_empty() {
+            trace!("timeline backfilling completed");
+            self.twitter_backfill = None;
+            return Poll::Ready(Ok(()));
+        }
+
+        let max_id = tweets.iter().map(|t| t.id).min().map(|id| id - 1);
+        // Make borrowck happy
+        let since_id = backfill.since_id;
+        let list = backfill.list;
+
+        let response = twitter::lists::Statuses::new(list)
+            .since_id(Some(since_id))
+            .max_id(max_id)
+            .send(
+                self.manifest().twitter.client.as_ref(),
+                self.core
+                    .twitter_token(self.manifest().twitter.user)
+                    .unwrap(),
+                &self.http_client(),
+            );
+
+        tweets
+            .into_iter()
+            .filter(|t| t.retweeted_status.is_none())
+            .try_for_each(|t| self.process_tweet(t))?;
+
+        self.twitter_backfill = Some(TwitterBackfill {
+            list,
+            since_id,
+            response,
+        });
+
+        Poll::Pending
+    }
+
+    fn poll_rt_queue(&mut self, cx: &mut Context) -> Poll<Fallible<()>> {
+        use crate::models::NewTweet;
+        use crate::schema::tweets::dsl::*;
+
+        let mut retweeted_status = if let Some(s) = ready!(self.rt_queue.poll_next_unpin(cx)?) {
+            s
+        } else {
+            return Poll::Ready(Ok(()));
+        };
+        let conn = self.database_pool().get()?;
+
+        loop {
+            diesel::replace_into(tweets)
+                .values(&NewTweet::from(&retweeted_status))
+                .execute(&*conn)?;
+            self.pending_rts.remove(&retweeted_status.id);
+
+            retweeted_status = if let Some(s) = ready!(self.rt_queue.poll_next_unpin(cx)?) {
+                s
+            } else {
+                return Poll::Ready(Ok(()));
+            };
+        }
     }
 }
 
@@ -179,70 +272,24 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Fallible<()>> {
         trace_fn!(App::<C>::poll);
 
-        if let Some(ref mut backfill) = self.twitter_backfill {
-            if let Poll::Ready(tweets) = backfill.response.poll_unpin(cx)? {
-                if tweets.is_empty() {
-                    trace!("timeline backfilling completed");
-                    self.twitter_backfill = None;
-                } else {
-                    let max_id = tweets.iter().map(|t| t.id).min().map(|id| id - 1);
-                    // Make borrowck happy
-                    let since_id = backfill.since_id;
-                    let list = backfill.list;
-
-                    tweets
-                        .response
-                        .into_iter()
-                        .filter(|t| t.retweeted_status.is_none())
-                        .try_for_each(|t| self.process_tweet(t))?;
-
-                    let response = twitter::lists::Statuses::new(list)
-                        .since_id(Some(since_id))
-                        .max_id(max_id)
-                        .send(
-                            self.manifest().twitter.client.as_ref(),
-                            self.core
-                                .twitter_token(self.manifest().twitter.user)
-                                .unwrap(),
-                            &self.http_client(),
-                        );
-
-                    self.twitter_backfill = Some(TwitterBackfill {
-                        list,
-                        since_id,
-                        response,
-                    });
-                }
-            }
-        }
+        let _ = self.poll_twitter_backfill(cx)?;
 
         while let Poll::Ready(v) = (&mut self.twitter).compat().poll_next_unpin(cx) {
             if let Some(result) = v {
-                let json = result.context("error while listening to Twitter's Streaming API");
-                if let Maybe::Just(tweet) = json::from_str(&json?)? {
+                let json = result.map_err(|e| {
+                    self.twitter_done = true;
+                    e.context("error while listening to Twitter's Streaming API")
+                })?;
+                if let Maybe::Just(tweet) = json::from_str(&json)? {
                     self.process_tweet(tweet)?;
                 }
             } else {
+                self.twitter_done = true;
                 return Poll::Ready(Ok(()));
             }
         }
 
-        let mut poll = self.rt_queue.poll_next_unpin(cx);
-        if let Poll::Ready(Some(_)) = poll {
-            let conn = self.database_pool().get()?;
-            while let Poll::Ready(Some(result)) = poll {
-                use crate::models::NewTweet;
-                use crate::schema::tweets::dsl::*;
-
-                let retweeted_status = result.context("failed to Retweet a Tweet")?;
-                diesel::replace_into(tweets)
-                    .values(&NewTweet::from(&retweeted_status))
-                    .execute(&*conn)?;
-                self.pending_rts.remove(&retweeted_status.id);
-
-                poll = self.rt_queue.poll_next_unpin(cx);
-            }
-        }
+        let _ = self.poll_rt_queue(cx)?;
 
         Poll::Pending
     }
