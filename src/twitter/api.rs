@@ -204,7 +204,7 @@ impl<T> Deref for Response<T> {
 impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
     type Output = Result<Response<T>>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<Response<T>>> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<Response<T>>> {
         trace_fn!(ResponseFuture::<T>::poll);
 
         if let ResponseFutureInner::Resp(ref mut res) = self.inner {
@@ -305,9 +305,9 @@ where
 
 fn rate_limit<T>(res: &hyper::Response<T>) -> Option<RateLimit> {
     Some(RateLimit {
-        limit: header(&res, "x-rate-limit-limit")?,
-        remaining: header(&res, "x-rate-limit-remaining")?,
-        reset: header(&res, "x-rate-limit-reset")?,
+        limit: header(res, "x-rate-limit-limit")?,
+        remaining: header(res, "x-rate-limit-remaining")?,
+        reset: header(res, "x-rate-limit-reset")?,
     })
 }
 

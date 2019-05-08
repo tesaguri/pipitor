@@ -126,7 +126,7 @@ where
                     pending.push(twitter::statuses::Retweet::new(tweet.id).send(
                         self.manifest().twitter.client.as_ref(),
                         self.core.twitter_token(user).unwrap(),
-                        &self.http_client(),
+                        self.http_client(),
                     ));
                 }
                 _ => unimplemented!(),
@@ -167,7 +167,7 @@ where
         Ok(())
     }
 
-    fn poll_twitter_backfill(&mut self, cx: &mut Context) -> Poll<Fallible<()>> {
+    fn poll_twitter_backfill(&mut self, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
         let backfill = if let Some(ref mut bf) = self.twitter_backfill {
             bf
         } else {
@@ -201,7 +201,7 @@ where
                 self.core
                     .twitter_token(self.manifest().twitter.user)
                     .unwrap(),
-                &self.http_client(),
+                self.http_client(),
             );
 
         tweets
@@ -218,7 +218,7 @@ where
         Poll::Pending
     }
 
-    fn poll_rt_queue(&mut self, cx: &mut Context) -> Poll<Fallible<()>> {
+    fn poll_rt_queue(&mut self, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
         use crate::models::NewTweet;
         use crate::schema::tweets::dsl::*;
 
@@ -270,7 +270,7 @@ where
 {
     type Output = Fallible<()>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Fallible<()>> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
         trace_fn!(App::<C>::poll);
 
         let _ = self.poll_twitter_backfill(cx)?;
@@ -451,7 +451,7 @@ where
 impl Future for RTQueue {
     type Output = Result<twitter::Tweet, twitter::Error>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         trace_fn!(RTQueue::poll);
 
         while let Poll::Ready(v) = self.pending.poll_next_unpin(cx) {
@@ -459,10 +459,11 @@ impl Future for RTQueue {
                 Some(Ok(_)) => {}
                 Some(Err(e)) => {
                     if let twitter::Error::Twitter(ref e) = e {
-                        if e.codes().any(|c| {
-                            c == twitter::ErrorCode::YOU_HAVE_ALREADY_RETWEETED_THIS_TWEET
-                                || c == twitter::ErrorCode::NO_STATUS_FOUND_WITH_THAT_ID
-                        }) {
+                        let is_negligible = |code| {
+                            code == twitter::ErrorCode::YOU_HAVE_ALREADY_RETWEETED_THIS_TWEET
+                                || code == twitter::ErrorCode::NO_STATUS_FOUND_WITH_THAT_ID
+                        };
+                        if e.codes().any(is_negligible) {
                             continue;
                         }
                     }

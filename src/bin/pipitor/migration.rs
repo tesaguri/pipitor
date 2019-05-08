@@ -10,7 +10,7 @@ use crate::common::open_manifest;
 pub struct Opt {}
 
 pub fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
-    let manifest = open_manifest(&opt)?;
+    let manifest = open_manifest(opt)?;
 
     let conn = SqliteConnection::establish(&manifest.database_url())?;
 

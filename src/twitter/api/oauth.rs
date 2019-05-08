@@ -46,7 +46,7 @@ where
         let Token {
             oauth_token: key,
             oauth_token_secret: secret,
-        } = serde_urlencoded::from_bytes::<Token>(&body).map_err(|_| Error::Unexpected)?;
+        } = serde_urlencoded::from_bytes::<Token>(body).map_err(|_| Error::Unexpected)?;
 
         Ok(Credentials { key, secret })
     })

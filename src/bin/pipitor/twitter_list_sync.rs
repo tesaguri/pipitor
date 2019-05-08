@@ -19,7 +19,7 @@ pub struct Opt {}
 pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     use pipitor::schema::twitter_tokens::dsl::*;
 
-    let manifest = open_manifest(&opt)?;
+    let manifest = open_manifest(opt)?;
     let list_id = if let Some(list) = manifest.twitter.list {
         list
     } else {

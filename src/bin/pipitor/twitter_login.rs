@@ -22,7 +22,7 @@ use crate::common::open_manifest;
 pub struct Opt {}
 
 pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
-    let manifest = open_manifest(&opt)?;
+    let manifest = open_manifest(opt)?;
 
     use pipitor::schema::twitter_tokens::dsl::*;
 
@@ -50,7 +50,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
                     match await!(twitter::account::VerifyCredentials::new().send(
                         manifest.twitter.client.as_ref(),
                         (&token).into(),
-                        &client,
+                        client,
                     )) {
                         Ok(_) => return Ok(None),
                         Err(twitter::Error::Twitter(ref e))

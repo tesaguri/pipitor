@@ -28,16 +28,16 @@ futures-util-preview = "0.3.0-alpha.14"
 futures-preview = "0.3.0-alpha.14"
 hyper = "0.12"
 itertools = "0.8"
+json = { version = "1", package = "serde_json" }
 log = "0.4"
-oauth1-request = "0.2"
-oauth1-request-derive = "0.2"
+oauth1 = { version = "0.2", package = "oauth1-request" }
+oauth1-request-derive = "0.2.2"
 r2d2 = "0.8"
 r2d2-diesel = "1"
 regex = "1"
 runtime = "0.3.0-alpha.2"
 runtime-tokio = "0.3.0-alpha.2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 serde_regex = "0.3"
 serde_urlencoded = "0.5"
 smallvec = { version = "0.6", features = ["serde"] }

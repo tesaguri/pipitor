@@ -2,8 +2,6 @@
 
 #[macro_use]
 extern crate diesel;
-extern crate oauth1_request as oauth1;
-extern crate serde_json as json;
 #[macro_use]
 extern crate log;
 #[macro_use]
