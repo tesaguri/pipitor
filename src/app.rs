@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::task::Context;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use diesel::prelude::*;
 use diesel::result::{DatabaseErrorKind, Error as QueryError};
@@ -275,17 +276,27 @@ where
         let _ = self.poll_twitter_backfill(cx)?;
 
         while let Poll::Ready(v) = (&mut self.twitter).compat().poll_next_unpin(cx) {
-            if let Some(result) = v {
-                let json = result.map_err(|e| {
-                    self.twitter_done = true;
-                    e.context("error while listening to Twitter's Streaming API")
-                })?;
-                if let Maybe::Just(tweet) = json::from_str(&json)? {
-                    self.process_tweet(tweet)?;
-                }
+            let result = if let Some(r) = v {
+                r
             } else {
                 self.twitter_done = true;
                 return Poll::Ready(Ok(()));
+            };
+
+            let json = result.map_err(|e| {
+                self.twitter_done = true;
+                e.context("error while listening to Twitter's Streaming API")
+            })?;
+
+            if let Maybe::Just(tweet) = json::from_str::<Maybe<twitter::Tweet>>(&json)? {
+                if log_enabled!(log::Level::Trace) {
+                    let created_at = snowflake_to_system_time(tweet.id as u64);
+                    match SystemTime::now().duration_since(created_at) {
+                        Ok(latency) => trace!("Twitter stream latency: {:.2?}", latency),
+                        Err(e) => trace!("Twitter stream latency: -{:.2?}", e.duration()),
+                    }
+                }
+                self.process_tweet(tweet)?;
             }
         }
 
@@ -474,4 +485,14 @@ impl FusedFuture for RTQueue {
     fn is_terminated(&self) -> bool {
         self.tweet.is_none()
     }
+}
+
+fn snowflake_to_system_time(id: u64) -> SystemTime {
+    // timestamp_ms = (snowflake >> 22) + 1_288_834_974_657
+    let snowflake_time_ms = id >> 22;
+    let timestamp = Duration::new(
+        snowflake_time_ms / 1_000 + 1_288_834_974,
+        (snowflake_time_ms as u32 % 1_000 + 657) * 1_000 * 1_000,
+    );
+    UNIX_EPOCH + timestamp
 }
