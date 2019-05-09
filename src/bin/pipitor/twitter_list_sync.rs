@@ -47,7 +47,9 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     println!("Retrieving the list...");
 
     let users: HashSet<i64> = manifest.rule.twitter_topics().collect();
-    let res = await!(res_fut).context("failed to retrieve the list from Twitter")?;
+    let res = res_fut
+        .await
+        .context("failed to retrieve the list from Twitter")?;
     let list: HashSet<i64> = (*res).users.iter().map(|u| u.id).collect();
     // `res` is actually a cursored response, but we have set `count` parameter to `5000`,
     // which is the maximum # of members of a list, so we needn't check cursor here.
@@ -69,7 +71,9 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         updated = true;
     }
 
-    await!(destroy.try_for_each(|_| futures::future::ok(())))
+    destroy
+        .try_for_each(|_| futures::future::ok(()))
+        .await
         .context("failed to remove a user from the list")?;
 
     let create: FuturesUnordered<_> = users
@@ -87,7 +91,9 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         updated = true;
     }
 
-    await!(create.try_for_each(|_| futures::future::ok(())))
+    create
+        .try_for_each(|_| futures::future::ok(()))
+        .await
         .context("failed to add a user to the list")?;
 
     if updated {

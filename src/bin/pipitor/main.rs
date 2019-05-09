@@ -1,4 +1,4 @@
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 #![recursion_limit = "128"]
 
 #[macro_use]
@@ -55,9 +55,9 @@ async fn main() -> Fallible<()> {
 
     match cmd {
         Cmd::Migration(subopt) => migration::main(&opt, subopt),
-        Cmd::Run(subopt) => await!(run::main(&opt, subopt)),
-        Cmd::Setup(subopt) => await!(setup::main(&opt, subopt)),
-        Cmd::TwitterListSync(subopt) => await!(twitter_list_sync::main(&opt, subopt)),
-        Cmd::TwitterLogin(subopt) => await!(twitter_login::main(&opt, subopt)),
+        Cmd::Run(subopt) => run::main(&opt, subopt).await,
+        Cmd::Setup(subopt) => setup::main(&opt, subopt).await,
+        Cmd::TwitterListSync(subopt) => twitter_list_sync::main(&opt, subopt).await,
+        Cmd::TwitterLogin(subopt) => twitter_login::main(&opt, subopt).await,
     }
 }

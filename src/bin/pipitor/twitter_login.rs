@@ -47,11 +47,10 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
             let (manifest, client) = (&manifest, &client);
             Ok(async move {
                 if let Some(token) = token {
-                    match await!(twitter::account::VerifyCredentials::new().send(
-                        manifest.twitter.client.as_ref(),
-                        (&token).into(),
-                        client,
-                    )) {
+                    match twitter::account::VerifyCredentials::new()
+                        .send(manifest.twitter.client.as_ref(), (&token).into(), client)
+                        .await
+                    {
                         Ok(_) => return Ok(None),
                         Err(twitter::Error::Twitter(ref e))
                             if e.status == StatusCode::UNAUTHORIZED => {}
@@ -69,8 +68,10 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         })
         .collect::<Fallible<_>>()?;
 
-    let mut unauthed_users: HashSet<_> =
-        await!(unauthed_users.try_filter_map(future::ok).try_collect())?;
+    let mut unauthed_users: HashSet<_> = unauthed_users
+        .try_filter_map(future::ok)
+        .try_collect()
+        .await?;
 
     if unauthed_users.is_empty() {
         println!("All users are already logged in.");
@@ -82,20 +83,19 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let mut stdin = tokio::io::lines(io::BufReader::new(stdin)).compat();
 
     while !unauthed_users.is_empty() {
-        let temporary = await!(twitter::oauth::request_token(
-            manifest.twitter.client.as_ref(),
-            &client,
-        ))
-        .context("error while getting OAuth request token from Twitter")?;
+        let temporary = twitter::oauth::request_token(manifest.twitter.client.as_ref(), &client)
+            .await
+            .context("error while getting OAuth request token from Twitter")?;
 
-        let verifier = await!(input_verifier(&mut stdin, &temporary.key, &unauthed_users))?;
+        let verifier = input_verifier(&mut stdin, &temporary.key, &unauthed_users).await?;
 
-        let (user, token) = await!(twitter::oauth::access_token(
+        let (user, token) = twitter::oauth::access_token(
             &verifier,
             manifest.twitter.client.as_ref(),
             temporary.as_ref(),
             &client,
-        ))
+        )
+        .await
         .context("error while getting OAuth access token from Twitter")?
         .response;
 
@@ -148,7 +148,7 @@ where
             stdout.flush().unwrap();
         }
 
-        if let Some(input) = await!(stdin.next()) {
+        if let Some(input) = stdin.next().await {
             return input;
         }
     }

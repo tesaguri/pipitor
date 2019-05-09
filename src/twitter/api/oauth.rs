@@ -1,4 +1,4 @@
-use futures::compat::Stream01CompatExt;
+use futures::compat::{Future01CompatExt, Stream01CompatExt};
 use futures::TryStreamExt;
 use hyper::client::connect::Connect;
 use hyper::header::AUTHORIZATION;
@@ -29,12 +29,20 @@ where
     let mut req = hyper::Request::post(Uri::from_static(URI));
     req.header(AUTHORIZATION, authorization);
 
-    let res =
-        await!(client.request(req.body(Default::default()).unwrap())).map_err(Error::Hyper)?;
+    let res = client
+        .request(req.body(Default::default()).unwrap())
+        .compat()
+        .await
+        .map_err(Error::Hyper)?;
 
     let status = res.status();
     let rate_limit = super::rate_limit(&res);
-    let body = await!(res.into_body().compat().try_concat()).map_err(Error::Hyper)?;
+    let body = res
+        .into_body()
+        .compat()
+        .try_concat()
+        .await
+        .map_err(Error::Hyper)?;
 
     #[derive(serde::Deserialize)]
     struct Token {
@@ -78,12 +86,20 @@ where
     let mut req = hyper::Request::post(Uri::from_static(URI));
     req.header(AUTHORIZATION, authorization);
 
-    let res =
-        await!(client.request(req.body(Default::default()).unwrap())).map_err(Error::Hyper)?;
+    let res = client
+        .request(req.body(Default::default()).unwrap())
+        .compat()
+        .await
+        .map_err(Error::Hyper)?;
 
     let status = res.status();
     let rate_limit = super::rate_limit(&res);
-    let body = await!(res.into_body().compat().try_concat()).map_err(Error::Hyper)?;
+    let body = res
+        .into_body()
+        .compat()
+        .try_concat()
+        .await
+        .map_err(Error::Hyper)?;
 
     #[derive(serde::Deserialize)]
     struct Token {

@@ -35,7 +35,7 @@ oauth1-request-derive = "0.2.2"
 r2d2 = "0.8"
 r2d2-diesel = "1"
 regex = "1"
-runtime = "0.3.0-alpha.2"
+runtime = "0.3.0-alpha.4"
 runtime-tokio = "0.3.0-alpha.2"
 serde = { version = "1", features = ["derive"] }
 serde_regex = "0.3"

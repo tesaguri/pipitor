@@ -7,7 +7,7 @@ use diesel::prelude::*;
 use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
-use futures::compat::Stream01CompatExt;
+use futures::compat::{Future01CompatExt, Stream01CompatExt};
 use futures::future::{self, FusedFuture, Future, FutureExt};
 use futures::ready;
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
@@ -59,7 +59,7 @@ impl App<hyper_tls::HttpsConnector<hyper::client::HttpConnector>> {
     pub async fn new(manifest: Manifest) -> Fallible<Self> {
         let conn = hyper_tls::HttpsConnector::new(4).context("failed to initialize TLS client")?;
         let client = Client::builder().build(conn);
-        await!(Self::with_http_client(client, manifest))
+        Self::with_http_client(client, manifest).await
     }
 }
 
@@ -72,8 +72,8 @@ where
     pub async fn with_http_client(client: Client<C>, manifest: Manifest) -> Fallible<Self> {
         trace_fn!(App::<C>::with_http_client);
 
-        let core = await!(Core::new(manifest, client))?;
-        let (twitter_backfill, twitter) = await!(core.init_twitter())?;
+        let core = Core::new(manifest, client).await?;
+        let (twitter_backfill, twitter) = core.init_twitter().await?;
 
         Ok(App {
             core,
@@ -146,7 +146,7 @@ where
 
     pub async fn reset(&mut self) -> Fallible<()> {
         let twitter_backfill = if self.twitter_done {
-            let (bf, t) = await!(self.core.init_twitter())?;
+            let (bf, t) = self.core.init_twitter().await?;
             self.twitter = t;
             self.twitter_done = false;
             bf
@@ -154,12 +154,13 @@ where
             None
         };
 
-        await!(future::poll_fn(|cx| -> Poll<Fallible<()>> {
+        future::poll_fn(|cx| -> Poll<Fallible<()>> {
             match (self.poll_twitter_backfill(cx)?, self.poll_rt_queue(cx)?) {
                 (Poll::Ready(()), Poll::Ready(())) => Poll::Ready(Ok(())),
                 _ => Poll::Pending,
             }
-        }))?;
+        })
+        .await?;
         debug_assert!(self.pending_rts.is_empty());
 
         self.twitter_backfill = twitter_backfill;
@@ -341,11 +342,10 @@ where
                 let (manifest, client) = (&manifest, &client);
                 Ok(async move {
                     if let Some(token) = token {
-                        match await!(twitter::account::VerifyCredentials::new().send(
-                            manifest.twitter.client.as_ref(),
-                            (&token).into(),
-                            client,
-                        )) {
+                        match twitter::account::VerifyCredentials::new()
+                            .send(manifest.twitter.client.as_ref(), (&token).into(), client)
+                            .await
+                        {
                             Ok(_) => return Ok((user, token.into())),
                             Err(twitter::Error::Twitter(ref e))
                                 if e.status == StatusCode::UNAUTHORIZED => {}
@@ -381,7 +381,7 @@ where
                 })?;
         }
 
-        let twitter_tokens = await!(twitter_tokens.try_collect())?;
+        let twitter_tokens = twitter_tokens.try_collect().await?;
 
         Ok(Core {
             manifest,
@@ -412,11 +412,13 @@ where
         twitter_topics.sort();
         twitter_topics.dedup();
 
-        // `await!` immediately to make sure the later call to `send()` happens after Twitter accepts this request
-        let twitter = await!(TwitterStreamBuilder::filter(stream_token)
+        // `await` immediately to make sure the later call to `send()` happens after Twitter accepts this request
+        let twitter = TwitterStreamBuilder::filter(stream_token)
             .follow(&*twitter_topics)
-            .listen_with_client(&self.client))
-        .context("error while connecting to Twitter's Streaming API")?;
+            .listen_with_client(&self.client)
+            .compat()
+            .await
+            .context("error while connecting to Twitter's Streaming API")?;
 
         let twitter_backfill = {
             use crate::schema::last_tweet::dsl::*;

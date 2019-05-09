@@ -1,11 +1,9 @@
-#![feature(async_await, await_macro)]
+#![feature(async_await)]
 
 #[macro_use]
 extern crate diesel;
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate tokio_async_await;
 
 macro_rules! trace_fn {
     (@heading $path:path) => {
