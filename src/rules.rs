@@ -82,6 +82,10 @@ impl RuleMap {
         self.map.get_mut(topic)
     }
 
+    pub fn contains_topic(&self, topic: &TopicId) -> bool {
+        self.map.contains_key(topic)
+    }
+
     pub fn remove(
         &mut self,
         topic: &TopicId,

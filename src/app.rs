@@ -22,7 +22,7 @@ use serde::de;
 use twitter_stream::{TwitterStream, TwitterStreamBuilder};
 
 use crate::models;
-use crate::rules::Outbox;
+use crate::rules::{Outbox, TopicId};
 use crate::twitter::{self, Request as _};
 use crate::util::Maybe;
 use crate::Manifest;
@@ -296,7 +296,13 @@ where
                         Err(e) => trace!("Twitter stream latency: -{:.2?}", e.duration()),
                     }
                 }
-                self.process_tweet(tweet)?;
+                if self
+                    .manifest()
+                    .rule
+                    .contains_topic(&TopicId::Twitter(tweet.user.id))
+                {
+                    self.process_tweet(tweet)?;
+                }
             }
         }
 
