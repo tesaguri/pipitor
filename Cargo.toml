@@ -48,7 +48,10 @@ tokio-file-unix = "0.5"
 toml = "0.5"
 twitter-stream = { version = "0.9", default-features = false }
 hyper-tls = { version = "0.3", optional = true }
+libsqlite3-sys = { version = ">=0.8.0, <0.13.0", optional = true }
 
 [features]
 default = ["native-tls"]
 native-tls = ["hyper-tls"]
+openssl-vendored = ["hyper-tls/vendored"]
+sqlite-bundled = ["libsqlite3-sys/bundled"]
