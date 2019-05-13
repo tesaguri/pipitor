@@ -144,6 +144,16 @@ where
         Ok(())
     }
 
+    pub async fn shutdown(&mut self) -> Fallible<()> {
+        future::poll_fn(|cx| -> Poll<Fallible<()>> {
+            match (self.poll_twitter_backfill(cx)?, self.poll_rt_queue(cx)?) {
+                (Poll::Ready(()), Poll::Ready(())) => Poll::Ready(Ok(())),
+                _ => Poll::Pending,
+            }
+        })
+        .await
+    }
+
     pub async fn reset(&mut self) -> Fallible<()> {
         let twitter_backfill = if self.twitter_done {
             let (bf, t) = self.core.init_twitter().await?;
@@ -154,13 +164,7 @@ where
             None
         };
 
-        future::poll_fn(|cx| -> Poll<Fallible<()>> {
-            match (self.poll_twitter_backfill(cx)?, self.poll_rt_queue(cx)?) {
-                (Poll::Ready(()), Poll::Ready(())) => Poll::Ready(Ok(())),
-                _ => Poll::Pending,
-            }
-        })
-        .await?;
+        self.shutdown().await?;
         debug_assert!(self.pending_rts.is_empty());
 
         self.twitter_backfill = twitter_backfill;

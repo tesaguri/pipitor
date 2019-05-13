@@ -43,6 +43,7 @@ serde = { version = "1.0.34", features = ["derive"] }
 serde_derive = "1.0.34"
 serde_regex = "0.3"
 serde_urlencoded = "0.5"
+signal-hook = { version = "0.1", features = ["tokio-support"] }
 smallvec = { version = "0.6.4", features = ["serde"] }
 structopt = "0.2"
 tokio = { version = "0.1.19", features = ["async-await-preview"] }
