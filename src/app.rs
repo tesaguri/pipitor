@@ -293,21 +293,27 @@ where
                 e.context("error while listening to Twitter's Streaming API")
             })?;
 
-            if let Maybe::Just(tweet) = json::from_str::<Maybe<twitter::Tweet>>(&json)? {
-                if log_enabled!(log::Level::Trace) {
-                    let created_at = snowflake_to_system_time(tweet.id as u64);
-                    match SystemTime::now().duration_since(created_at) {
-                        Ok(latency) => trace!("Twitter stream latency: {:.2?}", latency),
-                        Err(e) => trace!("Twitter stream latency: -{:.2?}", e.duration()),
-                    }
+            let tweet = if let Maybe::Just(t) = json::from_str::<Maybe<twitter::Tweet>>(&json)? {
+                t
+            } else {
+                continue;
+            };
+
+            if log_enabled!(log::Level::Trace) {
+                let created_at = snowflake_to_system_time(tweet.id as u64);
+                match SystemTime::now().duration_since(created_at) {
+                    Ok(latency) => trace!("Twitter stream latency: {:.2?}", latency),
+                    Err(e) => trace!("Twitter stream latency: -{:.2?}", e.duration()),
                 }
-                if self
-                    .manifest()
-                    .rule
-                    .contains_topic(&TopicId::Twitter(tweet.user.id))
-                {
-                    self.process_tweet(tweet)?;
-                }
+            }
+
+            let from = tweet.user.id;
+            let will_process = self.manifest().rule.contains_topic(&TopicId::Twitter(from))
+                && tweet.in_reply_to_user_id.map_or(true, |to| {
+                    self.manifest().rule.contains_topic(&TopicId::Twitter(to))
+                });
+            if will_process {
+                self.process_tweet(tweet)?;
             }
         }
 
