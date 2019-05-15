@@ -8,7 +8,7 @@ use futures::stream::StreamExt;
 use pipitor::App;
 use signal_hook::iterator::Signals;
 
-use crate::common::open_manifest;
+use crate::common::{open_manifest, DisplayFailChain};
 
 #[derive(structopt::StructOpt)]
 pub struct Opt {}
@@ -38,6 +38,8 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         .await
         .context("failed to initialize the application")?;
 
+    info!("started the application");
+
     loop {
         let mut app_fuse = (&mut app).fuse();
         futures::select! {
@@ -46,15 +48,17 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
                     Ok(()) => info!("disconnected from Twitter Streaming API"),
                     Err(e) => {
                         // TODO: do not retry immediately if the error is Too Many Requests or Forbidden
-                        error!("{}", e);
+                        error!("{}", DisplayFailChain(&e));
                     }
                 }
+                info!("restarting the application");
                 app.reset().await?;
             }
             option = signal => {
                 let _signal_id = option.unwrap_or_else(|| unreachable!())?;
                 info!("shutdown requested");
                 app.shutdown().await?;
+                info!("exiting normally");
                 return Ok(());
             }
         }

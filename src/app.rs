@@ -16,7 +16,7 @@ use hyper::client::connect::Connect;
 use hyper::Client;
 use hyper::StatusCode;
 use itertools::Itertools;
-use r2d2::Pool;
+use r2d2::{Pool, PooledConnection};
 use r2d2_diesel::ConnectionManager;
 use serde::de;
 use twitter_stream::{TwitterStream, TwitterStreamBuilder};
@@ -88,7 +88,7 @@ where
     pub fn process_tweet(&mut self, tweet: twitter::Tweet) -> Fallible<()> {
         trace_fn!(App::<C>::process_tweet, "tweet={:?}", tweet);
 
-        let conn = self.database_pool().get()?;
+        let conn = self.conn()?;
 
         let already_processed = {
             use crate::schema::tweets::dsl::*;
@@ -119,7 +119,7 @@ where
         let mut pending = FuturesUnordered::new();
 
         for outbox in self.manifest().rule.route_tweet(&tweet) {
-            debug!("sending a Tweet to outbox {:?}", outbox);
+            debug!("sending a Tweet to outbox {:?}: {:?}", outbox, tweet);
 
             match *outbox {
                 Outbox::Twitter(user) => {
@@ -188,7 +188,7 @@ where
         };
 
         if tweets.is_empty() {
-            trace!("timeline backfilling completed");
+            debug!("timeline backfilling completed");
             self.twitter_backfill = None;
             return Poll::Ready(Ok(()));
         }
@@ -232,7 +232,7 @@ where
         } else {
             return Poll::Ready(Ok(()));
         };
-        let conn = self.database_pool().get()?;
+        let conn = self.conn()?;
 
         loop {
             diesel::replace_into(tweets)
@@ -264,6 +264,10 @@ impl<C> App<C> {
 
     pub fn http_client(&self) -> &Client<C> {
         &self.core.client
+    }
+
+    fn conn(&self) -> Fallible<PooledConnection<ConnectionManager<SqliteConnection>>> {
+        self.core.conn()
     }
 }
 
@@ -302,8 +306,8 @@ where
             if log_enabled!(log::Level::Trace) {
                 let created_at = snowflake_to_system_time(tweet.id as u64);
                 match SystemTime::now().duration_since(created_at) {
-                    Ok(latency) => trace!("Twitter stream latency: {:.2?}", latency),
-                    Err(e) => trace!("Twitter stream latency: -{:.2?}", e.duration()),
+                    Ok(latency) => debug!("Twitter stream latency: {:.2?}", latency),
+                    Err(e) => debug!("Twitter stream latency: -{:.2?}", e.duration()),
                 }
             }
 
@@ -332,7 +336,8 @@ where
     async fn new(manifest: Manifest, client: Client<C>) -> Fallible<Self> {
         trace_fn!(Core::<C>::new);
 
-        let pool = Pool::new(ConnectionManager::new(manifest.database_url()))?;
+        let pool = Pool::new(ConnectionManager::new(manifest.database_url()))
+            .context("failed to initialize the connection pool")?;
 
         let twitter_tokens: FuturesUnordered<_> = manifest
             .rule
@@ -437,11 +442,11 @@ where
                 last_tweet
                     .find(&0)
                     .select(status_id)
-                    .first::<i64>(&*self.pool.get()?)
+                    .first::<i64>(&*self.conn()?)
                     .optional()?
                     .filter(|&n| n > 0)
                     .map(|since_id| {
-                        trace!("timeline backfilling enabled");
+                        debug!("timeline backfilling enabled");
                         let response = twitter::lists::Statuses::new(list)
                             .since_id(Some(since_id))
                             .send(self.manifest.twitter.client.as_ref(), token, &self.client);
@@ -463,6 +468,15 @@ where
         self.twitter_tokens
             .get(&user)
             .map(twitter::Credentials::as_ref)
+    }
+}
+
+impl<C> Core<C> {
+    fn conn(&self) -> Fallible<PooledConnection<ConnectionManager<SqliteConnection>>> {
+        self.pool
+            .get()
+            .context("failed to retrieve a connection from the connection pool")
+            .map_err(Into::into)
     }
 }
 

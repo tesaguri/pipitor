@@ -28,7 +28,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     };
 
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
-    let pool = Pool::new(manager)?;
+    let pool = Pool::new(manager).context("failed to initialize the connection pool")?;
 
     let conn = HttpsConnector::new(4).context("failed to initialize TLS client")?;
     let client = Client::builder().build(conn);

@@ -15,6 +15,9 @@ mod setup;
 mod twitter_list_sync;
 mod twitter_login;
 
+use std::process;
+
+use common::DisplayFailChain;
 use failure::Fallible;
 use structopt::StructOpt;
 
@@ -48,9 +51,17 @@ enum Cmd {
 }
 
 #[runtime::main(runtime_tokio::Tokio)]
-async fn main() -> Fallible<()> {
+async fn main() {
     env_logger::init();
 
+    if let Err(e) = run().await {
+        error!("{}", DisplayFailChain(&e));
+        info!("exiting abnormally");
+        process::exit(1);
+    }
+}
+
+async fn run() -> Fallible<()> {
     let Args { opt, cmd } = Args::from_args();
 
     match cmd {
