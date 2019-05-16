@@ -4,6 +4,7 @@ use std::task::Context;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use diesel::prelude::*;
+use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
@@ -16,8 +17,6 @@ use hyper::client::connect::Connect;
 use hyper::Client;
 use hyper::StatusCode;
 use itertools::Itertools;
-use r2d2::{Pool, PooledConnection};
-use r2d2_diesel::ConnectionManager;
 use serde::de;
 use twitter_stream::{TwitterStream, TwitterStreamBuilder};
 

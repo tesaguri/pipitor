@@ -1,6 +1,7 @@
 use std::collections::hash_set::HashSet;
 
 use diesel::prelude::*;
+use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use failure::{Fallible, ResultExt};
 use futures::stream::{FuturesUnordered, TryStreamExt};
@@ -8,8 +9,6 @@ use hyper::client::Client;
 use hyper_tls::HttpsConnector;
 use pipitor::models;
 use pipitor::twitter::{self, Request as _};
-use r2d2::Pool;
-use r2d2_diesel::ConnectionManager;
 
 use crate::common::open_manifest;
 

@@ -19,7 +19,7 @@ required-features = ["native-tls"]
 
 [dependencies]
 atoi = "0.3"
-diesel = { version = "1.4", default-features = false, features = ["sqlite"] }
+diesel = { version = "1.4", default-features = false, features = ["r2d2", "sqlite"] }
 diesel_derives = "1.4"
 diesel_migrations = { version = "1", default-features = false, features = ["sqlite"] }
 dotenv = "0.13"
@@ -34,8 +34,6 @@ json = { version = "1", package = "serde_json" }
 log = "0.4.6"
 oauth1 = { version = "0.2.1", package = "oauth1-request" }
 oauth1-request-derive = "0.2.2"
-r2d2 = "0.8"
-r2d2-diesel = "1"
 regex = "1.0.3"
 runtime = "0.3.0-alpha.4"
 runtime-tokio = "0.3.0-alpha.3"
