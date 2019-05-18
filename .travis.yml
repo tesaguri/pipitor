@@ -1,5 +1,6 @@
 dist: trusty
 language: rust
+rust: nightly
 services: docker
 sudo: required
 
@@ -10,8 +11,10 @@ env:
 
 matrix:
   include:
-    - env: TARGET=armv7-unknown-linux-gnueabihf
-      rust: nightly
+    - env:
+    # # FIXME: CI fails with "Can't locate FindBin.pm in @INC" error while running `python ./Configure`
+    # - env: TARGET=armv7-unknown-linux-gnueabihf
+    #   rust: nightly
     - env: TARGET=x86_64-unknown-linux-musl
       rust: nightly
     - env: TARGET=x86_64-apple-darwin
@@ -31,7 +34,7 @@ install:
   - source ~/.cargo/env || true
 
 script:
-  - bash scripts/script.sh
+  - sh scripts/script.sh
 
 after_script: set +e
 

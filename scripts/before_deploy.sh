@@ -6,20 +6,18 @@ set -ex
 
 main() {
   local src=$(pwd) \
-    stage=
+    stage=$(mktemp -d) \
+    cargo=
 
-  case $TRAVIS_OS_NAME in
-    linux)
-      stage=$(mktemp -d)
-      ;;
-    osx)
-      stage=$(mktemp -d -t tmp)
-      ;;
-  esac
+  if [ "$TRAVIS_OS_NAME" = linux]; then
+    cargo='cross'
+  else
+    cargo='cargo'
+  fi
 
   test -f Cargo.lock || cargo generate-lockfile
 
-  cross rustc --bin $PKG_NAME --target $TARGET --release -- -C lto
+  $cargo rustc --bin $PKG_NAME --target $TARGET --release --features 'openssl-vendored sqlite-bundled' -- -C lto -C codegen-units=1
   cp target/$TARGET/release/$PKG_NAME $stage/
 
   cd $stage
@@ -29,4 +27,6 @@ main() {
   rm -rf $stage
 }
 
-main
+if [ -n "$TARGET" ]; then
+  main
+fi
