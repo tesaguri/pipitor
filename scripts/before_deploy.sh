@@ -9,7 +9,7 @@ main() {
     stage=$(mktemp -d) \
     cargo=
 
-  if [ "$TRAVIS_OS_NAME" = linux]; then
+  if [ "$TRAVIS_OS_NAME" = linux ]; then
     cargo='cross'
   else
     cargo='cargo'
