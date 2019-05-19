@@ -9,13 +9,16 @@ A Twitter bot that gathers Tweets from a specified set of accounts, filters and 
 
 ## Usage
 
-Run the following to install (requires Nightly Rust):
+Download the latest binary package for your platform from the [releases](https://github.com/tesaguri/pipitor/releases) page
+and install it to a directory of your choice.
+
+Or alternatively, you can manually build the project from the source (requires Nightly Rust):
 
 ```shell
 cargo install pipitor
 ```
 
-Create a manifest file named `Pipitor.toml` in the working directory.
+After the installation, create a manifest file named `Pipitor.toml` in the working directory.
 Manifest format is shown in [`Pipitor.example.toml`](Pipitor.example.toml).
 
 Then, run the following, and follow the instructions on the command line:
