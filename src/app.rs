@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use std::pin::Pin;
 use std::task::Context;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,6 +35,7 @@ pub struct App<C> {
     twitter_done: bool,
     rt_queue: FuturesUnordered<RTQueue>,
     pending_rts: HashSet<i64>,
+    twitter_dump: Option<BufWriter<File>>,
 }
 
 struct Core<C> {
@@ -81,7 +84,15 @@ where
             twitter_done: false,
             rt_queue: FuturesUnordered::new(),
             pending_rts: HashSet::new(),
+            twitter_dump: None,
         })
+    }
+
+    pub fn set_twitter_dump(&mut self, twitter_dump: File) -> io::Result<()> {
+        if let Some(mut old) = self.twitter_dump.replace(BufWriter::new(twitter_dump)) {
+            old.flush()?;
+        }
+        Ok(())
     }
 
     pub fn process_tweet(&mut self, tweet: twitter::Tweet) -> Fallible<()> {
@@ -208,10 +219,12 @@ where
                 self.http_client(),
             );
 
-        tweets
-            .into_iter()
-            .filter(|t| t.retweeted_status.is_none())
-            .try_for_each(|t| self.process_tweet(t))?;
+        for t in tweets {
+            self.with_twitter_dump(|dump| json::to_writer(dump, &t))?;
+            if t.retweeted_status.is_none() {
+                self.process_tweet(t)?;
+            }
+        }
 
         self.twitter_backfill = Some(TwitterBackfill {
             list,
@@ -245,6 +258,20 @@ where
                 return Poll::Ready(Ok(()));
             };
         }
+    }
+
+    fn with_twitter_dump<F, E>(&mut self, f: F) -> Fallible<()>
+    where
+        F: FnOnce(&mut BufWriter<File>) -> Result<(), E>,
+        E: Fail,
+    {
+        if let Some(ref mut dump) = self.twitter_dump {
+            f(dump).map_err(|e| {
+                self.twitter_dump = None;
+                e.context("failed to write a Tweet to the dump file")
+            })?;
+        }
+        Ok(())
     }
 }
 
@@ -295,6 +322,8 @@ where
                 self.twitter_done = true;
                 e.context("error while listening to Twitter's Streaming API")
             })?;
+
+            self.with_twitter_dump(|dump| dump.write_all(json.as_bytes()))?;
 
             let tweet = if let Maybe::Just(t) = json::from_str::<Maybe<twitter::Tweet>>(&json)? {
                 t

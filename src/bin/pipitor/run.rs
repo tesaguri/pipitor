@@ -1,5 +1,6 @@
 use std::fmt::Debug;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::path::PathBuf;
 
 use failure::{Fail, Fallible, ResultExt};
 use fs2::FileExt;
@@ -12,9 +13,11 @@ use pipitor::App;
 use crate::common::{open_manifest, DisplayFailChain};
 
 #[derive(structopt::StructOpt)]
-pub struct Opt {}
+pub struct Opt {
+    twitter_dump: Option<PathBuf>,
+}
 
-pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
+pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
     let manifest = open_manifest(opt)?;
 
     let lock = File::open(
@@ -33,6 +36,18 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let mut app = App::new(manifest)
         .await
         .context("failed to initialize the application")?;
+
+    if let Some(ref path) = subopt.twitter_dump {
+        let f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(path)
+            .context(format!(
+                "failed to open {:?}",
+                subopt.twitter_dump.as_ref().unwrap(),
+            ))?;
+        app.set_twitter_dump(f).unwrap();
+    };
 
     info!("initialized the application");
 
