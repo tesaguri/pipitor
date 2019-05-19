@@ -6,6 +6,7 @@ use failure::{Fail, Fallible, ResultExt};
 use fs2::FileExt;
 use futures::compat::Stream01CompatExt;
 use futures::future::{self, Future, FutureExt};
+use futures::join;
 use futures::stream::StreamExt;
 use futures01::Stream as Stream01;
 use pipitor::App;
@@ -31,11 +32,10 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
         Err(e) => return Err(e.context("failed to acquire a file lock").into()),
     }
 
-    let mut signal = signal::quit().await.unwrap().fuse();
-
-    let mut app = App::new(manifest)
-        .await
-        .context("failed to initialize the application")?;
+    let (signal, app) = (signal::quit(), App::new(manifest));
+    let (signal, app) = join!(signal, app);
+    let mut signal = signal.unwrap().fuse();
+    let mut app = app.context("failed to initialize the application")?;
 
     if let Some(ref path) = subopt.twitter_dump {
         let f = OpenOptions::new()
