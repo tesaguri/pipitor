@@ -77,8 +77,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         return Ok(());
     }
 
-    let stdin = tokio_file_unix::File::new_nb(tokio_file_unix::raw_stdin()?)?
-        .into_io(&Default::default())?;
+    let stdin = stdin::nb()?;
     let mut stdin = tokio::io::lines(io::BufReader::new(stdin)).compat();
 
     while !unauthed_users.is_empty() {
@@ -150,5 +149,28 @@ where
         if let Some(input) = stdin.next().await {
             return input;
         }
+    }
+}
+
+#[cfg(unix)]
+mod stdin {
+    use std::io;
+
+    use tokio::io::AsyncRead as AsyncRead01;
+    use tokio_file_unix::{raw_stdin, File};
+
+    pub fn nb() -> io::Result<impl AsyncRead01> {
+        File::new_nb(raw_stdin()?)?.into_io(&Default::default())
+    }
+}
+
+#[cfg(windows)]
+mod stdin {
+    use std::io;
+
+    use tokio::io::AsyncRead as AsyncRead01;
+
+    pub fn nb() -> io::Result<impl AsyncRead01> {
+        Ok(tokio_stdin_stdout::stdin(0))
     }
 }

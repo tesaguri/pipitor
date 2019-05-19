@@ -1,12 +1,13 @@
+use std::fmt::Debug;
 use std::fs::File;
 
 use failure::{Fail, Fallible, ResultExt};
 use fs2::FileExt;
 use futures::compat::Stream01CompatExt;
-use futures::future::FutureExt;
+use futures::future::{self, Future, FutureExt};
 use futures::stream::StreamExt;
+use futures01::Stream as Stream01;
 use pipitor::App;
-use signal_hook::iterator::Signals;
 
 use crate::common::{open_manifest, DisplayFailChain};
 
@@ -27,18 +28,13 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         Err(e) => return Err(e.context("failed to acquire a file lock").into()),
     }
 
-    let mut signals = Signals::new(&[signal_hook::SIGTERM, signal_hook::SIGINT])
-        .unwrap()
-        .into_async()
-        .unwrap()
-        .compat();
-    let mut signal = signals.next().fuse();
+    let mut signal = signal::quit().await.unwrap().fuse();
 
     let mut app = App::new(manifest)
         .await
         .context("failed to initialize the application")?;
 
-    info!("started the application");
+    info!("initialized the application");
 
     loop {
         let mut app_fuse = (&mut app).fuse();
@@ -54,8 +50,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
                 info!("restarting the application");
                 app.reset().await?;
             }
-            option = signal => {
-                let _signal_id = option.unwrap_or_else(|| unreachable!())?;
+            _signal_id = signal => {
                 info!("shutdown requested");
                 app.shutdown().await?;
                 info!("exiting normally");
@@ -63,4 +58,54 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
             }
         }
     }
+}
+
+#[cfg(unix)]
+mod signal {
+    use std::io;
+
+    use futures::compat::Future01CompatExt;
+    use futures::future::Future;
+    use tokio_signal::unix::{
+        libc::{SIGINT, SIGTERM},
+        Signal,
+    };
+
+    pub async fn quit() -> io::Result<impl Future<Output = ()>> {
+        let (int, term) = (Signal::new(SIGINT).compat(), Signal::new(SIGTERM).compat());
+        let (int, term) = futures::try_join!(int, term)?;
+        Ok(super::merge_select(super::first(int), super::first(term)))
+    }
+}
+
+#[cfg(windows)]
+mod signal {
+    use std::io;
+
+    use futures::compat::Future01CompatExt;
+    use futures::future::Future;
+    use tokio_signal::windows::Event;
+
+    pub async fn quit() -> io::Result<impl Future<Output = ()>> {
+        let (cc, cb) = (Event::ctrl_c().compat(), Event::ctrl_break().compat());
+        let (cc, cb) = futures::try_join!(cc, cb)?;
+        Ok(super::merge_select(super::first(cc), super::first(cb)))
+    }
+}
+
+fn first<S: Stream01>(s: S) -> impl Future<Output = ()>
+where
+    S::Error: Debug,
+{
+    s.compat().into_future().map(|(r, _)| {
+        r.unwrap().unwrap();
+    })
+}
+
+fn merge_select<A, B>(a: A, b: B) -> impl Future<Output = A::Output>
+where
+    A: Future + Unpin,
+    B: Future<Output = A::Output> + Unpin,
+{
+    future::select(a, b).map(|either| either.factor_first().0)
 }
