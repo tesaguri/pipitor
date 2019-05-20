@@ -26,10 +26,10 @@ pub enum TopicId {
     _NonExhaustive(private::Never),
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash)]
-#[serde(untagged)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Outbox {
     Twitter(i64),
+    None,
     #[doc(hidden)]
     _NonExhaustive(private::Never),
 }
@@ -170,6 +170,18 @@ impl<'de> Deserialize<'de> for RuleMap {
         }
 
         d.deserialize_seq(Visitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for Outbox {
+    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        i64::deserialize(d).map(|id| {
+            if id == 0 {
+                Outbox::None
+            } else {
+                Outbox::Twitter(id)
+            }
+        })
     }
 }
 

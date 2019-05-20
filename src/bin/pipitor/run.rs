@@ -15,6 +15,10 @@ use crate::common::{open_manifest, DisplayFailChain};
 
 #[derive(structopt::StructOpt)]
 pub struct Opt {
+    #[structopt(
+        long = "twitter-dump",
+        help = "File to dump Twitter Streaming API output"
+    )]
     twitter_dump: Option<PathBuf>,
 }
 

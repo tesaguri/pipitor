@@ -139,6 +139,7 @@ where
                         self.http_client(),
                     ));
                 }
+                Outbox::None => {}
                 _ => unimplemented!(),
             }
         }
