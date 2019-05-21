@@ -1,6 +1,9 @@
 [twitter]
-user = 0 # `user_id` of the account used to retrieve Tweets
-list = 0 # `list_id` of the list used to backfill timeline (optional)
+# `user_id` of the account used to retrieve Tweets
+user = 0
+# `list_id` of the list used to backfill timeline (optional)
+# Running `pipitor twitter-list-sync` will overwrite members in the list.
+list = 0
 
 [twitter.client]
 key = "Your application's API key"
@@ -12,8 +15,11 @@ topics = [
     783214, # @Twitter
     12, # @jack
 ]
+# If `filter` is unspecified, the rule will match any Tweet.
 filter = "regex|to|filter the|Tweets"
-outbox = 0 # `user_id` of the account to Retweet filtered Tweets
+# `user_id` of the account to Retweet filtered Tweets.
+# This can be `0`, in which case the matched Tweets won't be Retweeted.
+outbox = 0
 
 [[rule]]
 topics = [
