@@ -221,7 +221,11 @@ where
             );
 
         for t in tweets {
-            self.with_twitter_dump(|dump| json::to_writer(dump, &t))?;
+            self.with_twitter_dump(|mut dump| -> io::Result<()> {
+                json::to_writer(&mut dump, &t)?;
+                dump.write_all(b"\n")?;
+                Ok(())
+            })?;
             if t.retweeted_status.is_none() {
                 self.process_tweet(t)?;
             }
@@ -324,7 +328,10 @@ where
                 e.context("error while listening to Twitter's Streaming API")
             })?;
 
-            self.with_twitter_dump(|dump| dump.write_all(json.as_bytes()))?;
+            self.with_twitter_dump(|dump| {
+                dump.write_all(json.trim_end().as_bytes())?;
+                dump.write_all(b"\n")
+            })?;
 
             let tweet = if let Maybe::Just(t) = json::from_str::<Maybe<twitter::Tweet>>(&json)? {
                 t
