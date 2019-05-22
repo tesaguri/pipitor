@@ -221,10 +221,9 @@ where
             );
 
         for t in tweets {
-            self.with_twitter_dump(|mut dump| -> io::Result<()> {
+            self.with_twitter_dump(|mut dump| {
                 json::to_writer(&mut dump, &t)?;
-                dump.write_all(b"\n")?;
-                Ok(())
+                dump.write_all(b"\n")
             })?;
             if t.retweeted_status.is_none() {
                 self.process_tweet(t)?;
