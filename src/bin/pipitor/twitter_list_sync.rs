@@ -4,7 +4,8 @@ use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use failure::{Fallible, ResultExt};
-use futures::stream::{FuturesUnordered, TryStreamExt};
+use futures::future;
+use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use hyper::client::Client;
 use hyper_tls::HttpsConnector;
 use pipitor::models;
@@ -78,11 +79,12 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let create: FuturesUnordered<_> = users
         .difference(&list)
         .map(|&user| {
-            twitter::lists::members::Create::new(list_id, user).send(
+            let res = twitter::lists::members::Create::new(list_id, user).send(
                 manifest.twitter.client.as_ref(),
                 token.as_ref(),
                 &client,
-            )
+            );
+            future::join(res, future::ready(user))
         })
         .collect();
     if !create.is_empty() {
@@ -91,7 +93,22 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     }
 
     create
-        .try_for_each(|_| futures::future::ok(()))
+        .then(|(result, user)| match result {
+            Ok(_) => future::ok(()),
+            Err(e) => {
+                if let twitter::Error::Twitter(ref e) = e {
+                    // Skip this error as it occurs if (but not only if) the user is protected.
+                    if e.codes().any(|c| {
+                        c == twitter::ErrorCode::YOU_ARENT_ALLOWED_TO_ADD_MEMBERS_TO_THIS_LIST
+                    }) {
+                        warn!("You aren't allowed to add user {} to the list", user);
+                        return future::ok(());
+                    }
+                }
+                future::err(e)
+            }
+        })
+        .try_for_each(future::ok)
         .await
         .context("failed to add a user to the list")?;
 
