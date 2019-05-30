@@ -20,6 +20,8 @@ api_requests! {
         #[oauth1(option)]
         count: Option<usize> = Some(200),
         include_entities: bool,
+        #[oauth1(option)]
+        include_rts: Option<bool>,
     }
 }
 

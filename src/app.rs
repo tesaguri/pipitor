@@ -1,6 +1,6 @@
 mod core;
 mod sender;
-mod twitter_backfill;
+mod twitter_list_timeline;
 
 use std::fs::File;
 use std::io::{self, Write};
@@ -26,11 +26,11 @@ use crate::Manifest;
 
 use self::core::Core;
 use self::sender::Sender;
-use self::twitter_backfill::TwitterBackfill;
+use self::twitter_list_timeline::TwitterListTimeline;
 
 pub struct App<C> {
     core: Core<C>,
-    twitter_backfill: TwitterBackfill,
+    twitter_list: TwitterListTimeline,
     twitter: TwitterStream,
     twitter_done: bool,
     sender: Sender,
@@ -56,11 +56,11 @@ where
 
         let core = Core::new(manifest, client).await?;
         let twitter = core.init_twitter().await?;
-        let twitter_backfill = core.init_twitter_backfill()?;
+        let twitter_list = core.init_twitter_list()?;
 
         Ok(App {
             core,
-            twitter_backfill,
+            twitter_list,
             twitter,
             twitter_done: false,
             sender: Sender::new(),
@@ -74,8 +74,8 @@ where
     pub async fn shutdown(&mut self) -> Fallible<()> {
         future::poll_fn(|cx| -> Poll<Fallible<()>> {
             match (
-                self.twitter_backfill
-                    .poll(&mut self.core, &mut self.sender, cx)?,
+                self.twitter_list
+                    .poll_backfill(&mut self.core, &mut self.sender, cx)?,
                 self.sender.poll_done(&self.core, cx)?,
             ) {
                 (Poll::Ready(()), Poll::Ready(())) => Poll::Ready(Ok(())),
@@ -86,18 +86,18 @@ where
     }
 
     pub async fn reset(&mut self) -> Fallible<()> {
-        let twitter_backfill = if self.twitter_done {
+        let twitter_list = if self.twitter_done {
             self.twitter = self.core.init_twitter().await?;
             self.twitter_done = false;
-            self.core.init_twitter_backfill()?
+            self.core.init_twitter_list()?
         } else {
-            TwitterBackfill::empty()
+            TwitterListTimeline::empty()
         };
 
         self.shutdown().await?;
         debug_assert!(!self.sender.has_pending());
 
-        self.twitter_backfill = twitter_backfill;
+        self.twitter_list = twitter_list;
 
         Ok(())
     }
@@ -180,9 +180,11 @@ where
 
         let this = self.get_mut();
 
+        let _ = this.twitter_list.poll(&this.core, &mut this.sender, cx)?;
+
         let _ = this
-            .twitter_backfill
-            .poll(&mut this.core, &mut this.sender, cx)?;
+            .twitter_list
+            .poll_backfill(&mut this.core, &mut this.sender, cx)?;
 
         if let Poll::Ready(result) = this.poll_twitter(cx) {
             return Poll::Ready(result);

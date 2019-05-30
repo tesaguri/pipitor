@@ -19,7 +19,7 @@ use crate::models;
 use crate::twitter::{self, Request as _};
 use crate::Manifest;
 
-use super::TwitterBackfill;
+use super::TwitterListTimeline;
 
 /// An object referenced by `poll`-like methods under `app` module.
 pub struct Core<C> {
@@ -141,27 +141,23 @@ where
         Ok(twitter)
     }
 
-    pub(super) fn init_twitter_backfill(&self) -> Fallible<TwitterBackfill> {
+    pub(super) fn init_twitter_list(&self) -> Fallible<TwitterListTimeline> {
         use crate::schema::last_tweet::dsl::*;
 
         let list = if let Some(list) = self.manifest.twitter.list {
             list
         } else {
-            return Ok(TwitterBackfill::empty());
+            return Ok(TwitterListTimeline::empty());
         };
 
-        let ret = last_tweet
+        let since_id = last_tweet
             .find(&0)
             .select(status_id)
             .first::<i64>(&*self.conn()?)
             .optional()?
-            .filter(|&n| n > 0)
-            .map_or_else(TwitterBackfill::empty, |since_id| {
-                debug!("timeline backfilling enabled");
-                TwitterBackfill::new(list, since_id, self)
-            });
+            .filter(|&n| n > 0);
 
-        Ok(ret)
+        Ok(TwitterListTimeline::new(list, since_id, self))
     }
 }
 
