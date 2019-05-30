@@ -130,8 +130,8 @@ where
             if log_enabled!(log::Level::Trace) {
                 let created_at = snowflake_to_system_time(tweet.id as u64);
                 match SystemTime::now().duration_since(created_at) {
-                    Ok(latency) => debug!("Twitter stream latency: {:.2?}", latency),
-                    Err(e) => debug!("Twitter stream latency: -{:.2?}", e.duration()),
+                    Ok(latency) => trace!("Twitter stream latency: {:.2?}", latency),
+                    Err(e) => trace!("Twitter stream latency: -{:.2?}", e.duration()),
                 }
             }
 
