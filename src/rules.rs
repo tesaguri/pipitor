@@ -37,18 +37,15 @@ pub enum Outbox {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Rule {
     #[serde(default)]
-    filter: Filter,
+    filter: Option<Filter>,
+    #[serde(default)]
+    exclude: Option<Filter>,
     #[serde(deserialize_with = "de_outbox")]
     outbox: SmallVec<[Outbox; 1]>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct Filter {
-    inner: Option<FilterInner>,
-}
-
 #[derive(Clone, Debug)]
-struct FilterInner {
+pub struct Filter {
     title: Regex,
     text: Option<Regex>,
 }
@@ -123,7 +120,10 @@ impl RuleMap {
         self.get(&TopicId::Twitter(tweet.user.id))
             .into_iter()
             .flatten()
-            .filter(move |r| r.filter.matches_tweet(tweet))
+            .filter(move |r| {
+                r.filter.as_ref().map_or(true, |f| f.matches_tweet(tweet))
+                    && r.exclude.as_ref().map_or(true, |e| !e.matches_tweet(tweet))
+            })
             .flat_map(|r| &r.outbox)
     }
 }
@@ -186,19 +186,28 @@ impl<'de> Deserialize<'de> for Outbox {
 }
 
 impl Rule {
-    pub fn new(filter: Filter) -> Self {
+    pub fn new(filter: Option<Filter>, exclude: Option<Filter>) -> Self {
         Rule {
             filter,
+            exclude,
             outbox: SmallVec::new(),
         }
     }
 
-    pub fn filter(&self) -> &Filter {
-        &self.filter
+    pub fn filter(&self) -> Option<&Filter> {
+        self.filter.as_ref()
     }
 
-    pub fn filter_mut(&mut self) -> &mut Filter {
+    pub fn filter_mut(&mut self) -> &mut Option<Filter> {
         &mut self.filter
+    }
+
+    pub fn exclude(&self) -> Option<&Filter> {
+        self.exclude.as_ref()
+    }
+
+    pub fn exclude_mut(&mut self) -> &mut Option<Filter> {
+        &mut self.exclude
     }
 
     pub fn outbox(&self) -> &[Outbox] {
@@ -214,19 +223,15 @@ impl Rule {
 
 impl Filter {
     pub fn from_title(title: Regex) -> Self {
-        Filter {
-            inner: Some(FilterInner { title, text: None }),
-        }
+        Filter { title, text: None }
     }
 
     pub fn matches_tweet(&self, tweet: &Tweet) -> bool {
-        self.inner.as_ref().map_or(true, |inner| {
-            inner.title.is_match(&tweet.text)
-                || inner
-                    .text
-                    .as_ref()
-                    .map_or(false, |t| t.is_match(&tweet.text))
-        })
+        self.title.is_match(&tweet.text)
+            || self
+                .text
+                .as_ref()
+                .map_or(false, |t| t.is_match(&tweet.text))
     }
 }
 
@@ -245,11 +250,9 @@ impl<'de> Deserialize<'de> for Filter {
             },
         }
 
-        Option::<Prototype>::deserialize(d).map(|o| Filter {
-            inner: o.map(|m| match m {
-                Prototype::Title(title) => FilterInner { title, text: None },
-                Prototype::Composite { title, text } => FilterInner { title, text },
-            }),
+        Prototype::deserialize(d).map(|p| match p {
+            Prototype::Title(title) => Filter { title, text: None },
+            Prototype::Composite { title, text } => Filter { title, text },
         })
     }
 }

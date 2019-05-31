@@ -26,3 +26,4 @@ topics = [
     17874544, # @TwitterSupport
 ]
 filter = "(?i)Another filter|This regex is case insensitive"
+exclude = "excluding Tweets that match this regex"
