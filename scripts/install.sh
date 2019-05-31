@@ -36,8 +36,10 @@ main() {
   fi
 
   # Install test dependencies
-  rustup component add rustfmt-preview
-  rustup component add clippy-preview
+  # (Components for Nightly Rust is quite unstable,
+  # so let's comment them out until we move on to Stable)
+  # rustup component add rustfmt-preview
+  # rustup component add clippy-preview
 }
 
 main
