@@ -9,6 +9,8 @@ pub struct Manifest {
     pub database_url: Option<Box<str>>,
     pub rule: RuleMap,
     pub twitter: Twitter,
+    #[serde(skip)]
+    _non_exhaustive: (),
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -17,6 +19,8 @@ pub struct Twitter {
     pub user: i64,
     #[serde(default)]
     pub list: Option<u64>,
+    #[serde(skip)]
+    _non_exhaustive: (),
 }
 
 impl Manifest {
