@@ -9,6 +9,8 @@ pub struct Manifest {
     pub database_url: Option<Box<str>>,
     pub rule: RuleMap,
     pub twitter: Twitter,
+    #[serde(default)]
+    pub skip_duplicate: bool,
     #[serde(skip)]
     _non_exhaustive: (),
 }

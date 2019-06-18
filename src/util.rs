@@ -1,3 +1,8 @@
+use std::marker::Unpin;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use futures::{Future, FutureExt};
 use hyper::client::connect::Connect;
 use serde::{de, Deserialize};
 
@@ -47,6 +52,12 @@ where
     }
 }
 
+/// A future that resolves to `(F::Output, T).
+pub struct ResolveWith<F, T> {
+    future: F,
+    value: Option<T>,
+}
+
 macro_rules! trace_fn {
     (@heading $path:path) => {
         concat!(file!(), ':', line!(), ':', column!(), ' ', stringify!($path));
@@ -60,4 +71,35 @@ macro_rules! trace_fn {
         #[allow(path_statements)] { $path; }
         trace!(concat!(trace_fn!(@heading $path), "; ", $fmt) $($arg)*);
     }};
+}
+
+impl<F, T> ResolveWith<F, T>
+where
+    F: Future + Unpin,
+    T: Unpin,
+{
+    pub fn new(future: F, value: T) -> Self {
+        ResolveWith {
+            future,
+            value: Some(value),
+        }
+    }
+}
+
+impl<F, T> Future for ResolveWith<F, T>
+where
+    F: Future + Unpin,
+    T: Unpin,
+{
+    type Output = (F::Output, T);
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.future.poll_unpin(cx).map(|x| {
+            let y = self
+                .value
+                .take()
+                .expect("polled `ResolveWith` after completion");
+            (x, y)
+        })
+    }
 }
