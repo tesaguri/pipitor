@@ -4,8 +4,6 @@ use std::task::{Context, Poll};
 
 use diesel::prelude::*;
 use failure::Fallible;
-use futures::ready;
-use futures::stream::StreamExt;
 use hyper::client::connect::Connect;
 
 use crate::rules::Outbox;
@@ -90,32 +88,6 @@ impl Sender {
     }
 
     pub fn poll_done<C>(&mut self, core: &Core<C>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
-        self.poll_retweet_queue(core, cx)
-    }
-
-    fn poll_retweet_queue<C>(
-        &mut self,
-        core: &Core<C>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Fallible<()>> {
-        use crate::models::NewTweet;
-        use crate::schema::tweets::dsl::*;
-
-        let mut conn = None;
-        while let Some(retweeted_status) = ready!(self.retweet_queue.queue.poll_next_unpin(cx)?) {
-            let conn = if let Some(ref c) = conn {
-                c
-            } else {
-                conn = Some(core.conn()?);
-                conn.as_ref().unwrap()
-            };
-
-            diesel::replace_into(tweets)
-                .values(&NewTweet::from(&retweeted_status))
-                .execute(&*conn)?;
-            self.retweet_queue.tweet_ids.remove(&retweeted_status.id);
-        }
-
-        Poll::Ready(Ok(()))
+        self.retweet_queue.poll(core, cx)
     }
 }

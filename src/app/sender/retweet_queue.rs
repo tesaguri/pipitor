@@ -2,17 +2,21 @@ use std::collections::HashSet;
 use std::pin::Pin;
 use std::task::Context;
 
+use diesel::prelude::*;
+use failure::Fallible;
 use futures::future::Future;
 use futures::stream::{FuturesUnordered, StreamExt};
-use futures::Poll;
+use futures::{ready, Poll};
 use serde::de;
 
 use crate::twitter;
 
+use super::super::Core;
+
 #[derive(Default)]
 pub struct RetweetQueue {
-    pub queue: FuturesUnordered<PendingRetweets>,
-    pub tweet_ids: HashSet<i64>,
+    queue: FuturesUnordered<PendingRetweets>,
+    tweet_ids: HashSet<i64>,
 }
 
 pub struct PendingRetweets {
@@ -21,6 +25,28 @@ pub struct PendingRetweets {
 }
 
 impl RetweetQueue {
+    pub fn poll<C>(&mut self, core: &Core<C>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
+        use crate::models::NewTweet;
+        use crate::schema::tweets::dsl::*;
+
+        let mut conn = None;
+        while let Some(retweeted_status) = ready!(self.queue.poll_next_unpin(cx)?) {
+            let conn = if let Some(ref c) = conn {
+                c
+            } else {
+                conn = Some(core.conn()?);
+                conn.as_ref().unwrap()
+            };
+
+            diesel::replace_into(tweets)
+                .values(&NewTweet::from(&retweeted_status))
+                .execute(&*conn)?;
+            self.tweet_ids.remove(&retweeted_status.id);
+        }
+
+        Poll::Ready(Ok(()))
+    }
+
     pub fn contains(&self, tweet_id: i64) -> bool {
         self.tweet_ids.contains(&tweet_id)
     }
