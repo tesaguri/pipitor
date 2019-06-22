@@ -26,7 +26,7 @@ pub struct Core<C> {
     manifest: Manifest,
     pool: Pool<ConnectionManager<SqliteConnection>>,
     client: Client<C>,
-    twitter_tokens: HashMap<i64, twitter::Credentials<Box<str>>>,
+    pub(super) twitter_tokens: HashMap<i64, twitter::Credentials<Box<str>>>,
     twitter_dump: Option<BufWriter<File>>,
 }
 
@@ -76,9 +76,7 @@ where
                         }
                     }
 
-                    Err(failure::err_msg(
-                        "not all Twitter users are authorized; please run `pipitor twitter-login`",
-                    ))
+                    Err(super::unauthorized())
                 })
             })
             .collect::<Fallible<_>>()?;
@@ -172,6 +170,10 @@ impl<C> Core<C> {
 
     pub fn database_pool(&self) -> &Pool<ConnectionManager<SqliteConnection>> {
         &self.pool
+    }
+
+    pub fn database_pool_mut(&mut self) -> &mut Pool<ConnectionManager<SqliteConnection>> {
+        &mut self.pool
     }
 
     pub fn http_client(&self) -> &Client<C> {

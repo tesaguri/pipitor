@@ -2,23 +2,26 @@ mod core;
 mod sender;
 mod twitter_list_timeline;
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, Write};
+use std::mem;
 use std::pin::Pin;
 use std::task::Context;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
 use futures::compat::Stream01CompatExt;
-use futures::future::{self, Future};
-use futures::stream::StreamExt;
-use futures::Poll;
+use futures::future;
+use futures::{Future, Poll, StreamExt};
 use hyper::client::connect::Connect;
 use hyper::Client;
 use twitter_stream::TwitterStream;
 
+use crate::models;
 use crate::rules::TopicId;
 use crate::twitter;
 use crate::util::Maybe;
@@ -100,6 +103,100 @@ where
         self.twitter_list = twitter_list;
 
         Ok(())
+    }
+
+    /// Replaces the `App`'s manifest.
+    ///
+    /// Unlike `manifest_mut`, this method takes care of keeping the `App`'s state
+    /// consistent with the new manifest.
+    ///
+    /// Returns the old `Manifest` if successful,
+    /// or a tuple of an error value and `manifest` otherwise.
+    pub async fn replace_manifest(
+        &mut self,
+        manifest: Manifest,
+    ) -> Result<Manifest, (failure::Error, Manifest)> {
+        // Store the old field values so that the fields can be rolledback in case of an error.
+        let old_pool = if manifest.database_url != self.manifest().database_url {
+            let pool = match Pool::new(ConnectionManager::new(manifest.database_url()))
+                .context("failed to initialize the connection pool")
+            {
+                Ok(pool) => pool,
+                Err(e) => return Err((e.into(), manifest)),
+            };
+            Some(mem::replace(self.core.database_pool_mut(), pool))
+        } else {
+            None
+        };
+        let old = mem::replace(self.manifest_mut(), manifest);
+
+        let catch = async {
+            let new = self.manifest();
+            let conn = self.core.conn()?;
+
+            let unauthed_users = new
+                .rule
+                .twitter_outboxes()
+                .chain(Some(new.twitter.user))
+                .filter(|user| !self.core.twitter_tokens.contains_key(&user))
+                // Make the values unique so that the later `_.len() != _.len()`
+                // comparison makes sense.
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+
+            let tokens: Vec<models::TwitterToken> = {
+                use crate::schema::twitter_tokens::dsl::*;
+
+                twitter_tokens
+                    .filter(id.eq_any(&unauthed_users))
+                    .load(&*conn)?
+            };
+
+            if unauthed_users.len() != tokens.len() {
+                return Err(unauthorized());
+            }
+
+            self.core
+                .twitter_tokens
+                .extend(tokens.into_iter().map(|token| (token.id, token.into())));
+
+            // Make borrowck happy
+            let new = self.manifest();
+
+            if new.twitter.client.key != old.twitter.client.key
+                || new.twitter.user != old.twitter.user
+                || new
+                    .rule
+                    .twitter_topics()
+                    .any(|user| !old.rule.contains_topic(&TopicId::Twitter(user)))
+            {
+                let twitter = self.core.init_twitter().await?;
+                let twitter_list = self.core.init_twitter_list()?;
+                self.twitter = twitter;
+                self.twitter_list = twitter_list;
+                self.twitter_done = false;
+            }
+
+            Ok(())
+        }
+            .await;
+
+        match catch {
+            Ok(()) => Ok(old),
+            Err(e) => {
+                let manifest = mem::replace(self.manifest_mut(), old);
+                if let Some(pool) = old_pool {
+                    *self.core.database_pool_mut() = pool;
+                }
+
+                // We could remove the tokens added above from `self.core.twitter_tokens`,
+                // but we don't do that because, in case of an error, the caller is typically
+                // expected to retry later and reuse the tokens, or just drop the `App`.
+
+                Err((e, manifest))
+            }
+        }
     }
 
     fn poll_twitter(&mut self, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
@@ -204,4 +301,8 @@ fn snowflake_to_system_time(id: u64) -> SystemTime {
         (snowflake_time_ms as u32 % 1_000 + 657) * 1_000 * 1_000,
     );
     UNIX_EPOCH + timestamp
+}
+
+fn unauthorized() -> failure::Error {
+    failure::err_msg("not all Twitter users are authorized; please run `pipitor twitter-login`")
 }
