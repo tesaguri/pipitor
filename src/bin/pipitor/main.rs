@@ -9,6 +9,7 @@ extern crate log;
 embed_migrations!();
 
 mod common;
+mod ctl;
 mod migration;
 mod run;
 mod setup;
@@ -38,6 +39,8 @@ pub struct Opt {
 
 #[derive(StructOpt)]
 enum Cmd {
+    #[structopt(name = "ctl", about = "Controls a currently running Pipitor instance")]
+    Ctl(ctl::Opt),
     #[structopt(name = "migration", about = "Run database migrations")]
     Migration(migration::Opt),
     #[structopt(name = "run", about = "Start running the bot")]
@@ -65,6 +68,7 @@ async fn run() -> Fallible<()> {
     let Args { opt, cmd } = Args::from_args();
 
     match cmd {
+        Cmd::Ctl(subopt) => ctl::main(&opt, subopt).await,
         Cmd::Migration(subopt) => migration::main(&opt, subopt),
         Cmd::Run(subopt) => run::main(&opt, subopt).await,
         Cmd::Setup(subopt) => setup::main(&opt, subopt).await,

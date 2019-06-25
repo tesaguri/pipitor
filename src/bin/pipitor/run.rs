@@ -36,14 +36,19 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
     let (signal, app) = (quit_signal(), App::new(manifest));
 
     let ipc_path = ipc_path(manifest_path);
-    let mut ipc = ipc_server(&ipc_path)
-        .with_context(|_| format!("failed to create an IPC socket at {:?}", ipc_path))
-        .map(|ipc| ipc.left_stream())
-        .unwrap_or_else(|e| {
+    let _ipc_guard;
+    let mut ipc = match ipc_server(&ipc_path) {
+        Ok(ipc) => {
+            _ipc_guard = RmGuard(&ipc_path);
+            ipc.left_stream()
+        }
+        Err(e) => {
+            let e = e.context(format!("failed to create an IPC socket at {:?}", ipc_path));
             error!("{}", DisplayFailChain(&e));
             stream::empty().right_stream()
-        })
-        .fuse();
+        }
+    }
+    .fuse();
 
     let (signal, app) = join!(signal, app);
     let mut signal = signal.unwrap().fuse();

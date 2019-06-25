@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 pub struct DisplayFailChain<'a, F>(pub &'a F);
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub enum IpcRequest {
     #[serde(rename = "reload")]
     Reload {},
@@ -23,14 +23,14 @@ pub enum IpcRequest {
     Shutdown {},
 }
 
-#[derive(Default, Serialize)]
+#[derive(Debug, Default, Deserialize, Fail, Serialize)]
 pub struct IpcResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     pub code: IpcResponseCode,
 }
 
-#[derive(PartialEq, Eq, Serialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum IpcResponseCode {
     #[serde(rename = "SUCCESS")]
     Success,
@@ -39,6 +39,8 @@ pub enum IpcResponseCode {
     #[serde(rename = "REQUEST_UNRECOGNIZED")]
     RequestUnrecognized,
 }
+
+pub struct RmGuard<'a>(pub &'a Path);
 
 impl<'a, F: AsFail> Display for DisplayFailChain<'a, F> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -75,11 +77,45 @@ impl IpcResponse {
             message: message.into(),
         }
     }
+
+    pub fn result(self) -> Result<Self, Self> {
+        if let IpcResponseCode::Success = self.code {
+            Ok(self)
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl Display for IpcResponse {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if let Some(ref msg) = self.message {
+            f.write_str(msg)
+        } else {
+            f.write_str(self.code.as_str())
+        }
+    }
+}
+
+impl IpcResponseCode {
+    pub fn as_str(&self) -> &'static str {
+        match *self {
+            IpcResponseCode::Success => "SUCCESS",
+            IpcResponseCode::InternalError => "INTERNAL_ERROR",
+            IpcResponseCode::RequestUnrecognized => "REQUEST_UNRECOGNIZED",
+        }
+    }
 }
 
 impl Default for IpcResponseCode {
     fn default() -> Self {
         IpcResponseCode::Success
+    }
+}
+
+impl Drop for RmGuard<'_> {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(self.0);
     }
 }
 
@@ -175,10 +211,13 @@ mod imp {
     use std::io;
     use std::marker::Unpin;
     use std::path::Path;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
 
-    use futures::compat::Future01CompatExt;
+    use futures::compat::{Compat01As03, Future01CompatExt};
+    use futures::future::{self, Future};
     use futures::stream::{self, Stream};
-    use futures::{AsyncRead, Future};
+    use futures::{AsyncRead, AsyncWrite};
     use tokio_signal::windows::Event;
 
     pub fn ipc_server<P>(
