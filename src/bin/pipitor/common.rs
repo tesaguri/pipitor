@@ -223,15 +223,12 @@ mod imp {
 #[cfg(windows)]
 mod imp {
     use std::io;
-    use std::marker::Unpin;
     use std::path::Path;
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
 
-    use futures::compat::{Compat01As03, Future01CompatExt};
+    use futures::compat::Future01CompatExt;
     use futures::future::{self, Future};
     use futures::stream::{self, Stream};
-    use futures::{AsyncRead, AsyncWrite};
+    use futures::AsyncWrite;
     use tokio_signal::windows::Event;
 
     pub fn ipc_server<P>(
@@ -246,7 +243,8 @@ mod imp {
     }
 
     pub async fn quit_signal() -> io::Result<impl Future<Output = ()>> {
-        let (cc, cb) = future::try_join(Event::ctrl_c().compat(), Event::ctrl_break().compat())?;
+        let (cc, cb) =
+            future::try_join(Event::ctrl_c().compat(), Event::ctrl_break().compat()).await?;
         Ok(super::merge_select(super::first(cc), super::first(cb)))
     }
 }
