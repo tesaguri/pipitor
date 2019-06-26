@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use failure::{Fail, Fallible, ResultExt};
 use fs2::FileExt;
 use futures::{future, stream};
-use futures::{join, AsyncWriteExt, FutureExt, StreamExt, TryFutureExt};
+use futures::{AsyncWriteExt, FutureExt, StreamExt, TryFutureExt};
 use pipitor::App;
 
 use crate::common::*;
@@ -21,17 +21,10 @@ pub struct Opt {
 pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
     let manifest = open_manifest(opt)?;
 
-    let manifest_path: &Path = opt
-        .manifest_path
-        .as_ref()
-        .map(|s| &**s)
-        .unwrap_or("Pipitor.toml")
-        .as_ref();
+    let manifest_path: &Path = opt.manifest_path();
     let lock = File::open(manifest_path)?;
-    match lock.try_lock_exclusive() {
-        Ok(()) => {}
-        Err(e) => return Err(e.context("failed to acquire a file lock").into()),
-    }
+    lock.try_lock_exclusive()
+        .context("failed to acquire a file lock")?;
 
     let (signal, app) = (quit_signal(), App::new(manifest));
 
@@ -50,7 +43,7 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
     }
     .fuse();
 
-    let (signal, app) = join!(signal, app);
+    let (signal, app) = future::join(signal, app).await;
     let mut signal = signal.unwrap().fuse();
     let mut app = app.context("failed to initialize the application")?;
 

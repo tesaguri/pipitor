@@ -1,9 +1,7 @@
-use std::env;
 use std::ffi::OsString;
 use std::fmt::{self, Debug, Display, Formatter};
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
+use std::{env, fs, io};
 
 use failure::{AsFail, Fail, Fallible, ResultExt};
 use futures::compat::Stream01CompatExt;
@@ -38,6 +36,12 @@ pub enum IpcResponseCode {
     InternalError,
     #[serde(rename = "REQUEST_UNRECOGNIZED")]
     RequestUnrecognized,
+}
+
+#[derive(structopt::StructOpt)]
+pub struct Opt {
+    #[structopt(long = "manifest-path", help = "Path to Pipitor.toml")]
+    manifest_path: Option<String>,
 }
 
 pub struct RmGuard<'a>(pub &'a Path);
@@ -113,6 +117,15 @@ impl Default for IpcResponseCode {
     }
 }
 
+impl Opt {
+    pub fn manifest_path(&self) -> &Path {
+        self.manifest_path
+            .as_ref()
+            .map(AsRef::as_ref)
+            .unwrap_or("Pipitor.toml".as_ref())
+    }
+}
+
 impl Drop for RmGuard<'_> {
     fn drop(&mut self) {
         let _ = fs::remove_file(self.0);
@@ -132,7 +145,7 @@ fn ipc_path_(manifest_path: &Path) -> PathBuf {
     manifest_path.with_file_name(sock)
 }
 
-pub fn open_manifest(opt: &crate::Opt) -> Fallible<Manifest> {
+pub fn open_manifest(opt: &Opt) -> Fallible<Manifest> {
     let manifest = if let Some(ref manifest_path) = opt.manifest_path {
         let manifest = match fs::read(manifest_path) {
             Ok(f) => f,
@@ -173,6 +186,7 @@ mod imp {
     use std::path::Path;
 
     use futures::compat::{AsyncWrite01CompatExt, Future01CompatExt, Stream01CompatExt};
+    use futures::future;
     use futures::{AsyncWrite, Future, Stream, TryStreamExt};
     use tokio_signal::unix::{
         libc::{SIGINT, SIGTERM},
@@ -200,8 +214,8 @@ mod imp {
     }
 
     pub async fn quit_signal() -> io::Result<impl Future<Output = ()>> {
-        let (int, term) = (Signal::new(SIGINT).compat(), Signal::new(SIGTERM).compat());
-        let (int, term) = futures::try_join!(int, term)?;
+        let (int, term) =
+            future::try_join(Signal::new(SIGINT).compat(), Signal::new(SIGTERM).compat()).await?;
         Ok(super::merge_select(super::first(int), super::first(term)))
     }
 }
@@ -232,8 +246,7 @@ mod imp {
     }
 
     pub async fn quit_signal() -> io::Result<impl Future<Output = ()>> {
-        let (cc, cb) = (Event::ctrl_c().compat(), Event::ctrl_break().compat());
-        let (cc, cb) = futures::try_join!(cc, cb)?;
+        let (cc, cb) = future::try_join(Event::ctrl_c().compat(), Event::ctrl_break().compat())?;
         Ok(super::merge_select(super::first(cc), super::first(cb)))
     }
 }

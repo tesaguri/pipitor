@@ -18,7 +18,7 @@ mod twitter_login;
 
 use std::process;
 
-use common::DisplayFailChain;
+use common::{DisplayFailChain, Opt};
 use failure::Fallible;
 use structopt::StructOpt;
 
@@ -29,12 +29,6 @@ struct Args {
     opt: Opt,
     #[structopt(subcommand)]
     cmd: Cmd,
-}
-
-#[derive(StructOpt)]
-pub struct Opt {
-    #[structopt(long = "manifest-path", help = "Path to Pipitor.toml")]
-    manifest_path: Option<String>,
 }
 
 #[derive(StructOpt)]

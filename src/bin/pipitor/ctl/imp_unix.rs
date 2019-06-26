@@ -10,11 +10,7 @@ use crate::common::{ipc_path, IpcRequest, IpcResponse};
 use super::*;
 
 pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
-    let manifest_path = opt
-        .manifest_path
-        .as_ref()
-        .map(|s| &**s)
-        .unwrap_or("Pipitor.toml");
+    let manifest_path = opt.manifest_path();
     let ipc_path = ipc_path(&manifest_path);
     let ipc = UnixStream::connect(&ipc_path).compat();
 
