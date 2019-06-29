@@ -18,7 +18,7 @@ pub struct Opt {
     twitter_dump: Option<PathBuf>,
 }
 
-pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
+pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
     let manifest = open_manifest(opt)?;
 
     let manifest_path: &Path = opt.manifest_path();
@@ -26,24 +26,31 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
     lock.try_lock_exclusive()
         .context("failed to acquire a file lock")?;
 
-    let (signal, app) = (quit_signal(), App::new(manifest));
+    let mut runtime = tokio::runtime::Runtime::new().context("failed to start a Tokio runtime")?;
 
     let ipc_path = ipc_path(manifest_path);
-    let _ipc_guard;
-    let mut ipc = match ipc_server(&ipc_path) {
-        Ok(ipc) => {
-            _ipc_guard = RmGuard(&ipc_path);
-            ipc.left_stream()
-        }
-        Err(e) => {
-            let e = e.context(format!("failed to create an IPC socket at {:?}", ipc_path));
-            error!("{}", DisplayFailChain(&e));
-            stream::empty().right_stream()
-        }
-    }
-    .fuse();
+    let ((mut ipc, _guard), (signal, app)) = runtime
+        .block_on(
+            future::lazy(move |_| {
+                let (signal, app) = (quit_signal(), App::new(manifest));
 
-    let (signal, app) = future::join(signal, app).await;
+                let x = match ipc_server(&ipc_path) {
+                    Ok(ipc) => (ipc.left_stream().fuse(), Some(RmGuard(ipc_path))),
+                    Err(e) => {
+                        let e =
+                            e.context(format!("failed to create an IPC socket at {:?}", ipc_path));
+                        error!("{}", DisplayFailChain(&e));
+                        (stream::empty().right_stream().fuse(), None)
+                    }
+                };
+
+                future::join(signal, app).map(|y| (x, y)).unit_error()
+            })
+            .flatten()
+            .boxed()
+            .compat(),
+        )
+        .unwrap();
     let mut signal = signal.unwrap().fuse();
     let mut app = app.context("failed to initialize the application")?;
 
@@ -61,7 +68,8 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
 
     info!("initialized the application");
 
-    loop {
+    let opt = opt.clone();
+    runtime.block_on(async move { loop {
         let mut app_fuse = (&mut app).fuse();
         futures::select! {
             result = app_fuse => {
@@ -123,7 +131,7 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
                 match req {
                     IpcRequest::Reload {} => {
                         info!("reloading the manifest");
-                        future::ready(open_manifest(opt))
+                        future::ready(open_manifest(&opt))
                             .and_then(|manifest| app.replace_manifest(manifest).map_err(|(e, _)| e))
                             .or_else(|e| {
                                 res = json::to_vec(&IpcResponse::new(
@@ -161,5 +169,5 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
                 }
             }
         }
-    }
+    }}.boxed().compat())
 }

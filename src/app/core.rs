@@ -9,6 +9,7 @@ use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
 use futures::compat::Future01CompatExt;
 use futures::stream::{FuturesUnordered, TryStreamExt};
+use futures::{Future, FutureExt};
 use hyper::client::connect::Connect;
 use hyper::Client;
 use hyper::StatusCode;
@@ -108,7 +109,7 @@ where
         })
     }
 
-    pub async fn init_twitter(&self) -> Fallible<TwitterStream> {
+    pub fn init_twitter(&self) -> impl Future<Output = Fallible<TwitterStream>> {
         trace_fn!(Core::<C>::init_twitter);
 
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
@@ -129,14 +130,11 @@ where
         twitter_topics.sort();
         twitter_topics.dedup();
 
-        let twitter = TwitterStreamBuilder::filter(stream_token)
+        TwitterStreamBuilder::filter(stream_token)
             .follow(&*twitter_topics)
             .listen_with_client(&self.client)
             .compat()
-            .await
-            .context("error while connecting to Twitter's Streaming API")?;
-
-        Ok(twitter)
+            .map(|result| Ok(result.context("error while connecting to Twitter's Streaming API")?))
     }
 
     pub(super) fn init_twitter_list(&self) -> Fallible<TwitterListTimeline> {

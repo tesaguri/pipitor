@@ -38,13 +38,13 @@ pub enum IpcResponseCode {
     RequestUnrecognized,
 }
 
-#[derive(structopt::StructOpt)]
+#[derive(Clone, structopt::StructOpt)]
 pub struct Opt {
     #[structopt(long = "manifest-path", help = "Path to Pipitor.toml")]
     manifest_path: Option<String>,
 }
 
-pub struct RmGuard<'a>(pub &'a Path);
+pub struct RmGuard<P: AsRef<Path>>(pub P);
 
 impl<'a, F: AsFail> Display for DisplayFailChain<'a, F> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -126,9 +126,9 @@ impl Opt {
     }
 }
 
-impl Drop for RmGuard<'_> {
+impl<P: AsRef<Path>> Drop for RmGuard<P> {
     fn drop(&mut self) {
-        let _ = fs::remove_file(self.0);
+        let _ = fs::remove_file(&self.0);
     }
 }
 
@@ -187,7 +187,7 @@ mod imp {
 
     use futures::compat::{AsyncWrite01CompatExt, Future01CompatExt, Stream01CompatExt};
     use futures::future;
-    use futures::{AsyncWrite, Future, Stream, TryStreamExt};
+    use futures::{AsyncWrite, Future, Stream, TryFutureExt, TryStreamExt};
     use tokio_signal::unix::{
         libc::{SIGINT, SIGTERM},
         Signal,
@@ -195,7 +195,7 @@ mod imp {
     use tokio_uds::UnixListener;
 
     pub fn ipc_server<P>(
-        path: P,
+        path: &P,
     ) -> io::Result<impl Stream<Item = io::Result<(Vec<u8>, impl AsyncWrite)>>>
     where
         P: AsRef<Path>,
@@ -213,10 +213,9 @@ mod imp {
             .map_ok(|(a, buf)| (buf, a.compat())))
     }
 
-    pub async fn quit_signal() -> io::Result<impl Future<Output = ()>> {
-        let (int, term) =
-            future::try_join(Signal::new(SIGINT).compat(), Signal::new(SIGTERM).compat()).await?;
-        Ok(super::merge_select(super::first(int), super::first(term)))
+    pub fn quit_signal() -> impl Future<Output = io::Result<impl Future<Output = ()>>> {
+        future::try_join(Signal::new(SIGINT).compat(), Signal::new(SIGTERM).compat())
+            .map_ok(|(int, term)| super::merge_select(super::first(int), super::first(term)))
     }
 }
 
@@ -226,13 +225,12 @@ mod imp {
     use std::path::Path;
 
     use futures::compat::Future01CompatExt;
-    use futures::future::{self, Future};
-    use futures::stream::{self, Stream};
-    use futures::AsyncWrite;
+    use futures::{future, stream};
+    use futures::{AsyncWrite, Future, Stream, TryFutureExt};
     use tokio_signal::windows::Event;
 
     pub fn ipc_server<P>(
-        _: P,
+        _: &P,
     ) -> io::Result<impl Stream<Item = io::Result<(Vec<u8>, impl AsyncWrite)>>>
     where
         P: AsRef<Path>,
@@ -242,10 +240,9 @@ mod imp {
         Ok(stream::empty::<io::Result<(_, Vec<u8>)>>())
     }
 
-    pub async fn quit_signal() -> io::Result<impl Future<Output = ()>> {
-        let (cc, cb) =
-            future::try_join(Event::ctrl_c().compat(), Event::ctrl_break().compat()).await?;
-        Ok(super::merge_select(super::first(cc), super::first(cb)))
+    pub fn quit_signal() -> impl Future<Output = io::Result<impl Future<Output = ()>>> {
+        future::try_join(Event::ctrl_c().compat(), Event::ctrl_break().compat())
+            .map_ok(|(cc, cb)| super::merge_select(super::first(cc), super::first(cb)))
     }
 }
 

@@ -18,9 +18,11 @@ mod twitter_login;
 
 use std::process;
 
-use common::{DisplayFailChain, Opt};
 use failure::Fallible;
+use futures::{FutureExt, TryFutureExt};
 use structopt::StructOpt;
+
+use common::{DisplayFailChain, Opt};
 
 #[derive(StructOpt)]
 #[structopt(author = "")]
@@ -47,26 +49,34 @@ enum Cmd {
     TwitterLogin(twitter_login::Opt),
 }
 
-#[runtime::main(runtime_tokio::Tokio)]
-async fn main() {
+fn main() {
     env_logger::init();
 
-    if let Err(e) = run().await {
+    if let Err(e) = run() {
         error!("{}", DisplayFailChain(&e));
         info!("exiting abnormally");
         process::exit(1);
     }
 }
 
-async fn run() -> Fallible<()> {
+fn run() -> Fallible<()> {
     let Args { opt, cmd } = Args::from_args();
 
     match cmd {
-        Cmd::Ctl(subopt) => ctl::main(&opt, subopt).await,
         Cmd::Migration(subopt) => migration::main(&opt, subopt),
-        Cmd::Run(subopt) => run::main(&opt, subopt).await,
-        Cmd::Setup(subopt) => setup::main(&opt, subopt).await,
-        Cmd::TwitterListSync(subopt) => twitter_list_sync::main(&opt, subopt).await,
-        Cmd::TwitterLogin(subopt) => twitter_login::main(&opt, subopt).await,
+        Cmd::Run(subopt) => run::main(&opt, subopt),
+        cmd => tokio::runtime::Runtime::new()?.block_on(
+            async move {
+                match cmd {
+                    Cmd::Ctl(subopt) => ctl::main(&opt, subopt).await,
+                    Cmd::Setup(subopt) => setup::main(&opt, subopt).await,
+                    Cmd::TwitterListSync(subopt) => twitter_list_sync::main(&opt, subopt).await,
+                    Cmd::TwitterLogin(subopt) => twitter_login::main(&opt, subopt).await,
+                    Cmd::Migration(_) | Cmd::Run(_) => unreachable!(),
+                }
+            }
+                .boxed()
+                .compat(),
+        ),
     }
 }

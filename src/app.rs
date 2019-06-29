@@ -74,8 +74,8 @@ where
         self.core.set_twitter_dump(twitter_dump)
     }
 
-    pub async fn shutdown(&mut self) -> Fallible<()> {
-        future::poll_fn(|cx| -> Poll<Fallible<()>> {
+    pub fn shutdown<'a>(&'a mut self) -> impl Future<Output = Fallible<()>> + 'a {
+        future::poll_fn(move |cx| {
             match (
                 self.twitter_list
                     .poll_backfill(&mut self.core, &mut self.sender, cx)?,
@@ -85,7 +85,6 @@ where
                 _ => Poll::Pending,
             }
         })
-        .await
     }
 
     pub async fn reset(&mut self) -> Fallible<()> {
