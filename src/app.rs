@@ -15,7 +15,7 @@ use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
 use futures::compat::Stream01CompatExt;
 use futures::future;
-use futures::{Future, Poll, StreamExt};
+use futures::{Future, Poll, StreamExt, TryFutureExt};
 use hyper::client::connect::Connect;
 use hyper::Client;
 use twitter_stream::TwitterStream;
@@ -39,10 +39,13 @@ pub struct App<C> {
 
 #[cfg(feature = "native-tls")]
 impl App<hyper_tls::HttpsConnector<hyper::client::HttpConnector>> {
-    pub async fn new(manifest: Manifest) -> Fallible<Self> {
-        let conn = hyper_tls::HttpsConnector::new(4).context("failed to initialize TLS client")?;
-        let client = Client::builder().build(conn);
-        Self::with_http_client(client, manifest).await
+    pub fn new(manifest: Manifest) -> impl Future<Output = Fallible<Self>> {
+        future::ready(hyper_tls::HttpsConnector::new(4).context("failed to initialize TLS client"))
+            .map_err(Into::into)
+            .and_then(|conn| {
+                let client = Client::builder().build(conn);
+                Self::with_http_client(client, manifest)
+            })
     }
 }
 
@@ -52,19 +55,21 @@ where
     C::Transport: 'static,
     C::Future: 'static,
 {
-    pub async fn with_http_client(client: Client<C>, manifest: Manifest) -> Fallible<Self> {
+    pub fn with_http_client(
+        client: Client<C>,
+        manifest: Manifest,
+    ) -> impl Future<Output = Fallible<Self>> {
         trace_fn!(App::<C>::with_http_client);
-
-        let core = Core::new(manifest, client)?;
-        let twitter = core.init_twitter().await?;
-        let twitter_list = core.init_twitter_list()?;
-
-        Ok(App {
-            core,
-            twitter_list,
-            twitter,
-            twitter_done: false,
-            sender: Sender::new(),
+        future::ready(Core::new(manifest, client)).and_then(|core| {
+            core.init_twitter().and_then(|twitter| {
+                future::ready(core.init_twitter_list()).map_ok(|twitter_list| App {
+                    core,
+                    twitter_list,
+                    twitter,
+                    twitter_done: false,
+                    sender: Sender::new(),
+                })
+            })
         })
     }
 

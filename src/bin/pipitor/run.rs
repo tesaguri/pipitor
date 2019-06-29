@@ -47,7 +47,6 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
                 future::join(signal, app).map(|y| (x, y)).unit_error()
             })
             .flatten()
-            .boxed()
             .compat(),
         )
         .unwrap();
