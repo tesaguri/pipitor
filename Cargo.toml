@@ -30,7 +30,6 @@ futures-preview = { version = "0.3.0-alpha.16", features = ["async-await", "io-c
 futures-util-preview = "0.3.0-alpha.16"
 futures01 = { version = "0.1", package = "futures" }
 hyper = "0.12"
-itertools = "0.8"
 json = { version = "1", package = "serde_json" }
 log = "0.4.6"
 oauth1 = { version = "0.2.1", package = "oauth1-request" }

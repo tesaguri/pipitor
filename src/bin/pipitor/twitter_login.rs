@@ -11,7 +11,6 @@ use futures::stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt};
 use hyper::client::Client;
 use hyper::StatusCode;
 use hyper_tls::HttpsConnector;
-use itertools::Itertools;
 use pipitor::models;
 use pipitor::twitter::{self, Request as _};
 
@@ -34,8 +33,9 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         .rule
         .twitter_outboxes()
         .chain(Some(manifest.twitter.user))
-        .unique()
-        .map(|user| {
+        .collect::<HashSet<_>>()
+        .iter()
+        .map(|&user| {
             let token = twitter_tokens
                 .find(&user)
                 .get_result::<models::TwitterToken>(&*pool.get()?)

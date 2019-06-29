@@ -3,7 +3,6 @@ pub(crate) mod core;
 mod sender;
 mod twitter_list_timeline;
 
-use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, Write};
 use std::mem;
@@ -11,7 +10,6 @@ use std::pin::Pin;
 use std::task::Context;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
@@ -22,7 +20,6 @@ use hyper::client::connect::Connect;
 use hyper::Client;
 use twitter_stream::TwitterStream;
 
-use crate::models;
 use crate::rules::TopicId;
 use crate::twitter;
 use crate::util::Maybe;
@@ -58,7 +55,7 @@ where
     pub async fn with_http_client(client: Client<C>, manifest: Manifest) -> Fallible<Self> {
         trace_fn!(App::<C>::with_http_client);
 
-        let core = Core::new(manifest, client).await?;
+        let core = Core::new(manifest, client)?;
         let twitter = core.init_twitter().await?;
         let twitter_list = core.init_twitter_list()?;
 
@@ -164,39 +161,11 @@ where
 
         let catch = async {
             let this = &mut guard.this;
+
+            this.core.load_twitter_tokens()?;
+
             let new = this.manifest();
-            let conn = this.core.conn()?;
-
-            let unauthed_users = new
-                .rule
-                .twitter_outboxes()
-                .chain(Some(new.twitter.user))
-                .filter(|user| !this.core.twitter_tokens.contains_key(&user))
-                // Make the values unique so that the later `_.len() != _.len()`
-                // comparison makes sense.
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>();
-
-            let tokens: Vec<models::TwitterToken> = {
-                use crate::schema::twitter_tokens::dsl::*;
-
-                twitter_tokens
-                    .filter(id.eq_any(&unauthed_users))
-                    .load(&*conn)?
-            };
-
-            if unauthed_users.len() != tokens.len() {
-                return Err(unauthorized());
-            }
-
-            this.core
-                .twitter_tokens
-                .extend(tokens.into_iter().map(|token| (token.id, token.into())));
-
-            let new = this.manifest(); // Make borrowck happy
             let old = guard.old.as_ref().unwrap();
-
             if new.twitter.client.key != old.twitter.client.key
                 || new.twitter.user != old.twitter.user
                 || new
@@ -331,8 +300,4 @@ fn snowflake_to_system_time(id: u64) -> SystemTime {
         (snowflake_time_ms as u32 % 1_000 + 657) * 1_000 * 1_000,
     );
     UNIX_EPOCH + timestamp
-}
-
-fn unauthorized() -> failure::Error {
-    failure::err_msg("not all Twitter users are authorized; please run `pipitor twitter-login`")
 }

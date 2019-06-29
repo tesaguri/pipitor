@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 
@@ -8,16 +8,13 @@ use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
 use futures::compat::Future01CompatExt;
-use futures::stream::{FuturesUnordered, TryStreamExt};
 use futures::{Future, FutureExt};
 use hyper::client::connect::Connect;
 use hyper::Client;
-use hyper::StatusCode;
-use itertools::Itertools;
 use twitter_stream::{TwitterStream, TwitterStreamBuilder};
 
 use crate::models;
-use crate::twitter::{self, Request as _};
+use crate::twitter;
 use crate::Manifest;
 
 use super::TwitterListTimeline;
@@ -37,50 +34,11 @@ where
     C::Transport: 'static,
     C::Future: 'static,
 {
-    pub async fn new(manifest: Manifest, client: Client<C>) -> Fallible<Self> {
+    pub fn new(manifest: Manifest, client: Client<C>) -> Fallible<Self> {
         trace_fn!(Core::<C>::new);
 
         let pool = Pool::new(ConnectionManager::new(manifest.database_url()))
             .context("failed to initialize the connection pool")?;
-
-        let twitter_tokens: FuturesUnordered<_> = manifest
-            .rule
-            .twitter_outboxes()
-            .chain(Some(manifest.twitter.user))
-            .unique()
-            .map(|user| {
-                use crate::schema::twitter_tokens::dsl::*;
-
-                let token = twitter_tokens
-                    .find(&user)
-                    .get_result::<models::TwitterToken>(&*pool.get()?)
-                    .optional()
-                    .context("failed to load tokens from the database")?;
-
-                // Make borrowck happy
-                let (manifest, client) = (&manifest, &client);
-                Ok(async move {
-                    if let Some(token) = token {
-                        match twitter::account::VerifyCredentials::new()
-                            .send(manifest.twitter.client.as_ref(), (&token).into(), client)
-                            .await
-                        {
-                            Ok(_) => return Ok((user, token.into())),
-                            Err(twitter::Error::Twitter(ref e))
-                                if e.status == StatusCode::UNAUTHORIZED => {}
-                            Err(e) => {
-                                return Err(e)
-                                    .context("error while verifying Twitter credentials")
-                                    .map_err(Into::into)
-                                    as Fallible<_>;
-                            }
-                        }
-                    }
-
-                    Err(super::unauthorized())
-                })
-            })
-            .collect::<Fallible<_>>()?;
 
         {
             use crate::schema::last_tweet::dsl::*;
@@ -98,15 +56,17 @@ where
                 })?;
         }
 
-        let twitter_tokens = twitter_tokens.try_collect().await?;
-
-        Ok(Core {
+        let mut ret = Core {
             manifest,
             pool,
             client,
-            twitter_tokens,
+            twitter_tokens: HashMap::new(),
             twitter_dump: None,
-        })
+        };
+
+        ret.load_twitter_tokens()?;
+
+        Ok(ret)
     }
 
     pub fn init_twitter(&self) -> impl Future<Output = Fallible<TwitterStream>> {
@@ -154,6 +114,39 @@ where
             .filter(|&n| n > 0);
 
         Ok(TwitterListTimeline::new(list, since_id, self))
+    }
+
+    pub fn load_twitter_tokens(&mut self) -> Fallible<()> {
+        let manifest = self.manifest();
+
+        let unauthed_users = manifest
+            .rule
+            .twitter_outboxes()
+            .chain(Some(manifest.twitter.user))
+            .filter(|user| !self.twitter_tokens.contains_key(&user))
+            // Make the values unique so that the later `_.len() != _.len()` comparison makes sense.
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let tokens: Vec<models::TwitterToken> = {
+            use crate::schema::twitter_tokens::dsl::*;
+
+            twitter_tokens
+                .filter(id.eq_any(&unauthed_users))
+                .load(&*self.conn()?)?
+        };
+
+        if unauthed_users.len() != tokens.len() {
+            return Err(failure::err_msg(
+                "not all Twitter users are authorized; please run `pipitor twitter-login`",
+            ));
+        }
+
+        self.twitter_tokens
+            .extend(tokens.into_iter().map(|token| (token.id, token.into())));
+
+        Ok(())
     }
 }
 
