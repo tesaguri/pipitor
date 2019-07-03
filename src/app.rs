@@ -1,4 +1,5 @@
-mod core;
+pub(crate) mod core;
+
 mod sender;
 mod twitter_list_timeline;
 

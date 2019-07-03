@@ -12,7 +12,8 @@ use futures::{ready, Poll};
 use hyper::client::connect::Connect;
 use tokio::timer::Interval;
 
-use crate::twitter::{self, Request as _};
+use crate::twitter;
+use crate::util::TwitterRequestExt as _;
 
 use super::{Core, Sender};
 
@@ -41,16 +42,10 @@ impl TwitterListTimeline {
         C::Transport: 'static,
         C::Future: 'static,
     {
-        let token = core.twitter_token(core.manifest().twitter.user).unwrap();
-
         let backfill = since_id.map(|since_id| {
             let response = twitter::lists::Statuses::new(list_id)
                 .since_id(Some(since_id))
-                .send(
-                    core.manifest().twitter.client.as_ref(),
-                    token,
-                    core.http_client(),
-                );
+                .send(core, None);
             Backfill { since_id, response }
         });
 
@@ -174,21 +169,10 @@ impl TwitterListTimeline {
         }
 
         let max_id = tweets.iter().map(|t| t.id).min().map(|id| id - 1);
-        self.inner
-            .as_mut()
-            .unwrap()
-            .backfill
-            .as_mut() // We can't just use `backfill.response` here
-            .unwrap() // because `backfill` borrows `self` mutably, and...
-            .response = twitter::lists::Statuses::new(list_id)
+        backfill.response = twitter::lists::Statuses::new(list_id)
             .since_id(Some(backfill.since_id))
             .max_id(max_id)
-            .send(
-                // ...`self` is also borrowed here.
-                core.manifest().twitter.client.as_ref(),
-                core.twitter_token(core.manifest().twitter.user).unwrap(),
-                core.http_client(),
-            );
+            .send(core, None);
 
         for t in tweets {
             core.with_twitter_dump(|mut dump| {
@@ -236,11 +220,7 @@ impl Inner {
         let resp = twitter::lists::Statuses::new(self.list_id)
             .count(None)
             .include_rts(Some(false))
-            .send(
-                core.manifest().twitter.client.as_ref(),
-                core.twitter_token(core.manifest().twitter.user).unwrap(),
-                core.http_client(),
-            );
+            .send(core, None);
 
         if self.responses.len() == self.responses.capacity() {
             debug!("respone buffer reached its capacity");

@@ -7,7 +7,8 @@ use failure::Fallible;
 use hyper::client::connect::Connect;
 
 use crate::rules::Outbox;
-use crate::twitter::{self, Request as _};
+use crate::twitter;
+use crate::util::TwitterRequestExt as _;
 
 use super::Core;
 
@@ -71,11 +72,7 @@ impl Sender {
 
             match *outbox {
                 Outbox::Twitter(user) => {
-                    retweets.push(twitter::statuses::Retweet::new(tweet.id).send(
-                        core.manifest().twitter.client.as_ref(),
-                        core.twitter_token(user).unwrap(),
-                        core.http_client(),
-                    ));
+                    retweets.push(twitter::statuses::Retweet::new(tweet.id).send(core, user));
                 }
                 Outbox::None => {}
                 _ => unimplemented!(),
