@@ -67,7 +67,7 @@ use std::pin::Pin;
 use failure::Fail;
 use futures::compat::{Compat01As03, Future01CompatExt, Stream01CompatExt};
 use futures::task::Context;
-use futures::{try_ready, Future, FutureExt, Poll, TryStreamExt};
+use futures::{ready, Future, FutureExt, Poll, TryStreamExt};
 use futures_util::try_stream::TryConcat;
 use hyper::client::connect::Connect;
 use hyper::client::{Client, ResponseFuture as HyperResponseFuture};
@@ -208,7 +208,7 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
         trace_fn!(ResponseFuture::<T>::poll);
 
         if let ResponseFutureInner::Resp(ref mut res) = self.inner {
-            let res = try_ready!(res.compat().poll_unpin(cx).map_err(Error::Hyper));
+            let res = ready!(res.compat().poll_unpin(cx).map_err(Error::Hyper))?;
             trace!("response={:?}", res);
 
             self.inner = ResponseFutureInner::Body {
@@ -224,7 +224,7 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
             ref mut body,
         } = self.inner
         {
-            let json = try_ready!(body.poll_unpin(cx).map_err(Error::Hyper));
+            let json = ready!(body.poll_unpin(cx).map_err(Error::Hyper))?;
 
             trace!("done reading response body");
 
