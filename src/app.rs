@@ -116,7 +116,6 @@ where
         &mut self,
         manifest: Manifest,
     ) -> Result<Manifest, (failure::Error, Manifest)> {
-        // Store the old field values so that the fields can be rolledback in case of an error.
         let old_pool = if manifest.database_url != self.manifest().database_url {
             let pool = match Pool::new(ConnectionManager::new(manifest.database_url()))
                 .context("failed to initialize the connection pool")
@@ -130,15 +129,49 @@ where
         };
         let old = mem::replace(self.manifest_mut(), manifest);
 
+        // An RAII guard to rollback the `App`'s state when the future is canceled.
+        struct Guard<'a, C> {
+            this: &'a mut App<C>,
+            old: Option<Manifest>,
+            old_pool: Option<Pool<ConnectionManager<SqliteConnection>>>,
+        }
+
+        impl<C> Guard<'_, C> {
+            fn rollback(&mut self) -> Manifest {
+                if let Some(pool) = self.old_pool.take() {
+                    *self.this.core.database_pool_mut() = pool;
+                }
+
+                // We could remove the new tokens from `self.core.twitter_tokens`,
+                // but we don't do that because, in case of an error, the caller is typically
+                // expected to retry later and reuse the tokens, or just drop the `App`.
+
+                mem::replace(self.this.manifest_mut(), self.old.take().unwrap())
+            }
+        }
+
+        impl<C> Drop for Guard<'_, C> {
+            fn drop(&mut self) {
+                self.rollback();
+            }
+        }
+
+        let mut guard = Guard {
+            this: self,
+            old: Some(old),
+            old_pool,
+        };
+
         let catch = async {
-            let new = self.manifest();
-            let conn = self.core.conn()?;
+            let this = &mut guard.this;
+            let new = this.manifest();
+            let conn = this.core.conn()?;
 
             let unauthed_users = new
                 .rule
                 .twitter_outboxes()
                 .chain(Some(new.twitter.user))
-                .filter(|user| !self.core.twitter_tokens.contains_key(&user))
+                .filter(|user| !this.core.twitter_tokens.contains_key(&user))
                 // Make the values unique so that the later `_.len() != _.len()`
                 // comparison makes sense.
                 .collect::<HashSet<_>>()
@@ -157,12 +190,12 @@ where
                 return Err(unauthorized());
             }
 
-            self.core
+            this.core
                 .twitter_tokens
                 .extend(tokens.into_iter().map(|token| (token.id, token.into())));
 
-            // Make borrowck happy
-            let new = self.manifest();
+            let new = this.manifest(); // Make borrowck happy
+            let old = guard.old.as_ref().unwrap();
 
             if new.twitter.client.key != old.twitter.client.key
                 || new.twitter.user != old.twitter.user
@@ -171,11 +204,11 @@ where
                     .twitter_topics()
                     .any(|user| !old.rule.contains_topic(&TopicId::Twitter(user)))
             {
-                let twitter = self.core.init_twitter().await?;
-                let twitter_list = self.core.init_twitter_list()?;
-                self.twitter = twitter;
-                self.twitter_list = twitter_list;
-                self.twitter_done = false;
+                let twitter = this.core.init_twitter().await?;
+                let twitter_list = this.core.init_twitter_list()?;
+                this.twitter = twitter;
+                this.twitter_list = twitter_list;
+                this.twitter_done = false;
             }
 
             Ok(())
@@ -183,17 +216,14 @@ where
             .await;
 
         match catch {
-            Ok(()) => Ok(old),
+            Ok(()) => {
+                let old = guard.old.take().unwrap();
+                mem::forget(guard);
+                Ok(old)
+            }
             Err(e) => {
-                let manifest = mem::replace(self.manifest_mut(), old);
-                if let Some(pool) = old_pool {
-                    *self.core.database_pool_mut() = pool;
-                }
-
-                // We could remove the tokens added above from `self.core.twitter_tokens`,
-                // but we don't do that because, in case of an error, the caller is typically
-                // expected to retry later and reuse the tokens, or just drop the `App`.
-
+                let manifest = guard.rollback();
+                mem::forget(guard);
                 Err((e, manifest))
             }
         }
