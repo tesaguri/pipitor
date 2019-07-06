@@ -8,7 +8,7 @@ use futures::compat::Stream01CompatExt;
 use futures::future::{self, Future, FutureExt};
 use futures::StreamExt;
 use futures01::Stream as Stream01;
-use pipitor::Manifest;
+use pipitor::{Credentials, Manifest};
 use serde::{Deserialize, Serialize};
 
 pub struct DisplayFailChain<'a, F>(pub &'a F);
@@ -157,6 +157,21 @@ pub fn open_manifest(opt: &Opt) -> Fallible<Manifest> {
         })?;
         Ok(toml::from_slice(&buf).context("failed to parse `Pipitor.toml`")?)
     }
+}
+
+pub fn open_credentials(opt: &Opt, manifest: &Manifest) -> Fallible<Credentials> {
+    if opt.manifest_path.is_none() && manifest.credentials.is_none() {
+        let buf = fs::read("credentials.toml").with_context(|e| match e.kind() {
+            io::ErrorKind::NotFound => "could not find `credentials.toml` in the current directory",
+            _ => "could not open `credentials.toml`",
+        })?;
+        return Ok(toml::from_slice(&buf).context("failed to parse `credentials.toml`")?);
+    }
+
+    let path = manifest.credentials_path();
+    let buf =
+        fs::read(path).with_context(|_| format!("could not open the credentials at {}", path))?;
+    Ok(toml::from_slice(&buf).context("failed to parse the credentials file")?)
 }
 
 pub use imp::*;

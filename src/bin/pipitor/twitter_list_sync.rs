@@ -11,7 +11,7 @@ use hyper_tls::HttpsConnector;
 use pipitor::models;
 use pipitor::twitter::{self, Request as _};
 
-use crate::common::open_manifest;
+use crate::common::{open_credentials, open_manifest};
 
 #[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
@@ -26,6 +26,8 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         println!("`twitter.list` is not set in the manifest");
         return Ok(());
     };
+
+    let credentials = open_credentials(opt, &manifest)?;
 
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = Pool::new(manager).context("failed to initialize the connection pool")?;
@@ -43,7 +45,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
 
     let res_fut = twitter::lists::Members::new(list_id)
         .count(Some(5000))
-        .send(manifest.twitter.client.as_ref(), token.as_ref(), &client);
+        .send(credentials.twitter.client.as_ref(), token.as_ref(), &client);
     println!("Retrieving the list...");
 
     let users: HashSet<i64> = manifest.rule.twitter_topics().collect();
@@ -60,7 +62,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         .difference(&users)
         .map(|&user| {
             twitter::lists::members::Destroy::new(list_id, user).send(
-                manifest.twitter.client.as_ref(),
+                credentials.twitter.client.as_ref(),
                 token.as_ref(),
                 &client,
             )
@@ -80,7 +82,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         .difference(&list)
         .map(|&user| {
             let res = twitter::lists::members::Create::new(list_id, user).send(
-                manifest.twitter.client.as_ref(),
+                credentials.twitter.client.as_ref(),
                 token.as_ref(),
                 &client,
             );

@@ -15,13 +15,15 @@ use twitter_stream::{TwitterStream, TwitterStreamBuilder};
 
 use crate::models;
 use crate::twitter;
-use crate::Manifest;
+use crate::util::open_credentials;
+use crate::{Credentials, Manifest};
 
 use super::TwitterListTimeline;
 
 /// An object referenced by `poll`-like methods under `app` module.
 pub struct Core<C> {
     manifest: Manifest,
+    credentials: Credentials,
     pool: Pool<ConnectionManager<SqliteConnection>>,
     client: Client<C>,
     pub(super) twitter_tokens: HashMap<i64, twitter::Credentials<Box<str>>>,
@@ -39,6 +41,7 @@ where
 
         let pool = Pool::new(ConnectionManager::new(manifest.database_url()))
             .context("failed to initialize the connection pool")?;
+        let credentials: Credentials = open_credentials(manifest.credentials_path())?;
 
         {
             use crate::schema::last_tweet::dsl::*;
@@ -58,6 +61,7 @@ where
 
         let mut ret = Core {
             manifest,
+            credentials,
             pool,
             client,
             twitter_tokens: HashMap::new(),
@@ -75,8 +79,8 @@ where
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
 
         let stream_token = twitter_stream::Token {
-            consumer_key: &*self.manifest.twitter.client.key,
-            consumer_secret: &*self.manifest.twitter.client.secret,
+            consumer_key: &*self.credentials.twitter.client.key,
+            consumer_secret: &*self.credentials.twitter.client.secret,
             access_key: token.key,
             access_secret: token.secret,
         };
@@ -153,6 +157,14 @@ where
 impl<C> Core<C> {
     pub fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+
+    pub fn credentials(&self) -> &Credentials {
+        &self.credentials
+    }
+
+    pub fn credentials_mut(&mut self) -> &mut Credentials {
+        &mut self.credentials
     }
 
     pub fn manifest_mut(&mut self) -> &mut Manifest {

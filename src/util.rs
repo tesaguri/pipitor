@@ -1,14 +1,17 @@
+use std::fs;
 use std::marker::Unpin;
 use std::ops::Range;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use failure::{Fallible, ResultExt};
 use futures::{Future, FutureExt};
 use hyper::client::connect::Connect;
 use serde::{de, Deserialize};
 
 use crate::app::core::Core;
 use crate::twitter;
+use crate::Credentials;
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -46,7 +49,7 @@ where
         let user = user.into().unwrap_or_else(|| core.manifest().twitter.user);
         twitter::Request::send(
             self,
-            core.manifest().twitter.client.as_ref(),
+            core.credentials().twitter.client.as_ref(),
             core.twitter_token(user).unwrap(),
             core.http_client(),
         )
@@ -142,6 +145,13 @@ pub fn char_index_to_byte_index(s: &str, char_index: usize) -> Option<usize> {
     }
 
     None
+}
+
+pub fn open_credentials(path: &str) -> Fallible<Credentials> {
+    let ret = fs::read(path)
+        .context("failed to open the credentials file")
+        .and_then(|buf| toml::from_slice(&buf).context("failed to parse the credentials file"))?;
+    Ok(ret)
 }
 
 #[cfg(test)]

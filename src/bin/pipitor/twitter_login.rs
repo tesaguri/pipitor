@@ -14,16 +14,16 @@ use hyper_tls::HttpsConnector;
 use pipitor::models;
 use pipitor::twitter::{self, Request as _};
 
-use crate::common::open_manifest;
+use crate::common::{open_credentials, open_manifest};
 
 #[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
 
 pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
-    let manifest = open_manifest(opt)?;
-
     use pipitor::schema::twitter_tokens::dsl::*;
 
+    let manifest = open_manifest(opt)?;
+    let credentials = open_credentials(opt, &manifest)?;
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = Pool::new(manager).context("failed to initialize the connection pool")?;
     let conn = HttpsConnector::new(4).context("failed to initialize TLS client")?;
@@ -43,11 +43,11 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
                 .context("failed to load tokens from the database")?;
 
             // Make borrowck happy
-            let (manifest, client) = (&manifest, &client);
+            let (credentials, client) = (&credentials, &client);
             Ok(async move {
                 if let Some(token) = token {
                     match twitter::account::VerifyCredentials::new()
-                        .send(manifest.twitter.client.as_ref(), (&token).into(), client)
+                        .send(credentials.twitter.client.as_ref(), (&token).into(), client)
                         .await
                     {
                         Ok(_) => return Ok(None),
@@ -81,7 +81,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let mut stdin = tokio::io::lines(io::BufReader::new(stdin)).compat();
 
     while !unauthed_users.is_empty() {
-        let temporary = twitter::oauth::request_token(manifest.twitter.client.as_ref(), &client)
+        let temporary = twitter::oauth::request_token(credentials.twitter.client.as_ref(), &client)
             .await
             .context("error while getting OAuth request token from Twitter")?;
 
@@ -89,7 +89,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
 
         let (user, token) = twitter::oauth::access_token(
             &verifier,
-            manifest.twitter.client.as_ref(),
+            credentials.twitter.client.as_ref(),
             temporary.as_ref(),
             &client,
         )

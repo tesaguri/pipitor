@@ -22,8 +22,8 @@ use twitter_stream::TwitterStream;
 
 use crate::rules::TopicId;
 use crate::twitter;
-use crate::util::Maybe;
-use crate::Manifest;
+use crate::util::{open_credentials, Maybe};
+use crate::{Credentials, Manifest};
 
 use self::core::Core;
 use self::sender::Sender;
@@ -118,28 +118,37 @@ where
         &mut self,
         manifest: Manifest,
     ) -> Result<Manifest, (failure::Error, Manifest)> {
-        let old_pool = if manifest.database_url != self.manifest().database_url {
-            let pool = match Pool::new(ConnectionManager::new(manifest.database_url()))
-                .context("failed to initialize the connection pool")
-            {
-                Ok(pool) => pool,
-                Err(e) => return Err((e.into(), manifest)),
+        macro_rules! try_ {
+            ($r:expr) => {
+                match $r {
+                    Ok(x) => x,
+                    Err(e) => return Err((e.into(), manifest)),
+                }
             };
+        }
+
+        let old_pool = if manifest.database_url != self.manifest().database_url {
+            let pool = try_!(Pool::new(ConnectionManager::new(manifest.database_url()))
+                .context("failed to initialize the connection pool"));
             Some(mem::replace(self.core.database_pool_mut(), pool))
         } else {
             None
         };
+        let credentials = try_!(open_credentials(manifest.credentials_path()));
+        let old_credentials = mem::replace(self.core.credentials_mut(), credentials);
         let old = mem::replace(self.manifest_mut(), manifest);
 
         // An RAII guard to rollback the `App`'s state when the future is canceled.
         struct Guard<'a, C> {
             this: &'a mut App<C>,
-            old: Option<Manifest>,
+            old: Option<(Manifest, Credentials)>,
             old_pool: Option<Pool<ConnectionManager<SqliteConnection>>>,
         }
 
         impl<C> Guard<'_, C> {
             fn rollback(&mut self) -> Manifest {
+                let (old, credentials) = self.old.take().unwrap();
+                *self.this.core.credentials_mut() = credentials;
                 if let Some(pool) = self.old_pool.take() {
                     *self.this.core.database_pool_mut() = pool;
                 }
@@ -148,7 +157,7 @@ where
                 // but we don't do that because, in case of an error, the caller is typically
                 // expected to retry later and reuse the tokens, or just drop the `App`.
 
-                mem::replace(self.this.manifest_mut(), self.old.take().unwrap())
+                mem::replace(self.this.manifest_mut(), old)
             }
         }
 
@@ -160,18 +169,17 @@ where
 
         let mut guard = Guard {
             this: self,
-            old: Some(old),
+            old: Some((old, old_credentials)),
             old_pool,
         };
+        let this = &mut guard.this;
+        let (ref old, ref old_credentials) = *guard.old.as_ref().unwrap();
 
         let catch = async {
-            let this = &mut guard.this;
-
             this.core.load_twitter_tokens()?;
 
             let new = this.manifest();
-            let old = guard.old.as_ref().unwrap();
-            if new.twitter.client.key != old.twitter.client.key
+            if this.credentials().twitter.client.key != old_credentials.twitter.client.key
                 || new.twitter.user != old.twitter.user
                 || new
                     .rule
@@ -191,7 +199,7 @@ where
 
         match catch {
             Ok(()) => {
-                let old = guard.old.take().unwrap();
+                let old = guard.old.take().unwrap().0;
                 mem::forget(guard);
                 Ok(old)
             }
@@ -257,6 +265,10 @@ impl<C> App<C> {
 
     pub fn manifest_mut(&mut self) -> &mut Manifest {
         self.core.manifest_mut()
+    }
+
+    pub fn credentials(&self) -> &Credentials {
+        self.core.credentials()
     }
 
     pub fn database_pool(&self) -> &Pool<ConnectionManager<SqliteConnection>> {
