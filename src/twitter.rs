@@ -1,8 +1,9 @@
-mod api;
+pub(crate) mod api;
 mod models;
 
-pub use api::*;
 pub use models::*;
+
+pub(crate) use api::*;
 
 use std::borrow::Borrow;
 

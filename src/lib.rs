@@ -20,3 +20,10 @@ mod app;
 pub use app::App;
 pub use credentials::Credentials;
 pub use manifest::Manifest;
+
+#[doc(hidden)]
+pub mod private {
+    pub mod twitter {
+        pub use crate::twitter::{api::*, *};
+    }
+}

@@ -12,7 +12,7 @@ use hyper::client::Client;
 use hyper::StatusCode;
 use hyper_tls::HttpsConnector;
 use pipitor::models;
-use pipitor::twitter::{self, Request as _};
+use pipitor::private::twitter::{self, Request as _};
 
 use crate::common::{open_credentials, open_manifest};
 

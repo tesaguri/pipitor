@@ -16,12 +16,6 @@ pub struct Tweet {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ListsMembers {
-    pub users: Vec<User>,
-    pub next_cursor: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct User {
     pub id: i64,
 }
