@@ -263,6 +263,7 @@ impl error::Error for TwitterErrors {}
 
 impl ErrorCode {
     pub const YOU_ARENT_ALLOWED_TO_ADD_MEMBERS_TO_THIS_LIST: u32 = 104;
+    pub const CANNOT_FIND_SPECIFIED_USER: u32 = 108;
     pub const NO_STATUS_FOUND_WITH_THAT_ID: u32 = 144;
     pub const YOU_HAVE_ALREADY_RETWEETED_THIS_TWEET: u32 = 327;
 }

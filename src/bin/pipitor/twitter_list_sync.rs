@@ -97,12 +97,19 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
             Ok(_) => future::ok(()),
             Err(e) => {
                 if let twitter::Error::Twitter(ref e) = e {
-                    // Skip this error as it occurs if (but not only if) the user is protected.
-                    if e.codes().any(|c| {
-                        c == twitter::ErrorCode::YOU_ARENT_ALLOWED_TO_ADD_MEMBERS_TO_THIS_LIST
-                    }) {
-                        warn!("You aren't allowed to add user {} to the list", user);
-                        return future::ok(());
+                    for c in e.codes() {
+                        match c {
+                            // Skip this error as it occurs if (but not only if) the user is protected.
+                            twitter::ErrorCode::YOU_ARENT_ALLOWED_TO_ADD_MEMBERS_TO_THIS_LIST => {
+                                warn!("You aren't allowed to add user {} to the list", user);
+                                return future::ok(());
+                            }
+                            twitter::ErrorCode::CANNOT_FIND_SPECIFIED_USER => {
+                                warn!("Cannot find user {}", user);
+                                return future::ok(());
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 future::err(e)
