@@ -146,17 +146,22 @@ fn ipc_path_(manifest_path: &Path) -> PathBuf {
 }
 
 pub fn open_manifest(opt: &Opt) -> Fallible<Manifest> {
-    if let Some(ref path) = opt.manifest_path {
+    let path: &str;
+    let mut manifest: Manifest = if let Some(ref p) = opt.manifest_path {
+        path = p;
         let buf = fs::read(path)
             .with_context(|_| format!("could not open the manifest at `{}`", path))?;
-        Ok(toml::from_slice(&buf).context("failed to parse the manifest file")?)
+        toml::from_slice(&buf).context("failed to parse the manifest file")?
     } else {
-        let buf = fs::read("Pipitor.toml").with_context(|e| match e.kind() {
+        path = "Pipitor.toml";
+        let buf = fs::read(path).with_context(|e| match e.kind() {
             io::ErrorKind::NotFound => "could not find `Pipitor.toml` in the current directory",
             _ => "could not open `Pipitor.toml`",
         })?;
-        Ok(toml::from_slice(&buf).context("failed to parse `Pipitor.toml`")?)
-    }
+        toml::from_slice(&buf).context("failed to parse `Pipitor.toml`")?
+    };
+    manifest.resolve_paths(path);
+    Ok(manifest)
 }
 
 pub fn open_credentials(opt: &Opt, manifest: &Manifest) -> Fallible<Credentials> {

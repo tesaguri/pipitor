@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::num::NonZeroU64;
+use std::path::Path;
 
 use dotenv::dotenv_iter;
 use serde::Deserialize;
@@ -30,6 +31,19 @@ pub struct Twitter {
 }
 
 impl Manifest {
+    pub fn resolve_paths(&mut self, base: &str) {
+        let resolve = |path: &mut Box<str>| {
+            *path = Path::new(base)
+                .join(&**path)
+                .into_os_string()
+                .into_string()
+                .unwrap()
+                .into();
+        };
+        self.credentials.as_mut().map(resolve);
+        self.database_url.as_mut().map(resolve);
+    }
+
     pub fn credentials_path(&self) -> &str {
         self.credentials
             .as_ref()
