@@ -14,7 +14,6 @@ use hyper::Client;
 use twitter_stream::{TwitterStream, TwitterStreamBuilder};
 
 use crate::models;
-use crate::twitter;
 use crate::util::open_credentials;
 use crate::{Credentials, Manifest};
 
@@ -26,7 +25,7 @@ pub struct Core<C> {
     credentials: Credentials,
     pool: Pool<ConnectionManager<SqliteConnection>>,
     client: Client<C>,
-    pub(super) twitter_tokens: HashMap<i64, twitter::Credentials<Box<str>>>,
+    pub(super) twitter_tokens: HashMap<i64, oauth1::Credentials<Box<str>>>,
     twitter_dump: Option<BufWriter<File>>,
 }
 
@@ -79,9 +78,9 @@ where
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
 
         let stream_token = twitter_stream::Token {
-            consumer_key: &*self.credentials.twitter.client.key,
-            consumer_secret: &*self.credentials.twitter.client.secret,
-            access_key: token.key,
+            consumer_key: self.credentials.twitter.client.identifier(),
+            consumer_secret: self.credentials.twitter.client.secret(),
+            access_key: token.identifier,
             access_secret: token.secret,
         };
 
@@ -190,10 +189,10 @@ impl<C> Core<C> {
             .map_err(Into::into)
     }
 
-    pub fn twitter_token(&self, user: i64) -> Option<twitter::Credentials<&str>> {
+    pub fn twitter_token(&self, user: i64) -> Option<oauth1::Credentials<&str>> {
         self.twitter_tokens
             .get(&user)
-            .map(twitter::Credentials::as_ref)
+            .map(oauth1::Credentials::as_ref)
     }
 
     pub fn with_twitter_dump<F, E>(&mut self, f: F) -> Fallible<()>

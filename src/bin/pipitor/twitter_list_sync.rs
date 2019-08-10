@@ -35,7 +35,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let conn = HttpsConnector::new(4).context("failed to initialize TLS client")?;
     let client = Client::builder().build(conn);
 
-    let token: twitter::Credentials = twitter_tokens
+    let token: oauth1::Credentials = twitter_tokens
         .find(&manifest.twitter.user)
         .get_result::<models::TwitterToken>(&*pool.get()?)
         .optional()

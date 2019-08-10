@@ -1,7 +1,5 @@
 use serde::Deserialize;
 
-use crate::twitter;
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct Credentials {
     pub twitter: Twitter,
@@ -11,7 +9,16 @@ pub struct Credentials {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Twitter {
-    pub client: twitter::Credentials<Box<str>>,
+    #[serde(with = "CredentialsDef")]
+    pub client: oauth1::Credentials<Box<str>>,
     #[serde(skip)]
     _non_exhaustive: (),
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "oauth1::Credentials")]
+struct CredentialsDef<T> {
+    #[serde(rename = "key")]
+    identifier: T,
+    secret: T,
 }

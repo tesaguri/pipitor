@@ -85,7 +85,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
             .await
             .context("error while getting OAuth request token from Twitter")?;
 
-        let verifier = input_verifier(&mut stdin, &temporary.key, &unauthed_users).await?;
+        let verifier = input_verifier(&mut stdin, temporary.identifier(), &unauthed_users).await?;
 
         let (user, token) = twitter::oauth::access_token(
             &verifier,
@@ -101,7 +101,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
             diesel::replace_into(twitter_tokens)
                 .values(models::NewTwitterTokens {
                     id: user,
-                    access_token: &token.key,
+                    access_token: token.identifier(),
                     access_token_secret: &token.secret,
                 })
                 .execute(&*pool.get()?)?;

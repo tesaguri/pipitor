@@ -179,7 +179,8 @@ where
             this.core.load_twitter_tokens()?;
 
             let new = this.manifest();
-            if this.credentials().twitter.client.key != old_credentials.twitter.client.key
+            if this.credentials().twitter.client.identifier
+                != old_credentials.twitter.client.identifier
                 || new.twitter.user != old.twitter.user
                 || new
                     .rule

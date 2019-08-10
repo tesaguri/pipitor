@@ -3,9 +3,9 @@ use futures::TryStreamExt;
 use hyper::client::connect::Connect;
 use hyper::header::AUTHORIZATION;
 use hyper::{Client, Uri};
-use oauth1::OAuth1Authorize;
+use oauth1::Credentials;
 
-use super::{Credentials, Error, Response, Result};
+use super::{Error, Response, Result};
 
 pub async fn request_token<'a, C>(
     client_credentials: Credentials<&'a str>,
@@ -16,15 +16,10 @@ where
 {
     const URI: &str = "https://api.twitter.com/oauth/request_token";
 
-    let oauth1::Request { authorization, .. } = ().authorize_form(
-        "POST",
-        URI,
-        client_credentials.key,
-        client_credentials.secret,
-        None,
-        oauth1::HmacSha1,
-        &*oauth1::Options::new().callback("oob"),
-    );
+    let oauth1::Request { authorization, .. } =
+        oauth1::Builder::new(client_credentials, oauth1::HmacSha1)
+            .callback("oob")
+            .post_form(URI, ());
 
     let mut req = hyper::Request::post(Uri::from_static(URI));
     req.header(AUTHORIZATION, authorization);
@@ -52,11 +47,11 @@ where
 
     super::make_response(status, rate_limit, &body, |body| {
         let Token {
-            oauth_token: key,
+            oauth_token: identifier,
             oauth_token_secret: secret,
         } = serde_urlencoded::from_bytes::<Token>(body).map_err(|_| Error::Unexpected)?;
 
-        Ok(Credentials { key, secret })
+        Ok(Credentials { identifier, secret })
     })
 }
 
@@ -71,17 +66,11 @@ where
 {
     const URI: &str = "https://api.twitter.com/oauth/access_token";
 
-    let oauth1::Request { authorization, .. } = ().authorize_form(
-        "POST",
-        URI,
-        client_credentials.key,
-        client_credentials.secret,
-        temporary_credentials.secret,
-        oauth1::HmacSha1,
-        &*oauth1::Options::new()
-            .token(temporary_credentials.key)
-            .verifier(oauth_verifier),
-    );
+    let oauth1::Request { authorization, .. } =
+        oauth1::Builder::new(client_credentials, oauth1::HmacSha1)
+            .token(temporary_credentials)
+            .verifier(oauth_verifier)
+            .post_form(URI, ());
 
     let mut req = hyper::Request::post(Uri::from_static(URI));
     req.header(AUTHORIZATION, authorization);
@@ -110,11 +99,11 @@ where
 
     super::make_response(status, rate_limit, &body, |body| {
         let Token {
-            oauth_token: key,
+            oauth_token: identifier,
             oauth_token_secret: secret,
             user_id,
         } = serde_urlencoded::from_bytes::<Token>(body).map_err(|_| Error::Unexpected)?;
 
-        Ok((user_id, Credentials { key, secret }))
+        Ok((user_id, Credentials { identifier, secret }))
     })
 }
