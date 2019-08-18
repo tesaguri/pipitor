@@ -44,6 +44,7 @@ impl<'de> Deserialize<'de> for Tweet {
         #[derive(Deserialize)]
         struct Prototype {
             id: i64,
+            #[serde(alias = "full_text")]
             text: String,
             #[serde(default)]
             in_reply_to_status_id: Option<i64>,

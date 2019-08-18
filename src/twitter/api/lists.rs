@@ -1,5 +1,7 @@
-use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display, Formatter};
 use std::num::NonZeroU64;
+
+use serde::{Deserialize, Serialize};
 
 use super::super::models;
 
@@ -33,6 +35,20 @@ api_requests! {
         include_entities: bool,
         #[oauth1(option)]
         include_rts: Option<bool>,
+        #[oauth1(option)]
+        tweet_mode: Option<TweetMode> = Some(TweetMode::Extended),
+    }
+}
+
+pub enum TweetMode {
+    Extended,
+}
+
+impl Display for TweetMode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match *self {
+            TweetMode::Extended => f.write_str("extended"),
+        }
     }
 }
 
