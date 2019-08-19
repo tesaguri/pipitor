@@ -49,19 +49,28 @@ pub struct NewTwitterTokens<'a> {
     pub access_token_secret: &'a str,
 }
 
-impl<T: From<String>> From<TwitterToken> for crate::twitter::Credentials<T> {
+impl From<TwitterToken> for oauth1::Credentials<Box<str>> {
     fn from(token: TwitterToken) -> Self {
         Self {
-            key: token.access_token.into(),
+            identifier: token.access_token.into(),
             secret: token.access_token_secret.into(),
         }
     }
 }
 
-impl<'a> From<&'a TwitterToken> for crate::twitter::Credentials<&'a str> {
+impl From<TwitterToken> for oauth1::Credentials {
+    fn from(token: TwitterToken) -> Self {
+        Self {
+            identifier: token.access_token,
+            secret: token.access_token_secret,
+        }
+    }
+}
+
+impl<'a> From<&'a TwitterToken> for oauth1::Credentials<&'a str> {
     fn from(token: &'a TwitterToken) -> Self {
         Self {
-            key: &token.access_token,
+            identifier: &token.access_token,
             secret: &token.access_token_secret,
         }
     }

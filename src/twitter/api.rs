@@ -73,10 +73,8 @@ use hyper::client::connect::Connect;
 use hyper::client::{Client, ResponseFuture as HyperResponseFuture};
 use hyper::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use hyper::{Body, Method, StatusCode, Uri};
-use oauth1::OAuth1Authorize;
+use oauth1::{Credentials, OAuth1Authorize};
 use serde::{de, Deserialize};
-
-use super::Credentials;
 
 pub struct Response<T> {
     pub response: T,
@@ -149,23 +147,16 @@ pub trait Request: OAuth1Authorize {
         C::Transport: 'static,
         C::Future: 'static,
     {
+        let mut builder = oauth1::Builder::new(client_credentials, oauth1::HmacSha1);
+        builder.token(token_credentials);
         let oauth1::Request {
             authorization,
             data,
         } = if Self::FORM {
-            OAuth1Authorize::authorize_form
+            builder.build_form(Self::METHOD.as_str(), Self::URI, self)
         } else {
-            OAuth1Authorize::authorize
-        }(
-            self,
-            Self::METHOD.as_str(),
-            Self::URI,
-            client_credentials.key,
-            client_credentials.secret,
-            token_credentials.secret,
-            oauth1::HmacSha1,
-            &*oauth1::Options::new().token(token_credentials.key),
-        );
+            builder.build(Self::METHOD.as_str(), Self::URI, self)
+        };
 
         trace!("{} {}", Self::METHOD, Self::URI);
         trace!("data: {}", data);

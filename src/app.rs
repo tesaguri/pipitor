@@ -3,7 +3,6 @@ pub(crate) mod core;
 mod sender;
 mod twitter_list_timeline;
 
-use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, Write};
 use std::mem;
@@ -11,22 +10,20 @@ use std::pin::Pin;
 use std::task::Context;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
 use futures::compat::Stream01CompatExt;
 use futures::future;
-use futures::{Future, Poll, StreamExt};
+use futures::{Future, Poll, StreamExt, TryFutureExt};
 use hyper::client::connect::Connect;
 use hyper::Client;
 use twitter_stream::TwitterStream;
 
-use crate::models;
 use crate::rules::TopicId;
 use crate::twitter;
-use crate::util::Maybe;
-use crate::Manifest;
+use crate::util::{open_credentials, Maybe};
+use crate::{Credentials, Manifest};
 
 use self::core::Core;
 use self::sender::Sender;
@@ -42,10 +39,13 @@ pub struct App<C> {
 
 #[cfg(feature = "native-tls")]
 impl App<hyper_tls::HttpsConnector<hyper::client::HttpConnector>> {
-    pub async fn new(manifest: Manifest) -> Fallible<Self> {
-        let conn = hyper_tls::HttpsConnector::new(4).context("failed to initialize TLS client")?;
-        let client = Client::builder().build(conn);
-        Self::with_http_client(client, manifest).await
+    pub fn new(manifest: Manifest) -> impl Future<Output = Fallible<Self>> {
+        future::ready(hyper_tls::HttpsConnector::new(4).context("failed to initialize TLS client"))
+            .map_err(Into::into)
+            .and_then(|conn| {
+                let client = Client::builder().build(conn);
+                Self::with_http_client(client, manifest)
+            })
     }
 }
 
@@ -55,19 +55,21 @@ where
     C::Transport: 'static,
     C::Future: 'static,
 {
-    pub async fn with_http_client(client: Client<C>, manifest: Manifest) -> Fallible<Self> {
+    pub fn with_http_client(
+        client: Client<C>,
+        manifest: Manifest,
+    ) -> impl Future<Output = Fallible<Self>> {
         trace_fn!(App::<C>::with_http_client);
-
-        let core = Core::new(manifest, client).await?;
-        let twitter = core.init_twitter().await?;
-        let twitter_list = core.init_twitter_list()?;
-
-        Ok(App {
-            core,
-            twitter_list,
-            twitter,
-            twitter_done: false,
-            sender: Sender::new(),
+        future::ready(Core::new(manifest, client)).and_then(|core| {
+            core.init_twitter().and_then(|twitter| {
+                future::ready(core.init_twitter_list()).map_ok(|twitter_list| App {
+                    core,
+                    twitter_list,
+                    twitter,
+                    twitter_done: false,
+                    sender: Sender::new(),
+                })
+            })
         })
     }
 
@@ -116,28 +118,37 @@ where
         &mut self,
         manifest: Manifest,
     ) -> Result<Manifest, (failure::Error, Manifest)> {
-        let old_pool = if manifest.database_url != self.manifest().database_url {
-            let pool = match Pool::new(ConnectionManager::new(manifest.database_url()))
-                .context("failed to initialize the connection pool")
-            {
-                Ok(pool) => pool,
-                Err(e) => return Err((e.into(), manifest)),
+        macro_rules! try_ {
+            ($r:expr) => {
+                match $r {
+                    Ok(x) => x,
+                    Err(e) => return Err((e.into(), manifest)),
+                }
             };
+        }
+
+        let old_pool = if manifest.database_url != self.manifest().database_url {
+            let pool = try_!(Pool::new(ConnectionManager::new(manifest.database_url()))
+                .context("failed to initialize the connection pool"));
             Some(mem::replace(self.core.database_pool_mut(), pool))
         } else {
             None
         };
+        let credentials = try_!(open_credentials(manifest.credentials_path()));
+        let old_credentials = mem::replace(self.core.credentials_mut(), credentials);
         let old = mem::replace(self.manifest_mut(), manifest);
 
         // An RAII guard to rollback the `App`'s state when the future is canceled.
         struct Guard<'a, C> {
             this: &'a mut App<C>,
-            old: Option<Manifest>,
+            old: Option<(Manifest, Credentials)>,
             old_pool: Option<Pool<ConnectionManager<SqliteConnection>>>,
         }
 
         impl<C> Guard<'_, C> {
             fn rollback(&mut self) -> Manifest {
+                let (old, credentials) = self.old.take().unwrap();
+                *self.this.core.credentials_mut() = credentials;
                 if let Some(pool) = self.old_pool.take() {
                     *self.this.core.database_pool_mut() = pool;
                 }
@@ -146,7 +157,7 @@ where
                 // but we don't do that because, in case of an error, the caller is typically
                 // expected to retry later and reuse the tokens, or just drop the `App`.
 
-                mem::replace(self.this.manifest_mut(), self.old.take().unwrap())
+                mem::replace(self.this.manifest_mut(), old)
             }
         }
 
@@ -158,46 +169,18 @@ where
 
         let mut guard = Guard {
             this: self,
-            old: Some(old),
+            old: Some((old, old_credentials)),
             old_pool,
         };
+        let this = &mut guard.this;
+        let (ref old, ref old_credentials) = *guard.old.as_ref().unwrap();
 
         let catch = async {
-            let this = &mut guard.this;
+            this.core.load_twitter_tokens()?;
+
             let new = this.manifest();
-            let conn = this.core.conn()?;
-
-            let unauthed_users = new
-                .rule
-                .twitter_outboxes()
-                .chain(Some(new.twitter.user))
-                .filter(|user| !this.core.twitter_tokens.contains_key(&user))
-                // Make the values unique so that the later `_.len() != _.len()`
-                // comparison makes sense.
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>();
-
-            let tokens: Vec<models::TwitterToken> = {
-                use crate::schema::twitter_tokens::dsl::*;
-
-                twitter_tokens
-                    .filter(id.eq_any(&unauthed_users))
-                    .load(&*conn)?
-            };
-
-            if unauthed_users.len() != tokens.len() {
-                return Err(unauthorized());
-            }
-
-            this.core
-                .twitter_tokens
-                .extend(tokens.into_iter().map(|token| (token.id, token.into())));
-
-            let new = this.manifest(); // Make borrowck happy
-            let old = guard.old.as_ref().unwrap();
-
-            if new.twitter.client.key != old.twitter.client.key
+            if this.credentials().twitter.client.identifier
+                != old_credentials.twitter.client.identifier
                 || new.twitter.user != old.twitter.user
                 || new
                     .rule
@@ -217,7 +200,7 @@ where
 
         match catch {
             Ok(()) => {
-                let old = guard.old.take().unwrap();
+                let old = guard.old.take().unwrap().0;
                 mem::forget(guard);
                 Ok(old)
             }
@@ -285,6 +268,10 @@ impl<C> App<C> {
         self.core.manifest_mut()
     }
 
+    pub fn credentials(&self) -> &Credentials {
+        self.core.credentials()
+    }
+
     pub fn database_pool(&self) -> &Pool<ConnectionManager<SqliteConnection>> {
         self.core.database_pool()
     }
@@ -331,8 +318,4 @@ fn snowflake_to_system_time(id: u64) -> SystemTime {
         (snowflake_time_ms as u32 % 1_000 + 657) * 1_000 * 1_000,
     );
     UNIX_EPOCH + timestamp
-}
-
-fn unauthorized() -> failure::Error {
-    failure::err_msg("not all Twitter users are authorized; please run `pipitor twitter-login`")
 }

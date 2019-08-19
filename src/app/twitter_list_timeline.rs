@@ -1,5 +1,5 @@
 use std::io::Write;
-
+use std::num::NonZeroU64;
 use std::task::Context;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -22,7 +22,7 @@ pub struct TwitterListTimeline {
 }
 
 struct Inner {
-    list_id: u64,
+    list_id: NonZeroU64,
     responses: Vec<twitter::ResponseFuture<Vec<twitter::Tweet>>>,
     interval: Interval,
     backfill: Option<Backfill>,
@@ -36,7 +36,7 @@ struct Backfill {
 const RESP_BUF_CAP: usize = 8;
 
 impl TwitterListTimeline {
-    pub fn new<C>(list_id: u64, since_id: Option<i64>, core: &Core<C>) -> Self
+    pub fn new<C>(list_id: NonZeroU64, since_id: Option<i64>, core: &Core<C>) -> Self
     where
         C: Connect + Sync + 'static,
         C::Transport: 'static,

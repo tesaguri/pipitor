@@ -1,0 +1,113 @@
+{
+  "created_at": "Tue Sep 26 21:00:22 +0000 2017",
+  "id": 912783930431905797,
+  "id_str": "912783930431905797",
+  "text": "Can\u2019t fit your Tweet into 140 characters? \ud83e\udd14\n\nWe\u2019re trying something new with a small group, and increasing the char\u2026 https:\/\/t.co\/y1rJlHsVB5",
+  "truncated": true,
+  "entities": {
+    "hashtags": [],
+    "symbols": [],
+    "user_mentions": [],
+    "urls": [
+      {
+        "url": "https:\/\/t.co\/y1rJlHsVB5",
+        "expanded_url": "https:\/\/twitter.com\/i\/web\/status\/912783930431905797",
+        "display_url": "twitter.com\/i\/web\/status\/9\u2026",
+        "indices": [117, 140]
+      }
+    ]
+  },
+  "source": "\u003ca href=\"http:\/\/twitter.com\" rel=\"nofollow\"\u003eTwitter Web Client\u003c\/a\u003e",
+  "in_reply_to_status_id": null,
+  "in_reply_to_status_id_str": null,
+  "in_reply_to_user_id": null,
+  "in_reply_to_user_id_str": null,
+  "in_reply_to_screen_name": null,
+  "user": {
+    "id": 783214,
+    "id_str": "783214",
+    "name": "Twitter",
+    "screen_name": "Twitter",
+    "location": "Everywhere",
+    "description": "What\u2019s happening?!",
+    "url": "https:\/\/t.co\/TAXQpsHa5X",
+    "entities": {
+      "url": {
+        "urls": [
+          {
+            "url": "https:\/\/t.co\/TAXQpsHa5X",
+            "expanded_url": "https:\/\/about.twitter.com\/",
+            "display_url": "about.twitter.com",
+            "indices": [0, 23]
+          }
+        ]
+      },
+      "description": {
+        "urls": []
+      }
+    },
+    "protected": false,
+    "followers_count": 56238782,
+    "friends_count": 140,
+    "listed_count": 90943,
+    "created_at": "Tue Feb 20 14:35:54 +0000 2007",
+    "favourites_count": 5948,
+    "utc_offset": null,
+    "time_zone": null,
+    "geo_enabled": true,
+    "verified": true,
+    "statuses_count": 10527,
+    "lang": null,
+    "contributors_enabled": false,
+    "is_translator": false,
+    "is_translation_enabled": false,
+    "profile_background_color": "ACDED6",
+    "profile_background_image_url": "http:\/\/abs.twimg.com\/images\/themes\/theme18\/bg.gif",
+    "profile_background_image_url_https": "https:\/\/abs.twimg.com\/images\/themes\/theme18\/bg.gif",
+    "profile_background_tile": true,
+    "profile_image_url": "http:\/\/pbs.twimg.com\/profile_images\/1111729635610382336\/_65QFl7B_normal.png",
+    "profile_image_url_https": "https:\/\/pbs.twimg.com\/profile_images\/1111729635610382336\/_65QFl7B_normal.png",
+    "profile_banner_url": "https:\/\/pbs.twimg.com\/profile_banners\/783214\/1556918042",
+    "profile_link_color": "1B95E0",
+    "profile_sidebar_border_color": "FFFFFF",
+    "profile_sidebar_fill_color": "F6F6F6",
+    "profile_text_color": "333333",
+    "profile_use_background_image": true,
+    "has_extended_profile": true,
+    "default_profile": false,
+    "default_profile_image": false,
+    "following": false,
+    "follow_request_sent": false,
+    "notifications": false,
+    "translator_type": "regular"
+  },
+  "geo": null,
+  "coordinates": null,
+  "place": null,
+  "contributors": null,
+  "is_quote_status": false,
+  "retweet_count": 49967,
+  "favorite_count": 89200,
+  "favorited": false,
+  "retweeted": false,
+  "possibly_sensitive": false,
+  "possibly_sensitive_appealable": false,
+  "lang": "en",
+  "extended_tweet": {
+    "full_text": "Can\u2019t fit your Tweet into 140 characters? \ud83e\udd14\n\nWe\u2019re trying something new with a small group, and increasing the character limit to 280! Excited about the possibilities? Read our blog to find out how it all adds up. \ud83d\udc47\nhttps:\/\/t.co\/C6hjsB9nbL",
+    "display_text_range": [0, 239],
+    "entities": {
+      "hashtags": [],
+      "symbols": [],
+      "user_mentions": [],
+      "urls": [
+        {
+          "url": "https:\/\/t.co\/C6hjsB9nbL",
+          "expanded_url": "https:\/\/cards.twitter.com\/cards\/gsby\/4ubsj",
+          "display_url": "cards.twitter.com\/cards\/gsby\/4ub\u2026",
+          "indices": [216, 239]
+        }
+      ]
+    }
+  }
+}

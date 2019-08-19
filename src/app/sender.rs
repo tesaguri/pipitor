@@ -4,10 +4,14 @@ use std::task::{Context, Poll};
 
 use diesel::prelude::*;
 use failure::Fallible;
+use futures::ready;
+use futures::stream::{FuturesUnordered, StreamExt};
 use hyper::client::connect::Connect;
+use serde::de;
 
 use crate::rules::Outbox;
 use crate::twitter;
+use crate::util::ResolveWith;
 use crate::util::TwitterRequestExt as _;
 
 use super::Core;
@@ -17,6 +21,8 @@ use self::retweet_queue::{PendingRetweets, RetweetQueue};
 /// A non-thread-safe object that sends entries to corresponding outboxes.
 #[derive(Default)]
 pub struct Sender {
+    find_duplicate_tweet_queue:
+        FuturesUnordered<ResolveWith<twitter::ResponseFuture<de::IgnoredAny>, twitter::Tweet>>,
     retweet_queue: RetweetQueue,
 }
 
@@ -65,6 +71,80 @@ impl Sender {
             return Ok(());
         }
 
+        if !core.manifest().skip_duplicate {
+            self.retweet(tweet, core);
+            return Ok(());
+        }
+
+        if core.manifest().rule.route_tweet(&tweet).next().is_none() {
+            return Ok(());
+        }
+
+        let duplicate = {
+            use crate::schema::tweets::dsl::*;
+            use diesel::dsl::*;
+
+            tweets
+                .filter(user_id.eq(&tweet.user.id).and(text.eq(&*tweet.text)))
+                .select(max(id))
+                .first::<Option<i64>>(&*conn)?
+        };
+
+        if let Some(dup) = duplicate {
+            // Check whether the duplicate Tweet still exists
+            let res = twitter::statuses::Show::new(dup).send(core, None);
+            self.find_duplicate_tweet_queue
+                .push(ResolveWith::new(res, tweet));
+        } else {
+            self.retweet(tweet, core);
+        }
+
+        Ok(())
+    }
+
+    pub fn poll_done<C>(&mut self, core: &Core<C>, cx: &mut Context<'_>) -> Poll<Fallible<()>>
+    where
+        C: Connect + Sync + 'static,
+        C::Transport: 'static,
+        C::Future: 'static,
+    {
+        let mut ready = true;
+
+        ready &= self.poll_find_duplicate_tweet(core, cx).is_ready();
+        ready &= self.retweet_queue.poll(core, cx)?.is_ready();
+
+        if ready {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
+    }
+
+    fn poll_find_duplicate_tweet<C>(&mut self, core: &Core<C>, cx: &mut Context<'_>) -> Poll<()>
+    where
+        C: Connect + Sync + 'static,
+        C::Transport: 'static,
+        C::Future: 'static,
+    {
+        while let Some((result, tweet)) =
+            ready!(self.find_duplicate_tweet_queue.poll_next_unpin(cx))
+        {
+            if result.is_err() {
+                // Either the duplicate Tweet does not exist anymore (404)
+                // or the Tweet's existence could not be verified because of an error.
+                self.retweet(tweet, core);
+            }
+        }
+
+        Poll::Ready(())
+    }
+
+    fn retweet<C>(&mut self, tweet: twitter::Tweet, core: &Core<C>)
+    where
+        C: Connect + Sync + 'static,
+        C::Transport: 'static,
+        C::Future: 'static,
+    {
         let mut retweets = PendingRetweets::new();
 
         for outbox in core.manifest().rule.route_tweet(&tweet) {
@@ -80,11 +160,5 @@ impl Sender {
         }
 
         self.retweet_queue.insert(tweet, retweets);
-
-        Ok(())
-    }
-
-    pub fn poll_done<C>(&mut self, core: &Core<C>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
-        self.retweet_queue.poll(core, cx)
     }
 }
