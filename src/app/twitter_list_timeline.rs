@@ -23,6 +23,7 @@ pub struct TwitterListTimeline {
 
 struct Inner {
     list_id: NonZeroU64,
+    since_id: Option<i64>,
     responses: Vec<twitter::ResponseFuture<Vec<twitter::Tweet>>>,
     interval: Interval,
     backfill: Option<Backfill>,
@@ -51,6 +52,7 @@ impl TwitterListTimeline {
 
         let mut inner = Inner {
             list_id,
+            since_id: None,
             responses: Vec::with_capacity(RESP_BUF_CAP),
             // Rate limit of GET lists/statuses (user auth): 900 reqs/15-min window (1 req/sec)
             interval: Interval::new_interval(Duration::from_secs(1)),
@@ -88,8 +90,8 @@ impl TwitterListTimeline {
             inner.send_request(core);
         }
 
-        let tweets = match ready!(inner.poll_next(cx)) {
-            Ok(resp) => resp.response,
+        let mut tweets = match ready!(inner.poll_next(cx)) {
+            Ok(resp) => resp.response.into_iter(),
             Err(e) => {
                 // Skip the error as the list timeline is only for complementary purpose.
                 warn!("error while retrieving Tweets from the list: {:?}", e);
@@ -109,17 +111,21 @@ impl TwitterListTimeline {
             }
         };
 
-        if log_enabled!(log::Level::Trace) {
-            if let Some(t) = tweets.first() {
+        if let Some(t) = tweets.next() {
+            inner.since_id = Some(t.id);
+
+            if log_enabled!(log::Level::Trace) {
                 let created_at = super::snowflake_to_system_time(t.id as u64);
                 match SystemTime::now().duration_since(created_at) {
                     Ok(latency) => trace!("Twitter list worst latency: {:.2?}", latency),
                     Err(e) => trace!("Twitter list worst latency: -{:.2?}", e.duration()),
                 }
             }
+
+            sender.send_tweet(t, core)?;
         }
 
-        for t in tweets {
+        while let Some(t) = tweets.next() {
             sender.send_tweet(t, core)?;
         }
 
@@ -137,13 +143,13 @@ impl TwitterListTimeline {
         C::Transport: 'static,
         C::Future: 'static,
     {
-        let (list_id, backfill_opt) = if let Some(Inner {
+        let &mut Inner {
             list_id,
-            ref mut backfill,
+            ref mut since_id,
+            backfill: ref mut backfill_opt,
             ..
-        }) = self.inner
-        {
-            (list_id, backfill)
+        } = if let Some(ref mut inner) = self.inner {
+            inner
         } else {
             return Poll::Ready(Ok(()));
         };
@@ -168,7 +174,11 @@ impl TwitterListTimeline {
             return Poll::Ready(Ok(()));
         }
 
-        let max_id = tweets.iter().map(|t| t.id).min().map(|id| id - 1);
+        if since_id.is_none() {
+            *since_id = tweets.first().map(|t| t.id);
+        }
+
+        let max_id = tweets.last().map(|t| t.id - 1);
         backfill.response = twitter::lists::Statuses::new(list_id)
             .since_id(Some(backfill.since_id))
             .max_id(max_id)
@@ -217,9 +227,11 @@ impl Inner {
     {
         trace_fn!(Inner::send_request::<C>);
 
+        let count = if self.since_id.is_some() { 200 } else { 1 };
         let resp = twitter::lists::Statuses::new(self.list_id)
-            .count(None)
+            .count(Some(count))
             .include_rts(Some(false))
+            .since_id(self.since_id)
             .send(core, None);
 
         if self.responses.len() == self.responses.capacity() {
