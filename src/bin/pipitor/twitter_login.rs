@@ -95,7 +95,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         )
         .await
         .context("error while getting OAuth access token from Twitter")?
-        .response;
+        .data;
 
         if unauthed_users.remove(&user) {
             diesel::replace_into(twitter_tokens)

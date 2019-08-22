@@ -91,7 +91,7 @@ impl TwitterListTimeline {
         }
 
         let mut tweets = match ready!(inner.poll_next(cx)) {
-            Ok(resp) => resp.response.into_iter(),
+            Ok(resp) => resp.data.into_iter(),
             Err(e) => {
                 // Skip the error as the list timeline is only for complementary purpose.
                 warn!("error while retrieving Tweets from the list: {:?}", e);
@@ -125,7 +125,7 @@ impl TwitterListTimeline {
             sender.send_tweet(t, core)?;
         }
 
-        while let Some(t) = tweets.next() {
+        for t in tweets {
             sender.send_tweet(t, core)?;
         }
 
@@ -161,7 +161,7 @@ impl TwitterListTimeline {
         };
 
         let tweets = match ready!(backfill.response.poll_unpin(cx)) {
-            Ok(resp) => resp.response,
+            Ok(resp) => resp.data,
             Err(e) => {
                 *backfill_opt = None;
                 return Poll::Ready(Err(e.into()));

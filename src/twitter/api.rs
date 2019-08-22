@@ -77,7 +77,7 @@ use oauth1::{Credentials, OAuth1Authorize};
 use serde::{de, Deserialize};
 
 pub struct Response<T> {
-    pub response: T,
+    pub data: T,
     pub rate_limit: Option<RateLimit>,
 }
 
@@ -188,7 +188,7 @@ impl<T> Deref for Response<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        &self.response
+        &self.data
     }
 }
 
@@ -275,8 +275,8 @@ where
     F: FnOnce(&[u8]) -> Result<T>,
 {
     if let StatusCode::OK = status {
-        parse(body).map(|response| Response {
-            response,
+        parse(body).map(|data| Response {
+            data,
             rate_limit,
         })
     } else {
