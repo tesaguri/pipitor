@@ -65,7 +65,6 @@ use std::ops::Deref;
 use std::pin::Pin;
 
 use failure::Fail;
-use futures::compat::{Compat01As03, Future01CompatExt, Stream01CompatExt};
 use futures::task::Context;
 use futures::{ready, Future, FutureExt, Poll, TryStreamExt};
 use futures_util::try_stream::TryConcat;
@@ -91,7 +90,7 @@ enum ResponseFutureInner {
     Body {
         status: StatusCode,
         rate_limit: Option<RateLimit>,
-        body: TryConcat<Compat01As03<Body>>,
+        body: TryConcat<Body>,
     },
 }
 
@@ -199,13 +198,13 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
         trace_fn!(ResponseFuture::<T>::poll);
 
         if let ResponseFutureInner::Resp(ref mut res) = self.inner {
-            let res = ready!(res.compat().poll_unpin(cx).map_err(Error::Hyper))?;
+            let res = ready!(res.poll_unpin(cx).map_err(Error::Hyper))?;
             trace!("response={:?}", res);
 
             self.inner = ResponseFutureInner::Body {
                 status: res.status(),
                 rate_limit: rate_limit(&res),
-                body: res.into_body().compat().try_concat(),
+                body: res.into_body().try_concat(),
             };
         }
 

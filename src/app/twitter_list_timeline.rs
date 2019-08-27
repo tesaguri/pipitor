@@ -5,7 +5,6 @@ use std::time::{Duration, Instant, SystemTime};
 
 use failure::Fallible;
 
-use futures::compat::Stream01CompatExt;
 use futures::future::FutureExt;
 use futures::stream::StreamExt;
 use futures::{ready, Poll};
@@ -85,7 +84,7 @@ impl TwitterListTimeline {
             return Poll::Ready(Ok(()));
         };
 
-        if let Poll::Ready(Some(_)) = (&mut inner.interval).compat().poll_next_unpin(cx) {
+        if let Poll::Ready(Some(_)) = inner.interval.poll_next_unpin(cx) {
             inner.send_request(core);
         }
 

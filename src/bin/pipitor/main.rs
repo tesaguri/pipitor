@@ -18,7 +18,6 @@ mod twitter_login;
 use std::process;
 
 use failure::Fallible;
-use futures::{FutureExt, TryFutureExt};
 use structopt::StructOpt;
 
 use common::{DisplayFailChain, Opt};
@@ -64,18 +63,14 @@ fn run() -> Fallible<()> {
     match cmd {
         Cmd::Migration(subopt) => migration::main(&opt, subopt),
         Cmd::Run(subopt) => run::main(&opt, subopt),
-        cmd => tokio::runtime::Runtime::new()?.block_on(
-            async move {
-                match cmd {
-                    Cmd::Ctl(subopt) => ctl::main(&opt, subopt).await,
-                    Cmd::Setup(subopt) => setup::main(&opt, subopt).await,
-                    Cmd::TwitterListSync(subopt) => twitter_list_sync::main(&opt, subopt).await,
-                    Cmd::TwitterLogin(subopt) => twitter_login::main(&opt, subopt).await,
-                    Cmd::Migration(_) | Cmd::Run(_) => unreachable!(),
-                }
+        cmd => tokio::runtime::Runtime::new()?.block_on(async move {
+            match cmd {
+                Cmd::Ctl(subopt) => ctl::main(&opt, subopt).await,
+                Cmd::Setup(subopt) => setup::main(&opt, subopt).await,
+                Cmd::TwitterListSync(subopt) => twitter_list_sync::main(&opt, subopt).await,
+                Cmd::TwitterLogin(subopt) => twitter_login::main(&opt, subopt).await,
+                Cmd::Migration(_) | Cmd::Run(_) => unreachable!(),
             }
-                .boxed()
-                .compat(),
-        ),
+        }),
     }
 }

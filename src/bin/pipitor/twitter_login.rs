@@ -5,13 +5,13 @@ use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use failure::{Fallible, ResultExt};
-use futures::compat::Stream01CompatExt;
 use futures::future;
 use futures::stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt};
 use hyper::client::Client;
 use hyper::StatusCode;
 use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
+use tokio::io::AsyncBufReadExt;
 
 use crate::common::{https_connector, open_credentials, open_manifest};
 
@@ -75,8 +75,8 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         return Ok(());
     }
 
-    let stdin = stdin::nb()?;
-    let mut stdin = tokio::io::lines(io::BufReader::new(stdin)).compat();
+    let stdin = tokio::io::stdin();
+    let mut stdin = tokio::io::BufReader::new(stdin).lines();
 
     while !unauthed_users.is_empty() {
         let temporary = twitter::oauth::request_token(credentials.twitter.client.as_ref(), &client)
@@ -147,28 +147,5 @@ where
         if let Some(input) = stdin.next().await {
             return input;
         }
-    }
-}
-
-#[cfg(unix)]
-mod stdin {
-    use std::io;
-
-    use tokio::io::AsyncRead as AsyncRead01;
-    use tokio_file_unix::{raw_stdin, File};
-
-    pub fn nb() -> io::Result<impl AsyncRead01> {
-        File::new_nb(raw_stdin()?)?.into_io(&Default::default())
-    }
-}
-
-#[cfg(windows)]
-mod stdin {
-    use std::io;
-
-    use tokio::io::AsyncRead as AsyncRead01;
-
-    pub fn nb() -> io::Result<impl AsyncRead01> {
-        Ok(tokio_stdin_stdout::stdin(0))
     }
 }

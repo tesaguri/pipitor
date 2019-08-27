@@ -14,7 +14,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
-use futures::compat::Stream01CompatExt;
 use futures::future;
 use futures::{Future, Poll, StreamExt, TryFutureExt};
 use hyper::client::connect::Connect;
@@ -42,7 +41,7 @@ pub struct App<C> {
 #[cfg(feature = "native-tls")]
 impl App<hyper_tls::HttpsConnector<hyper::client::HttpConnector>> {
     pub fn new(manifest: Manifest) -> impl Future<Output = Fallible<Self>> {
-        future::ready(hyper_tls::HttpsConnector::new(4).context("failed to initialize TLS client"))
+        future::ready(hyper_tls::HttpsConnector::new().context("failed to initialize TLS client"))
             .map_err(Into::into)
             .and_then(|conn| {
                 let client = Client::builder().build(conn);
@@ -215,7 +214,7 @@ where
     }
 
     fn poll_twitter(&mut self, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
-        while let Poll::Ready(v) = (&mut self.twitter).compat().poll_next_unpin(cx) {
+        while let Poll::Ready(v) = self.twitter.poll_next_unpin(cx) {
             let result = if let Some(r) = v {
                 r
             } else {

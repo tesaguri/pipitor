@@ -7,11 +7,10 @@ use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
-use futures::compat::Future01CompatExt;
 use futures::{Future, FutureExt};
 use hyper::client::connect::Connect;
 use hyper::Client;
-use twitter_stream::{TwitterStream, TwitterStreamBuilder};
+use twitter_stream::TwitterStream;
 
 use crate::models;
 use crate::util::open_credentials;
@@ -77,12 +76,10 @@ where
 
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
 
-        let stream_token = twitter_stream::Token {
-            consumer_key: self.credentials.twitter.client.identifier(),
-            consumer_secret: self.credentials.twitter.client.secret(),
-            access_key: token.identifier,
-            access_secret: token.secret,
-        };
+        let stream_token = twitter_stream::Token::from_credentials(
+            self.credentials().twitter.client.as_ref(),
+            token.as_ref(),
+        );
 
         let mut twitter_topics: Vec<_> = self
             .manifest
@@ -93,10 +90,9 @@ where
         twitter_topics.sort();
         twitter_topics.dedup();
 
-        TwitterStreamBuilder::filter(stream_token)
+        twitter_stream::Builder::filter(stream_token)
             .follow(&*twitter_topics)
             .listen_with_client(&self.client)
-            .compat()
             .map(|result| Ok(result.context("error while connecting to Twitter's Streaming API")?))
     }
 
