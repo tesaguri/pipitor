@@ -2,6 +2,7 @@ pub(crate) mod core;
 
 mod sender;
 mod twitter_list_timeline;
+mod twitter_request_ext;
 
 use std::fs::File;
 use std::io::{self, Write};
@@ -28,6 +29,7 @@ use crate::{Credentials, Manifest};
 use self::core::Core;
 use self::sender::Sender;
 use self::twitter_list_timeline::TwitterListTimeline;
+use self::twitter_request_ext::TwitterRequestExt;
 
 pub struct App<C> {
     core: Core<C>,

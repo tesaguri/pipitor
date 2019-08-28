@@ -13,9 +13,8 @@ use hyper::client::connect::Connect;
 use tokio::timer::Interval;
 
 use crate::twitter;
-use crate::util::TwitterRequestExt as _;
 
-use super::{Core, Sender};
+use super::{Core, Sender, TwitterRequestExt as _};
 
 pub struct TwitterListTimeline {
     inner: Option<Inner>,

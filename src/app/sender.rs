@@ -12,9 +12,8 @@ use serde::de;
 use crate::rules::Outbox;
 use crate::twitter;
 use crate::util::ResolveWith;
-use crate::util::TwitterRequestExt as _;
 
-use super::Core;
+use super::{Core, TwitterRequestExt as _};
 
 use self::retweet_queue::{PendingRetweets, RetweetQueue};
 
