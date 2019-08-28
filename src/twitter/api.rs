@@ -65,12 +65,13 @@ use std::ops::Deref;
 use std::pin::Pin;
 
 use failure::Fail;
+use flate2::bufread::GzDecoder;
 use futures::task::Context;
 use futures::{ready, Future, FutureExt, Poll, TryStreamExt};
 use futures_util::try_stream::TryConcat;
 use hyper::client::connect::Connect;
 use hyper::client::{Client, ResponseFuture as HyperResponseFuture};
-use hyper::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use hyper::header::{HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE};
 use hyper::{Body, Method, StatusCode, Uri};
 use oauth1::{Credentials, OAuth1Authorize};
 use serde::{de, Deserialize};
@@ -91,6 +92,7 @@ enum ResponseFutureInner {
         status: StatusCode,
         rate_limit: Option<RateLimit>,
         body: TryConcat<Body>,
+        gzip: bool,
     },
 }
 
@@ -162,6 +164,7 @@ pub trait Request: OAuth1Authorize {
 
         let mut req = hyper::Request::builder();
         req.method(Self::METHOD)
+            .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
             .header(AUTHORIZATION, authorization);
 
         let req = if Self::FORM {
@@ -201,10 +204,17 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
             let res = ready!(res.poll_unpin(cx).map_err(Error::Hyper))?;
             trace!("response={:?}", res);
 
+            let gzip = res
+                .headers()
+                .get_all(CONTENT_ENCODING)
+                .iter()
+                .any(|e| e == "gzip");
+
             self.inner = ResponseFutureInner::Body {
                 status: res.status(),
                 rate_limit: rate_limit(&res),
                 body: res.into_body().try_concat(),
+                gzip,
             };
         }
 
@@ -212,14 +222,19 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
             status,
             rate_limit,
             ref mut body,
+            gzip,
         } = self.inner
         {
-            let json = ready!(body.poll_unpin(cx).map_err(Error::Hyper))?;
+            let body = ready!(body.poll_unpin(cx).map_err(Error::Hyper))?;
 
             trace!("done reading response body");
 
-            Poll::Ready(make_response(status, rate_limit, &json, |json| {
-                json::from_slice(json).map_err(Error::Deserializing)
+            Poll::Ready(make_response(status, rate_limit, &body, |body| {
+                if gzip {
+                    json::from_reader(GzDecoder::new(body)).map_err(Error::Deserializing)
+                } else {
+                    json::from_slice(body).map_err(Error::Deserializing)
+                }
             }))
         } else {
             unreachable!();
