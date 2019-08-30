@@ -10,11 +10,10 @@ use futures::future;
 use futures::stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt};
 use hyper::client::Client;
 use hyper::StatusCode;
-use hyper_tls::HttpsConnector;
 use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
 
-use crate::common::{open_credentials, open_manifest};
+use crate::common::{https_connector, open_credentials, open_manifest};
 
 #[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
@@ -26,8 +25,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let credentials = open_credentials(opt, &manifest)?;
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = Pool::new(manager).context("failed to initialize the connection pool")?;
-    let conn = HttpsConnector::new(4).context("failed to initialize TLS client")?;
-    let client = Client::builder().build(conn);
+    let client = Client::builder().build(https_connector()?);
 
     let unauthed_users: FuturesUnordered<_> = manifest
         .rule

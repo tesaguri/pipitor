@@ -1,2 +1,0 @@
-[target.armv7-unknown-linux-gnueabihf]
-image = "tesaguri/pipitor-armv7-unknown-linux-gnueabihf:v0.1.0"

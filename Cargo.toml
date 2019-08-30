@@ -15,10 +15,10 @@ A Twitter bot that gathers, filters and Retweets Tweets automatically.
 [[bin]]
 name = "pipitor"
 path = "src/bin/pipitor/main.rs"
-required-features = ["native-tls"]
 
 [dependencies]
 atoi = "0.3"
+cfg-if = "0.1"
 diesel = { version = "1.4", default-features = false, features = ["r2d2", "sqlite"] }
 diesel_derives = "1.4"
 diesel_migrations = { version = "1", default-features = false, features = ["sqlite"] }
@@ -45,7 +45,14 @@ tokio = "0.1.19"
 tokio-signal = "0.2"
 toml = "0.5"
 twitter-stream = { version = "0.9", default-features = false }
+
+ct-logs = { version = "0.6", optional = true }
+hyper-rustls = { version = "0.17", optional = true }
+rustls-pkg = { version = "0.16", package = "rustls", optional = true }
+webpki-roots = { version = "0.17", optional = true }
+
 hyper-tls = { version = "0.3.1", optional = true }
+
 libsqlite3-sys = { version = ">=0.8.0, <0.13.0", optional = true }
 
 [target.'cfg(unix)'.dependencies]
@@ -59,4 +66,5 @@ tokio-stdin-stdout = "0.1"
 default = ["native-tls"]
 native-tls = ["hyper-tls"]
 openssl-vendored = ["hyper-tls/vendored"]
+rustls = ["ct-logs", "hyper-rustls", "rustls-pkg", "webpki-roots"]
 sqlite-bundled = ["libsqlite3-sys/bundled"]

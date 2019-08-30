@@ -28,11 +28,13 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
 
     let mut runtime = tokio::runtime::Runtime::new().context("failed to start a Tokio runtime")?;
 
+    let client = hyper::Client::builder().build(https_connector()?);
     let ipc_path = ipc_path(manifest_path);
     let ((mut ipc, _guard), (signal, app)) = runtime
         .block_on(
             future::lazy(move |_| {
-                let (signal, app) = (quit_signal(), App::new(manifest));
+                let signal = quit_signal();
+                let app = App::with_http_client(client, manifest);
 
                 let x = match ipc_server(&ipc_path) {
                     Ok(ipc) => (ipc.left_stream().fuse(), Some(RmGuard(ipc_path))),

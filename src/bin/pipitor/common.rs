@@ -179,6 +179,39 @@ pub fn open_credentials(opt: &Opt, manifest: &Manifest) -> Fallible<Credentials>
     Ok(toml::from_slice(&buf).context("failed to parse the credentials file")?)
 }
 
+cfg_if::cfg_if! {
+    if #[cfg(feature = "rustls")] {
+        use hyper::client::HttpConnector;
+        use hyper_rustls::HttpsConnector;
+
+        pub fn https_connector() -> failure::Fallible<HttpsConnector<HttpConnector>> {
+            let mut h = HttpConnector::new(4);
+            h.enforce_http(false);
+
+            let mut c = rustls_pkg::ClientConfig::new();
+            c.root_store
+                .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+            c.alpn_protocols.push(b"h2".to_vec());
+            c.ct_logs = Some(&ct_logs::LOGS);
+
+            Ok(HttpsConnector::from((h, c)))
+        }
+    } else if #[cfg(feature = "native-tls")] {
+        use hyper::client::HttpConnector;
+        use hyper_tls::HttpsConnector;
+
+        pub fn https_connector() -> failure::Fallible<HttpsConnector<HttpConnector>> {
+            Ok(HttpsConnector::new(4).context("failed to initialize TLS client")?)
+        }
+    } else {
+        compile_error!("Either `native-tls` or `rustls` feature is required");
+
+        pub fn https_connector() -> failure::Fallible<hyper::client::HttpConnector> {
+            unimplemented!();
+        }
+    }
+}
+
 pub use imp::*;
 
 #[cfg(unix)]
