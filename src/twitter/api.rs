@@ -275,10 +275,7 @@ where
     F: FnOnce(&[u8]) -> Result<T>,
 {
     if let StatusCode::OK = status {
-        parse(body).map(|data| Response {
-            data,
-            rate_limit,
-        })
+        parse(body).map(|data| Response { data, rate_limit })
     } else {
         #[derive(Default, Deserialize)]
         struct Errors {
