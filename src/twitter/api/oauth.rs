@@ -1,4 +1,3 @@
-use futures::compat::{Future01CompatExt, Stream01CompatExt};
 use futures::TryStreamExt;
 use hyper::client::connect::Connect;
 use hyper::header::AUTHORIZATION;
@@ -26,18 +25,12 @@ where
 
     let res = client
         .request(req.body(Default::default()).unwrap())
-        .compat()
         .await
         .map_err(Error::Hyper)?;
 
     let status = res.status();
     let rate_limit = super::rate_limit(&res);
-    let body = res
-        .into_body()
-        .compat()
-        .try_concat()
-        .await
-        .map_err(Error::Hyper)?;
+    let body = res.into_body().try_concat().await.map_err(Error::Hyper)?;
 
     #[derive(serde::Deserialize)]
     struct Token {
@@ -77,18 +70,12 @@ where
 
     let res = client
         .request(req.body(Default::default()).unwrap())
-        .compat()
         .await
         .map_err(Error::Hyper)?;
 
     let status = res.status();
     let rate_limit = super::rate_limit(&res);
-    let body = res
-        .into_body()
-        .compat()
-        .try_concat()
-        .await
-        .map_err(Error::Hyper)?;
+    let body = res.into_body().try_concat().await.map_err(Error::Hyper)?;
 
     #[derive(serde::Deserialize)]
     struct Token {

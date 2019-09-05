@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use failure::{Fail, Fallible, ResultExt};
 use fs2::FileExt;
 use futures::{future, stream};
-use futures::{AsyncWriteExt, FutureExt, StreamExt, TryFutureExt};
+use futures::{pin_mut, FutureExt, StreamExt, TryFutureExt};
 use pipitor::App;
+use tokio::io::AsyncWriteExt;
 
 use crate::common::*;
 
@@ -26,149 +27,144 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
     lock.try_lock_exclusive()
         .context("failed to acquire a file lock")?;
 
-    let mut runtime = tokio::runtime::Runtime::new().context("failed to start a Tokio runtime")?;
+    let runtime = tokio::runtime::Runtime::new().context("failed to start a Tokio runtime")?;
 
-    let client = hyper::Client::builder().build(https_connector()?);
     let ipc_path = ipc_path(manifest_path);
-    let ((mut ipc, _guard), (signal, app)) = runtime
-        .block_on(
-            future::lazy(move |_| {
-                let signal = quit_signal();
-                let app = App::with_http_client(client, manifest);
-
-                let x = match ipc_server(&ipc_path) {
-                    Ok(ipc) => (ipc.left_stream().fuse(), Some(RmGuard(ipc_path))),
-                    Err(e) => {
-                        let e =
-                            e.context(format!("failed to create an IPC socket at {:?}", ipc_path));
-                        error!("{}", DisplayFailChain(&e));
-                        (stream::empty().right_stream().fuse(), None)
-                    }
-                };
-
-                future::join(signal, app).map(|y| (x, y)).unit_error()
-            })
-            .flatten()
-            .compat(),
-        )
-        .unwrap();
-    let mut signal = signal.unwrap().fuse();
-    let mut app = app.context("failed to initialize the application")?;
-
-    if let Some(ref path) = subopt.twitter_dump {
-        let f = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(path)
-            .context(format!(
-                "failed to open {:?}",
-                subopt.twitter_dump.as_ref().unwrap(),
-            ))?;
-        app.set_twitter_dump(f).unwrap();
+    let (ipc, _guard) = match ipc_server(&ipc_path) {
+        Ok(ipc) => (ipc.left_stream().fuse(), Some(RmGuard(ipc_path))),
+        Err(e) => {
+            let e = e.context(format!("failed to create an IPC socket at {:?}", ipc_path));
+            error!("{}", DisplayFailChain(&e));
+            (stream::empty().right_stream().fuse(), None)
+        }
     };
+    pin_mut!(ipc);
 
-    info!("initialized the application");
+    let mut signal = quit_signal().unwrap().fuse();
 
     let opt = opt.clone();
-    runtime.block_on(async move { loop {
-        let mut app_fuse = (&mut app).fuse();
-        futures::select! {
-            result = app_fuse => {
-                match result {
-                    Ok(()) => info!("disconnected from Twitter Streaming API"),
-                    Err(e) => {
-                        // TODO: do not retry immediately if the error is Too Many Requests or Forbidden
-                        error!("{}", DisplayFailChain(&e));
-                    }
-                }
-                info!("restarting the application");
-                app.reset().await?;
-            }
-            _signal_id = signal => {
-                info!("shutdown requested via console");
-                app.shutdown().await?;
-                info!("exiting normally");
-                return Ok(());
-            }
-            result = ipc.select_next_some() => {
-                let (req, mut write) = match result {
-                    Ok(x) => x,
-                    Err(e) => {
-                        warn!("error in the IPC socket: {}", e);
-                        continue;
-                    }
-                };
+    runtime.block_on(async move {
+        let client = hyper::Client::builder().build(https_connector()?);
+        let mut app = App::with_http_client(client, manifest)
+            .await
+            .context("failed to initialize the application")?;
 
-                macro_rules! respond {
-                    ($body:expr) => {
-                        async {
-                            write.write_all($body).await?;
-                            write.flush().await?;
-                            Ok(()) as Fallible<()>
+        if let Some(ref path) = subopt.twitter_dump {
+            let f = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(path)
+                .context(format!(
+                    "failed to open {:?}",
+                    subopt.twitter_dump.as_ref().unwrap(),
+                ))?;
+            app.set_twitter_dump(f).unwrap();
+        };
+
+        info!("initialized the application");
+
+        loop {
+            let mut app_fuse = (&mut app).fuse();
+            futures::select! {
+                result = app_fuse => {
+                    match result {
+                        Ok(()) => info!("disconnected from Twitter Streaming API"),
+                        Err(e) => {
+                            // TODO: do not retry immediately if the error is Too Many Requests or Forbidden
+                            error!("{}", DisplayFailChain(&e));
                         }
-                            .map_err(|e| warn!("failed to write IPC response: {}", e))
-                    };
+                    }
+                    info!("restarting the application");
+                    app.reset().await?;
                 }
+                _signal_id = signal => {
+                    info!("shutdown requested via console");
+                    app.shutdown().await?;
+                    info!("exiting normally");
+                    return Ok(());
+                }
+                result = ipc.select_next_some() => {
+                    let (req, mut write) = match result {
+                        Ok(x) => x,
+                        Err(e) => {
+                            warn!("error in the IPC socket: {}", e);
+                            continue;
+                        }
+                    };
 
-                let req: IpcRequest = match json::from_slice(&req) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        info!(
-                            "unrecognized IPC request: {:?}",
-                            String::from_utf8_lossy(&req),
-                        );
-                        let res = json::to_vec(&IpcResponse::new(
-                            IpcResponseCode::RequestUnrecognized,
-                            "request unrecognized".to_owned(),
-                        ))
-                        .unwrap();
-                        let _ = respond!(&res).await;
-                        continue;
+                    macro_rules! respond {
+                        ($body:expr) => {
+                            async {
+                                write.write_all($body).await?;
+                                write.flush().await?;
+                                Ok(()) as Fallible<()>
+                            }
+                                .map_err(|e| warn!("failed to write IPC response: {}", e))
+                        };
                     }
-                };
 
-                // Declaring IPC response body here to make borrowck happy
-                let mut res = Vec::new();
-                match req {
-                    IpcRequest::Reload {} => {
-                        info!("reloading the manifest");
-                        future::ready(open_manifest(&opt))
-                            .and_then(|manifest| app.replace_manifest(manifest).map_err(|(e, _)| e))
-                            .or_else(|e| {
-                                res = json::to_vec(&IpcResponse::new(
-                                    IpcResponseCode::InternalError,
-                                    "failed to reload the manifest".to_owned(),
-                                ))
-                                .unwrap();
-                                respond!(&res).then(|_| future::err(e))
-                            })
-                            .await?;
+                    let req: IpcRequest = match json::from_slice(&req) {
+                        Ok(x) => x,
+                        Err(e) => {
+                            info!(
+                                "unrecognized IPC request: {:?}",
+                                String::from_utf8_lossy(&req),
+                            );
+                            let res = json::to_vec(&IpcResponse::new(
+                                IpcResponseCode::RequestUnrecognized,
+                                "request unrecognized".to_owned(),
+                            ))
+                            .unwrap();
+                            let _ = respond!(&res).await;
+                            continue;
+                        }
+                    };
 
-                        let res = json::to_vec(&IpcResponse::default()).unwrap();
-                        let _ = respond!(&res).await;
-                    }
-                    IpcRequest::Shutdown {} => {
-                        info!("shutdown requested via IPC");
+                    // Declaring IPC response body here to make borrowck happy
+                    let mut res = Vec::new();
+                    match req {
+                        IpcRequest::Reload {} => {
+                            info!("reloading the manifest");
+                            future::ready(open_manifest(&opt))
+                                .and_then(|manifest| {
+                                    app.replace_manifest(manifest).map_err(|(e, _)| e)
+                                })
+                                .or_else(|e| {
+                                    res = json::to_vec(&IpcResponse::new(
+                                        IpcResponseCode::InternalError,
+                                        "failed to reload the manifest".to_owned(),
+                                    ))
+                                    .unwrap();
+                                    respond!(&res).then(|_| future::err(e))
+                                })
+                                .await?;
 
-                        app.shutdown()
-                            .or_else(|e| {
-                                res = json::to_vec(&IpcResponse::new(
-                                    IpcResponseCode::InternalError,
-                                    "error occured during shutdown".to_owned(),
-                                ))
-                                .unwrap();
-                                respond!(&res).then(|_| future::err(e))
-                            })
-                            .await?;
+                            let res = json::to_vec(&IpcResponse::default()).unwrap();
+                            let _ = respond!(&res).await;
+                        }
+                        IpcRequest::Shutdown {} => {
+                            info!("shutdown requested via IPC");
 
-                        let res = json::to_vec(&IpcResponse::default()).unwrap();
-                        let _ = respond!(&res).await;
+                            app.shutdown()
+                                .or_else(|e| {
+                                    res = json::to_vec(&IpcResponse::new(
+                                        IpcResponseCode::InternalError,
+                                        "error occured during shutdown".to_owned(),
+                                    ))
+                                    .unwrap();
+                                    respond!(&res).then(|_| future::err(e))
+                                })
+                                .await?;
 
-                        info!("exiting normally");
-                        return Ok(());
+                            let res = json::to_vec(&IpcResponse::default()).unwrap();
+                            let _ = respond!(&res).await;
+
+                            info!("exiting normally");
+                            return Ok(());
+                        }
                     }
                 }
             }
         }
-    }}.boxed().compat())
+    })
 }

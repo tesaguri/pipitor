@@ -1,13 +1,12 @@
 use std::ffi::OsString;
 use std::fmt::{self, Debug, Display, Formatter};
+use std::marker::Unpin;
 use std::path::{Path, PathBuf};
 use std::{env, fs, io};
 
 use failure::{AsFail, Fail, Fallible, ResultExt};
-use futures::compat::Stream01CompatExt;
 use futures::future::{self, Future, FutureExt};
-use futures::StreamExt;
-use futures01::Stream as Stream01;
+use futures::{Stream, StreamExt};
 use pipitor::{Credentials, Manifest};
 use serde::{Deserialize, Serialize};
 
@@ -185,7 +184,7 @@ cfg_if::cfg_if! {
         use hyper_rustls::HttpsConnector;
 
         pub fn https_connector() -> failure::Fallible<HttpsConnector<HttpConnector>> {
-            let mut h = HttpConnector::new(4);
+            let mut h = HttpConnector::new();
             h.enforce_http(false);
 
             let mut c = rustls_pkg::ClientConfig::new();
@@ -201,7 +200,7 @@ cfg_if::cfg_if! {
         use hyper_tls::HttpsConnector;
 
         pub fn https_connector() -> failure::Fallible<HttpsConnector<HttpConnector>> {
-            Ok(HttpsConnector::new(4).context("failed to initialize TLS client")?)
+            Ok(HttpsConnector::new().context("failed to initialize TLS client")?)
         }
     } else {
         compile_error!("Either `native-tls` or `rustls` feature is required");
@@ -219,14 +218,11 @@ mod imp {
     use std::io;
     use std::path::Path;
 
-    use futures::compat::{AsyncWrite01CompatExt, Future01CompatExt, Stream01CompatExt};
-    use futures::future;
-    use futures::{AsyncWrite, Future, Stream, TryFutureExt, TryStreamExt};
-    use tokio_signal::unix::{
-        libc::{SIGINT, SIGTERM},
-        Signal,
-    };
-    use tokio_uds::UnixListener;
+    use futures::{Future, Stream, TryStreamExt};
+    use tokio::io::{AsyncReadExt, AsyncWrite};
+    use tokio_net::signal::ctrl_c;
+    use tokio_net::signal::unix::{signal, SignalKind};
+    use tokio_net::uds::UnixListener;
 
     pub fn ipc_server<P>(
         path: &P,
@@ -240,16 +236,18 @@ mod imp {
     fn ipc_server_(
         path: &Path,
     ) -> io::Result<impl Stream<Item = io::Result<(Vec<u8>, impl AsyncWrite)>>> {
-        Ok(UnixListener::bind(path)?
-            .incoming()
-            .compat()
-            .and_then(|a| tokio::io::read_to_end(a, Vec::new()).compat())
-            .map_ok(|(a, buf)| (buf, a.compat())))
+        Ok(UnixListener::bind(path)?.incoming().and_then(|mut a| {
+            async move {
+                let mut buf = Vec::new();
+                a.read_to_end(&mut buf).await?;
+                Ok((buf, a))
+            }
+        }))
     }
 
-    pub fn quit_signal() -> impl Future<Output = io::Result<impl Future<Output = ()>>> {
-        future::try_join(Signal::new(SIGINT).compat(), Signal::new(SIGTERM).compat())
-            .map_ok(|(int, term)| super::merge_select(super::first(int), super::first(term)))
+    pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
+        let (int, term) = (ctrl_c()?, signal(SignalKind::terminate())?);
+        Ok(super::merge_select(super::first(int), super::first(term)))
     }
 }
 
@@ -258,10 +256,10 @@ mod imp {
     use std::io;
     use std::path::Path;
 
-    use futures::compat::Future01CompatExt;
-    use futures::{future, stream};
-    use futures::{AsyncWrite, Future, Stream, TryFutureExt};
-    use tokio_signal::windows::Event;
+    use futures::stream;
+    use futures::{Future, Stream};
+    use tokio::io::AsyncWrite;
+    use tokio_net::signal::{ctrl_c, windows::ctrl_break};
 
     pub fn ipc_server<P>(
         _: &P,
@@ -274,19 +272,14 @@ mod imp {
         Ok(stream::empty::<io::Result<(_, Vec<u8>)>>())
     }
 
-    pub fn quit_signal() -> impl Future<Output = io::Result<impl Future<Output = ()>>> {
-        future::try_join(Event::ctrl_c().compat(), Event::ctrl_break().compat())
-            .map_ok(|(cc, cb)| super::merge_select(super::first(cc), super::first(cb)))
+    pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
+        let (cc, cb) = (ctrl_c()?, ctrl_break()?);
+        Ok(super::merge_select(super::first(cc), super::first(cb)))
     }
 }
 
-fn first<S: Stream01>(s: S) -> impl Future<Output = ()>
-where
-    S::Error: Debug,
-{
-    s.compat().into_future().map(|(r, _)| {
-        r.unwrap().unwrap();
-    })
+fn first<S: Stream<Item = ()> + Unpin>(s: S) -> impl Future<Output = ()> {
+    s.into_future().map(|(opt, _)| opt.unwrap())
 }
 
 fn merge_select<A, B>(a: A, b: B) -> impl Future<Output = A::Output>
