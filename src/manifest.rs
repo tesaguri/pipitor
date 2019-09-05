@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::num::NonZeroU64;
 use std::path::Path;
 
-use dotenv::dotenv_iter;
 use serde::Deserialize;
 
 use crate::rules::RuleMap;
@@ -54,12 +53,7 @@ impl Manifest {
     pub fn database_url(&self) -> Cow<'_, str> {
         if let Some(ref url) = self.database_url {
             Cow::Borrowed(url)
-        } else if let Some((_, url)) = dotenv_iter()
-            .into_iter()
-            .flatten()
-            .flatten()
-            .find(|(k, _)| k == "DATABASE_URL")
-        {
+        } else if let Ok(url) = dotenv::var("DATABASE_URL") {
             Cow::Owned(url)
         } else {
             Cow::Borrowed("pipitor.sqlite3")

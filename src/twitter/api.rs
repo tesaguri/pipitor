@@ -11,7 +11,7 @@ macro_rules! api_requests {
         $($rest:tt)*
     ) => {
         $(#[$attr])*
-        #[derive(oauth1_request_derive::OAuth1Authorize)]
+        #[derive(oauth1::Authorize)]
         pub struct $Name {
             $($(#[$req_attr])* $required: $req_ty,)*
             $($(#[$opt_attr])* $optional: $opt_ty,)*
@@ -73,7 +73,7 @@ use hyper::client::connect::Connect;
 use hyper::client::{Client, ResponseFuture as HyperResponseFuture};
 use hyper::header::{HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE};
 use hyper::{Body, Method, StatusCode, Uri};
-use oauth1::{Credentials, OAuth1Authorize};
+use oauth1::Credentials;
 use serde::{de, Deserialize};
 
 pub struct Response<T> {
@@ -130,7 +130,7 @@ pub struct ErrorCode {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub trait Request: OAuth1Authorize {
+pub trait Request: oauth1::Authorize {
     type Data: de::DeserializeOwned;
 
     const METHOD: Method;

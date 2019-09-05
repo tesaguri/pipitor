@@ -23,7 +23,6 @@ use structopt::StructOpt;
 use common::{DisplayFailChain, Opt};
 
 #[derive(StructOpt)]
-#[structopt(author = "")]
 struct Args {
     #[structopt(flatten)]
     opt: Opt,
@@ -39,11 +38,11 @@ enum Cmd {
     Migration(migration::Opt),
     #[structopt(name = "run", about = "Start running the bot")]
     Run(run::Opt),
-    #[structopt(name = "setup", about = "")]
+    #[structopt(name = "setup")]
     Setup(setup::Opt),
-    #[structopt(name = "twitter-list-sync", about = "")]
+    #[structopt(name = "twitter-list-sync")]
     TwitterListSync(twitter_list_sync::Opt),
-    #[structopt(name = "twitter-login", about = "")]
+    #[structopt(name = "twitter-login")]
     TwitterLogin(twitter_login::Opt),
 }
 
