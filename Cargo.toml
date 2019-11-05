@@ -24,11 +24,11 @@ diesel = { version = "1.4", default-features = false, features = ["r2d2", "sqlit
 diesel_derives = "1.4"
 diesel_migrations = { version = "1", default-features = false, features = ["sqlite"] }
 dotenv = "0.14"
-env_logger = "0.6"
+env_logger = "0.7"
 failure = "0.1.3"
 flate2 = "1"
 fs2 = "0.4"
-futures-preview = { version = "0.3.0-alpha.17", features = ["async-await", "nightly"] }
+futures-preview = { version = "0.3.0-alpha.19", features = ["async-await"] }
 futures-util-preview = "0.3.0-alpha.17"
 hyper = "0.13.0-alpha.1"
 json = { version = "1", package = "serde_json" }
@@ -49,7 +49,7 @@ twitter-stream = { version = "0.10.0-alpha.1", default-features = false }
 ct-logs = { version = "0.6", optional = true }
 hyper-rustls = { version = "0.18.0-alpha.1", optional = true }
 rustls-pkg = { version = "0.16", package = "rustls", optional = true }
-webpki-roots = { version = "0.17", optional = true }
+webpki-roots = { version = "0.18", optional = true }
 
 hyper-tls = { version = "0.4.0-alpha.1", optional = true }
 
