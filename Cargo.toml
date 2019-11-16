@@ -5,7 +5,6 @@ edition = "2018"
 authors = ["Daiki Mizukami <tesaguriguma@gmail.com>"]
 license = "AGPL-3.0-only"
 readme = "README.md"
-categories = ["command-line-utilities"]
 repository = "https://github.com/tesaguri/pipitor"
 documentation = "https://docs.rs/pipitor/0.3.0-alpha.2/pipitor/"
 description = """
