@@ -88,8 +88,8 @@ impl TwitterListTimeline {
             inner.send_request(core);
         }
 
-        let mut tweets = match ready!(inner.poll_next(cx)) {
-            Ok(resp) => resp.data.into_iter(),
+        let tweets = match ready!(inner.poll_next(cx)) {
+            Ok(resp) => resp.data,
             Err(e) => {
                 // Skip the error as the list timeline is only for complementary purpose.
                 warn!("error while retrieving Tweets from the list: {:?}", e);
@@ -108,6 +108,9 @@ impl TwitterListTimeline {
                 return Poll::Pending;
             }
         };
+
+        // Reverse the order so that older Tweets get Retweeted first.
+        let mut tweets = tweets.into_iter().rev();
 
         if let Some(t) = tweets.next() {
             inner.since_id = Some(t.id);
