@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::pin::Pin;
-use std::task::Context;
+use std::task::{Context, Poll};
 
 use diesel::prelude::*;
 use failure::Fallible;
 use futures::future::Future;
+use futures::ready;
 use futures::stream::{FuturesUnordered, StreamExt};
-use futures::{ready, Poll};
 use serde::de;
 
 use crate::twitter;

@@ -11,9 +11,7 @@ pub trait TwitterRequestExt: twitter::Request {
         user: impl Into<Option<i64>>,
     ) -> twitter::ResponseFuture<Self::Data>
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static;
+        C: Connect + Clone + Send + Sync + 'static;
 }
 
 impl<T> TwitterRequestExt for T
@@ -26,9 +24,7 @@ where
         user: impl Into<Option<i64>>,
     ) -> twitter::ResponseFuture<Self::Data>
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static,
+        C: Connect + Clone + Send + Sync + 'static,
     {
         let user = user.into().unwrap_or_else(|| core.manifest().twitter.user);
         twitter::Request::send(

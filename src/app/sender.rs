@@ -36,9 +36,7 @@ impl Sender {
 
     pub fn send_tweet<C>(&mut self, tweet: twitter::Tweet, core: &Core<C>) -> Fallible<()>
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static,
+        C: Connect + Clone + Send + Sync + 'static,
     {
         trace_fn!(Sender::send_tweet::<C>, "tweet={:?}", tweet);
 
@@ -103,9 +101,7 @@ impl Sender {
 
     pub fn poll_done<C>(&mut self, core: &Core<C>, cx: &mut Context<'_>) -> Poll<Fallible<()>>
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static,
+        C: Connect + Clone + Send + Sync + 'static,
     {
         let mut ready = true;
 
@@ -121,9 +117,7 @@ impl Sender {
 
     fn poll_find_duplicate_tweet<C>(&mut self, core: &Core<C>, cx: &mut Context<'_>) -> Poll<()>
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static,
+        C: Connect + Clone + Send + Sync + 'static,
     {
         while let Some((result, tweet)) =
             ready!(self.find_duplicate_tweet_queue.poll_next_unpin(cx))
@@ -140,9 +134,7 @@ impl Sender {
 
     fn retweet<C>(&mut self, tweet: twitter::Tweet, core: &Core<C>)
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static,
+        C: Connect + Clone + Send + Sync + 'static,
     {
         let mut retweets = PendingRetweets::new();
 

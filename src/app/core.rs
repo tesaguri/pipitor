@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
+use std::pin::Pin;
 
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
@@ -9,7 +10,8 @@ use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
 use futures::{Future, FutureExt};
 use hyper::client::connect::Connect;
-use hyper::Client;
+use hyper::{Body, Client};
+use pin_project::pin_project;
 use twitter_stream::TwitterStream;
 
 use crate::models;
@@ -19,10 +21,12 @@ use crate::{Credentials, Manifest};
 use super::TwitterListTimeline;
 
 /// An object referenced by `poll`-like methods under `app` module.
+#[pin_project]
 pub struct Core<C> {
     manifest: Manifest,
     credentials: Credentials,
     pool: Pool<ConnectionManager<SqliteConnection>>,
+    #[pin]
     client: Client<C>,
     pub(super) twitter_tokens: HashMap<i64, oauth1::Credentials<Box<str>>>,
     twitter_dump: Option<BufWriter<File>>,
@@ -30,9 +34,7 @@ pub struct Core<C> {
 
 impl<C> Core<C>
 where
-    C: Connect + Sync + 'static,
-    C::Transport: 'static,
-    C::Future: 'static,
+    C: Connect + Clone + Send + Sync + 'static,
 {
     pub fn new(manifest: Manifest, client: Client<C>) -> Fallible<Self> {
         trace_fn!(Core::<C>::new);
@@ -71,7 +73,7 @@ where
         Ok(ret)
     }
 
-    pub fn init_twitter(&self) -> impl Future<Output = Fallible<TwitterStream>> {
+    pub fn init_twitter(&self) -> impl Future<Output = Fallible<TwitterStream<Body>>> {
         trace_fn!(Core::<C>::init_twitter);
 
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
@@ -92,7 +94,7 @@ where
 
         twitter_stream::Builder::filter(stream_token)
             .follow(&*twitter_topics)
-            .listen_with_client(&self.client)
+            .listen_with_client(self.client.clone())
             .map(|result| Ok(result.context("error while connecting to Twitter's Streaming API")?))
     }
 
@@ -191,17 +193,20 @@ impl<C> Core<C> {
             .map(oauth1::Credentials::as_ref)
     }
 
-    pub fn with_twitter_dump<F, E>(&mut self, f: F) -> Fallible<()>
+    pub fn with_twitter_dump<F, E>(self: Pin<&mut Self>, f: F) -> Fallible<()>
     where
         F: FnOnce(&mut BufWriter<File>) -> Result<(), E>,
         E: Fail,
     {
-        if let Some(ref mut dump) = self.twitter_dump {
+        let twitter_dump = self.project().twitter_dump;
+
+        if let Some(ref mut dump) = twitter_dump {
             f(dump).map_err(|e| {
-                self.twitter_dump = None;
+                *twitter_dump = None;
                 e.context("failed to write a Tweet to the dump file")
             })?;
         }
+
         Ok(())
     }
 

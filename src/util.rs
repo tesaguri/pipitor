@@ -1,14 +1,26 @@
+use std::convert::TryInto;
 use std::fs;
 use std::marker::Unpin;
+use std::mem;
 use std::ops::Range;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use bytes::Buf;
 use failure::{Fallible, ResultExt};
-use futures::{Future, FutureExt};
+use futures::{ready, Future, FutureExt};
+use http_body::Body;
+use pin_project::pin_project;
 use serde::{de, Deserialize};
 
 use crate::Credentials;
+
+#[pin_project]
+pub struct ConcatBody<B> {
+    #[pin]
+    body: B,
+    accum: Vec<u8>,
+}
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -36,6 +48,31 @@ macro_rules! trace_fn {
         #[allow(path_statements)] { $path; }
         trace!(concat!(trace_fn!(@heading $path), "; ", $fmt) $($arg)*);
     }};
+}
+
+impl<B: Body> ConcatBody<B> {
+    pub fn new(body: B) -> Self {
+        let cap = body.size_hint().lower();
+        ConcatBody {
+            body,
+            accum: Vec::with_capacity(cap.try_into().unwrap_or(0)),
+        }
+    }
+}
+
+impl<B: Body> Future for ConcatBody<B> {
+    type Output = Result<Vec<u8>, B::Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+
+        loop {
+            match ready!(this.body.as_mut().poll_data(cx)?) {
+                Some(buf) => this.accum.extend(buf.bytes()),
+                None => return Poll::Ready(Ok(mem::take(this.accum))),
+            }
+        }
+    }
 }
 
 impl<F, T> ResolveWith<F, T>

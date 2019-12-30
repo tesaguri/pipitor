@@ -8,16 +8,17 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::mem;
 use std::pin::Pin;
-use std::task::Context;
+use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
 use futures::future;
-use futures::{Future, Poll, StreamExt, TryFutureExt};
+use futures::{Future, StreamExt, TryFutureExt};
 use hyper::client::connect::Connect;
-use hyper::Client;
+use hyper::{Body, Client};
+use pin_project::pin_project;
 use twitter_stream::TwitterStream;
 
 use crate::rules::TopicId;
@@ -30,10 +31,12 @@ use self::sender::Sender;
 use self::twitter_list_timeline::TwitterListTimeline;
 use self::twitter_request_ext::TwitterRequestExt;
 
+#[pin_project]
 pub struct App<C> {
+    #[pin]
     core: Core<C>,
     twitter_list: TwitterListTimeline,
-    twitter: TwitterStream,
+    twitter: TwitterStream<Body>,
     twitter_done: bool,
     sender: Sender,
 }
@@ -41,20 +44,15 @@ pub struct App<C> {
 #[cfg(feature = "native-tls")]
 impl App<hyper_tls::HttpsConnector<hyper::client::HttpConnector>> {
     pub fn new(manifest: Manifest) -> impl Future<Output = Fallible<Self>> {
-        future::ready(hyper_tls::HttpsConnector::new().context("failed to initialize TLS client"))
-            .map_err(Into::into)
-            .and_then(|conn| {
-                let client = Client::builder().build(conn);
-                Self::with_http_client(client, manifest)
-            })
+        let conn = hyper_tls::HttpsConnector::new();
+        let client = Client::builder().build(conn);
+        Self::with_http_client(client, manifest)
     }
 }
 
 impl<C: Connect> App<C>
 where
-    C: Connect + Sync + 'static,
-    C::Transport: 'static,
-    C::Future: 'static,
+    C: Connect + Clone + Send + Sync + 'static,
 {
     pub fn with_http_client(
         client: Client<C>,
@@ -78,32 +76,35 @@ where
         self.core.set_twitter_dump(twitter_dump)
     }
 
-    pub fn shutdown<'a>(&'a mut self) -> impl Future<Output = Fallible<()>> + 'a {
-        future::poll_fn(move |cx| {
-            match (
-                self.twitter_list
-                    .poll_backfill(&mut self.core, &mut self.sender, cx)?,
-                self.sender.poll_done(&self.core, cx)?,
-            ) {
-                (Poll::Ready(()), Poll::Ready(())) => Poll::Ready(Ok(())),
-                _ => Poll::Pending,
-            }
-        })
+    pub fn shutdown<'a>(mut self: Pin<&'a mut Self>) -> impl Future<Output = Fallible<()>> + 'a {
+        future::poll_fn(move |cx| self.as_mut().poll_shutdown(cx))
     }
 
-    pub async fn reset(&mut self) -> Fallible<()> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
+        let mut this = self.project();
+        let poll_backfill = this
+            .twitter_list
+            .poll_backfill(this.core.as_mut(), this.sender, cx)?;
+        match (poll_backfill, this.sender.poll_done(&this.core, cx)?) {
+            (Poll::Ready(()), Poll::Ready(())) => Poll::Ready(Ok(())),
+            _ => Poll::Pending,
+        }
+    }
+
+    pub async fn reset(mut self: Pin<&mut Self>) -> Fallible<()> {
         let twitter_list = if self.twitter_done {
-            self.twitter = self.core.init_twitter().await?;
-            self.twitter_done = false;
+            let this = self.as_mut().project();
+            *this.twitter = this.core.init_twitter().await?;
+            *this.twitter_done = false;
             self.core.init_twitter_list()?
         } else {
             TwitterListTimeline::empty()
         };
 
-        self.shutdown().await?;
+        self.as_mut().shutdown().await?;
         debug_assert!(!self.sender.has_pending());
 
-        self.twitter_list = twitter_list;
+        *self.project().twitter_list = twitter_list;
 
         Ok(())
     }
@@ -197,7 +198,7 @@ where
 
             Ok(())
         }
-            .await;
+        .await;
 
         match catch {
             Ok(()) => {
@@ -213,21 +214,23 @@ where
         }
     }
 
-    fn poll_twitter(&mut self, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
-        while let Poll::Ready(v) = self.twitter.poll_next_unpin(cx) {
+    fn poll_twitter(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
+        let mut this = self.project();
+
+        while let Poll::Ready(v) = this.twitter.poll_next_unpin(cx) {
             let result = if let Some(r) = v {
                 r
             } else {
-                self.twitter_done = true;
+                *this.twitter_done = true;
                 return Poll::Ready(Ok(()));
             };
 
             let json = result.map_err(|e| {
-                self.twitter_done = true;
+                *this.twitter_done = true;
                 e.context("error while listening to Twitter's Streaming API")
             })?;
 
-            self.core.with_twitter_dump(|dump| {
+            this.core.as_mut().with_twitter_dump(|dump| {
                 dump.write_all(json.trim_end().as_bytes())?;
                 dump.write_all(b"\n")
             })?;
@@ -247,12 +250,19 @@ where
             }
 
             let from = tweet.user.id;
-            let will_process = self.manifest().rule.contains_topic(&TopicId::Twitter(from))
+            let will_process = this
+                .core
+                .manifest()
+                .rule
+                .contains_topic(&TopicId::Twitter(from))
                 && tweet.in_reply_to_user_id.map_or(true, |to| {
-                    self.manifest().rule.contains_topic(&TopicId::Twitter(to))
+                    this.core
+                        .manifest()
+                        .rule
+                        .contains_topic(&TopicId::Twitter(to))
                 });
             if will_process {
-                self.sender.send_tweet(tweet, &self.core)?;
+                this.sender.send_tweet(tweet, &this.core)?;
             }
         }
 
@@ -284,27 +294,26 @@ impl<C> App<C> {
 
 impl<C> Future for App<C>
 where
-    C: Connect + Sync + 'static,
-    C::Transport: 'static,
-    C::Future: 'static,
+    C: Connect + Clone + Send + Sync + 'static,
 {
     type Output = Fallible<()>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
         trace_fn!(App::<C>::poll);
 
-        let this = self.get_mut();
+        let this = self.as_mut().project();
 
-        let _ = this.twitter_list.poll(&this.core, &mut this.sender, cx)?;
+        let _ = this.twitter_list.poll(&this.core, this.sender, cx)?;
 
         let _ = this
             .twitter_list
-            .poll_backfill(&mut this.core, &mut this.sender, cx)?;
+            .poll_backfill(this.core, this.sender, cx)?;
 
-        if let Poll::Ready(result) = this.poll_twitter(cx) {
+        if let Poll::Ready(result) = self.as_mut().poll_twitter(cx) {
             return Poll::Ready(result);
         }
 
+        let this = self.project();
         let _ = this.sender.poll_done(&this.core, cx)?;
 
         Poll::Pending

@@ -1,15 +1,16 @@
 use std::io::Write;
 use std::num::NonZeroU64;
-use std::task::Context;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
 
 use failure::Fallible;
 
 use futures::future::FutureExt;
+use futures::ready;
 use futures::stream::StreamExt;
-use futures::{ready, Poll};
 use hyper::client::connect::Connect;
-use tokio::timer::Interval;
+use tokio::time::Interval;
 
 use crate::twitter;
 
@@ -37,9 +38,7 @@ const RESP_BUF_CAP: usize = 8;
 impl TwitterListTimeline {
     pub fn new<C>(list_id: NonZeroU64, since_id: Option<i64>, core: &Core<C>) -> Self
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static,
+        C: Connect + Clone + Send + Sync + 'static,
     {
         let backfill = since_id.map(|since_id| {
             let response = twitter::lists::Statuses::new(list_id)
@@ -53,7 +52,7 @@ impl TwitterListTimeline {
             since_id: None,
             responses: Vec::with_capacity(RESP_BUF_CAP),
             // Rate limit of GET lists/statuses (user auth): 900 reqs/15-min window (1 req/sec)
-            interval: Interval::new_interval(Duration::from_secs(1)),
+            interval: tokio::time::interval(Duration::from_secs(1)),
             backfill,
         };
         inner.send_request(core);
@@ -72,9 +71,7 @@ impl TwitterListTimeline {
         cx: &mut Context<'_>,
     ) -> Poll<Fallible<()>>
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static,
+        C: Connect + Clone + Send + Sync + 'static,
     {
         trace_fn!(TwitterListTimeline::poll::<C>);
 
@@ -101,7 +98,8 @@ impl TwitterListTimeline {
                             let eta = reset
                                 .duration_since(now_s)
                                 .unwrap_or(Duration::from_secs(0));
-                            inner.interval = Interval::new(now_i + eta, Duration::from_secs(1));
+                            let at = (now_i + eta).into();
+                            inner.interval = tokio::time::interval_at(at, Duration::from_secs(1));
                         }
                     }
                 }
@@ -135,14 +133,12 @@ impl TwitterListTimeline {
 
     pub fn poll_backfill<C>(
         &mut self,
-        core: &mut Core<C>,
+        mut core: Pin<&mut Core<C>>,
         sender: &mut Sender,
         cx: &mut Context<'_>,
     ) -> Poll<Fallible<()>>
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static,
+        C: Connect + Clone + Send + Sync + 'static,
     {
         let &mut Inner {
             list_id,
@@ -183,15 +179,15 @@ impl TwitterListTimeline {
         backfill.response = twitter::lists::Statuses::new(list_id)
             .since_id(Some(backfill.since_id))
             .max_id(max_id)
-            .send(core, None);
+            .send(&core, None);
 
         for t in tweets {
-            core.with_twitter_dump(|mut dump| {
+            core.as_mut().with_twitter_dump(|mut dump| {
                 json::to_writer(&mut dump, &t)?;
                 dump.write_all(b"\n")
             })?;
             if t.retweeted_status.is_none() {
-                sender.send_tweet(t, core)?;
+                sender.send_tweet(t, &core)?;
             }
         }
 
@@ -222,9 +218,7 @@ impl Inner {
 
     fn send_request<C>(&mut self, core: &Core<C>)
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static,
+        C: Connect + Clone + Send + Sync + 'static,
     {
         trace_fn!(Inner::send_request::<C>);
 

@@ -27,7 +27,7 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
     lock.try_lock_exclusive()
         .context("failed to acquire a file lock")?;
 
-    let runtime = tokio::runtime::Runtime::new().context("failed to start a Tokio runtime")?;
+    let mut runtime = tokio::runtime::Runtime::new().context("failed to start a Tokio runtime")?;
 
     let ipc_path = ipc_path(manifest_path);
     let (ipc, _guard) = match ipc_server(&ipc_path) {
@@ -44,10 +44,11 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
 
     let opt = opt.clone();
     runtime.block_on(async move {
-        let client = hyper::Client::builder().build(https_connector()?);
-        let mut app = App::with_http_client(client, manifest)
+        let client = hyper::Client::builder().build(https_connector());
+        let app = App::with_http_client(client, manifest)
             .await
             .context("failed to initialize the application")?;
+        pin_mut!(app);
 
         if let Some(ref path) = subopt.twitter_dump {
             let f = OpenOptions::new()
@@ -75,11 +76,11 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
                         }
                     }
                     info!("restarting the application");
-                    app.reset().await?;
+                    app.as_mut().reset().await?;
                 }
                 _signal_id = signal => {
                     info!("shutdown requested via console");
-                    app.shutdown().await?;
+                    app.as_mut().shutdown().await?;
                     info!("exiting normally");
                     return Ok(());
                 }

@@ -2,7 +2,7 @@ use std::net::Shutdown;
 
 use failure::{Fallible, ResultExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio_net::uds::UnixStream;
+use tokio::net::UnixStream;
 
 use crate::common::{ipc_path, IpcRequest, IpcResponse};
 

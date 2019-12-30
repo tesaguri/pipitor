@@ -1,8 +1,9 @@
-use futures::TryStreamExt;
 use hyper::client::connect::Connect;
 use hyper::header::AUTHORIZATION;
 use hyper::{Client, Uri};
 use oauth1::Credentials;
+
+use crate::util::ConcatBody;
 
 use super::{Error, Response, Result};
 
@@ -11,7 +12,7 @@ pub async fn request_token<'a, C>(
     client: &'a Client<C>,
 ) -> Result<Response<Credentials>>
 where
-    C: Connect + Sync + 'static,
+    C: Connect + Clone + Send + Sync + 'static,
 {
     const URI: &str = "https://api.twitter.com/oauth/request_token";
 
@@ -20,17 +21,18 @@ where
             .callback("oob")
             .post_form(URI, ());
 
-    let mut req = hyper::Request::post(Uri::from_static(URI));
-    req.header(AUTHORIZATION, authorization);
+    let req = hyper::Request::post(Uri::from_static(URI))
+        .header(AUTHORIZATION, authorization)
+        .body(Default::default())
+        .unwrap();
 
-    let res = client
-        .request(req.body(Default::default()).unwrap())
-        .await
-        .map_err(Error::Hyper)?;
+    let res = client.request(req).await.map_err(Error::Hyper)?;
 
     let status = res.status();
     let rate_limit = super::rate_limit(&res);
-    let body = res.into_body().try_concat().await.map_err(Error::Hyper)?;
+    let body = ConcatBody::new(res.into_body())
+        .await
+        .map_err(Error::Hyper)?;
 
     #[derive(serde::Deserialize)]
     struct Token {
@@ -55,7 +57,7 @@ pub async fn access_token<'a, C>(
     client: &'a Client<C>,
 ) -> Result<Response<(i64, Credentials)>>
 where
-    C: Connect + Sync + 'static,
+    C: Connect + Clone + Send + Sync + 'static,
 {
     const URI: &str = "https://api.twitter.com/oauth/access_token";
 
@@ -65,17 +67,18 @@ where
             .verifier(oauth_verifier)
             .post_form(URI, ());
 
-    let mut req = hyper::Request::post(Uri::from_static(URI));
-    req.header(AUTHORIZATION, authorization);
+    let req = hyper::Request::post(Uri::from_static(URI))
+        .header(AUTHORIZATION, authorization)
+        .body(Default::default())
+        .unwrap();
 
-    let res = client
-        .request(req.body(Default::default()).unwrap())
-        .await
-        .map_err(Error::Hyper)?;
+    let res = client.request(req).await.map_err(Error::Hyper)?;
 
     let status = res.status();
     let rate_limit = super::rate_limit(&res);
-    let body = res.into_body().try_concat().await.map_err(Error::Hyper)?;
+    let body = ConcatBody::new(res.into_body())
+        .await
+        .map_err(Error::Hyper)?;
 
     #[derive(serde::Deserialize)]
     struct Token {

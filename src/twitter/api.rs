@@ -63,18 +63,19 @@ use std::fmt::{self, Display, Formatter};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use failure::Fail;
 use flate2::bufread::GzDecoder;
-use futures::task::Context;
-use futures::{ready, Future, FutureExt, Poll, TryStreamExt};
-use futures_util::try_stream::TryConcat;
+use futures::{ready, Future, FutureExt};
 use hyper::client::connect::Connect;
 use hyper::client::{Client, ResponseFuture as HyperResponseFuture};
 use hyper::header::{HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE};
 use hyper::{Body, Method, StatusCode, Uri};
 use oauth1::Credentials;
 use serde::{de, Deserialize};
+
+use crate::util::ConcatBody;
 
 pub struct Response<T> {
     pub data: T,
@@ -91,7 +92,7 @@ enum ResponseFutureInner {
     Body {
         status: StatusCode,
         rate_limit: Option<RateLimit>,
-        body: TryConcat<Body>,
+        body: ConcatBody<Body>,
         gzip: bool,
     },
 }
@@ -144,9 +145,7 @@ pub trait Request: oauth1::Authorize {
         client: &Client<C>,
     ) -> ResponseFuture<Self::Data>
     where
-        C: Connect + Sync + 'static,
-        C::Transport: 'static,
-        C::Future: 'static,
+        C: Connect + Clone + Send + Sync + 'static,
     {
         let mut builder = oauth1::Builder::new(client_credentials, oauth1::HmacSha1);
         builder.token(token_credentials);
@@ -162,8 +161,8 @@ pub trait Request: oauth1::Authorize {
         trace!("{} {}", Self::METHOD, Self::URI);
         trace!("data: {}", data);
 
-        let mut req = hyper::Request::builder();
-        req.method(Self::METHOD)
+        let req = hyper::Request::builder()
+            .method(Self::METHOD)
             .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
             .header(AUTHORIZATION, authorization);
 
@@ -213,7 +212,7 @@ impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
             self.inner = ResponseFutureInner::Body {
                 status: res.status(),
                 rate_limit: rate_limit(&res),
-                body: res.into_body().try_concat(),
+                body: ConcatBody::new(res.into_body()),
                 gzip,
             };
         }

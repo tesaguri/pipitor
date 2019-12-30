@@ -25,7 +25,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let credentials = open_credentials(opt, &manifest)?;
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = Pool::new(manager).context("failed to initialize the connection pool")?;
-    let client = Client::builder().build(https_connector()?);
+    let client = Client::builder().build(https_connector());
 
     let unauthed_users: FuturesUnordered<_> = manifest
         .rule

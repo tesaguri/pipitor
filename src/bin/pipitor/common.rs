@@ -183,7 +183,7 @@ cfg_if::cfg_if! {
         use hyper::client::HttpConnector;
         use hyper_rustls::HttpsConnector;
 
-        pub fn https_connector() -> failure::Fallible<HttpsConnector<HttpConnector>> {
+        pub fn https_connector() -> HttpsConnector<HttpConnector> {
             let mut h = HttpConnector::new();
             h.enforce_http(false);
 
@@ -193,19 +193,19 @@ cfg_if::cfg_if! {
             c.alpn_protocols.push(b"h2".to_vec());
             c.ct_logs = Some(&ct_logs::LOGS);
 
-            Ok(HttpsConnector::from((h, c)))
+            HttpsConnector::from((h, c))
         }
     } else if #[cfg(feature = "native-tls")] {
         use hyper::client::HttpConnector;
         use hyper_tls::HttpsConnector;
 
-        pub fn https_connector() -> failure::Fallible<HttpsConnector<HttpConnector>> {
-            Ok(HttpsConnector::new().context("failed to initialize TLS client")?)
+        pub fn https_connector() -> HttpsConnector<HttpConnector> {
+            HttpsConnector::new()
         }
     } else {
         compile_error!("Either `native-tls` or `rustls` feature is required");
 
-        pub fn https_connector() -> failure::Fallible<hyper::client::HttpConnector> {
+        pub fn https_connector() -> hyper::client::HttpConnector {
             unimplemented!();
         }
     }
@@ -217,12 +217,13 @@ pub use imp::*;
 mod imp {
     use std::io;
     use std::path::Path;
+    use std::task::Poll;
 
-    use futures::{Future, Stream, TryStreamExt};
+    use futures::stream;
+    use futures::{pin_mut, ready, Future, Stream, TryStreamExt};
     use tokio::io::{AsyncReadExt, AsyncWrite};
-    use tokio_net::signal::ctrl_c;
-    use tokio_net::signal::unix::{signal, SignalKind};
-    use tokio_net::uds::UnixListener;
+    use tokio::net::UnixListener;
+    use tokio::signal::unix::{signal, SignalKind};
 
     pub fn ipc_server<P>(
         path: &P,
@@ -236,17 +237,30 @@ mod imp {
     fn ipc_server_(
         path: &Path,
     ) -> io::Result<impl Stream<Item = io::Result<(Vec<u8>, impl AsyncWrite)>>> {
-        Ok(UnixListener::bind(path)?.incoming().and_then(|mut a| {
-            async move {
-                let mut buf = Vec::new();
-                a.read_to_end(&mut buf).await?;
-                Ok((buf, a))
-            }
+        let mut listener = UnixListener::bind(path)?;
+        Ok(stream::poll_fn(move |cx| {
+            // Emulating `UnixListener::incoming` with `poll_fn` because `incoming` borrows
+            // the listener so its returned value would not be able to outlive this function.
+            let accept = listener.accept();
+            pin_mut!(accept);
+            let (socket, _) = ready!(accept.poll(cx))?;
+            Poll::Ready(Some(Ok(socket)))
+
+            // We are dropping `accept` here, which potentially cancels the future,
+            // but it's OK because `UnixListener::accept` is implemented with `future::poll_fn`
+            // so dropping it does not prevent the task from being woken
+            // (it's an implementation detail though).
+        })
+        .and_then(|mut a| async move {
+            let mut buf = Vec::new();
+            a.read_to_end(&mut buf).await?;
+            Ok((buf, a))
         }))
     }
 
     pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
-        let (int, term) = (ctrl_c()?, signal(SignalKind::terminate())?);
+        let int = signal(SignalKind::interrupt())?;
+        let term = signal(SignalKind::terminate())?;
         Ok(super::merge_select(super::first(int), super::first(term)))
     }
 }
@@ -257,9 +271,9 @@ mod imp {
     use std::path::Path;
 
     use futures::stream;
-    use futures::{Future, Stream};
+    use futures::{Future, FutureExt, Stream};
     use tokio::io::AsyncWrite;
-    use tokio_net::signal::{ctrl_c, windows::ctrl_break};
+    use tokio::signal::{ctrl_c, windows::ctrl_break};
 
     pub fn ipc_server<P>(
         _: &P,
@@ -273,8 +287,9 @@ mod imp {
     }
 
     pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
-        let (cc, cb) = (ctrl_c()?, ctrl_break()?);
-        Ok(super::merge_select(super::first(cc), super::first(cb)))
+        let cc = Box::pin(tokio::signal::ctrl_c()).map(|result| result.unwrap());
+        let cb = ctrl_break()?;
+        Ok(super::merge_select(cc, super::first(cb)))
     }
 }
 
