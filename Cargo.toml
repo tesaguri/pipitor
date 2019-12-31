@@ -40,7 +40,7 @@ serde = { version = "1.0.34", features = ["derive"] }
 serde_derive = "1.0.34"
 serde_regex = "0.4"
 serde_urlencoded = "0.6"
-smallvec = { version = "0.6.4", features = ["serde"] }
+smallvec = { version = "1", features = ["serde"] }
 structopt = "0.3"
 tokio = { version = "0.2", features = ["io-std", "signal", "stream", "time", "uds"] }
 tower-service = "0.3"
