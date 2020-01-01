@@ -31,7 +31,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = Pool::new(manager).context("failed to initialize the connection pool")?;
 
-    let client = Client::builder().build(https_connector());
+    let mut client = Client::builder().build(https_connector());
 
     let token: oauth1::Credentials = twitter_tokens
         .find(&manifest.twitter.user)
@@ -43,7 +43,11 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
 
     let res_fut = twitter::lists::Members::new(list_id)
         .count(Some(5000))
-        .send(credentials.twitter.client.as_ref(), token.as_ref(), &client);
+        .send(
+            credentials.twitter.client.as_ref(),
+            token.as_ref(),
+            &mut client,
+        );
     println!("Retrieving the list...");
 
     let users: HashSet<i64> = manifest.rule.twitter_topics().collect();
@@ -62,7 +66,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
             twitter::lists::members::Destroy::new(list_id, user).send(
                 credentials.twitter.client.as_ref(),
                 token.as_ref(),
-                &client,
+                &mut client,
             )
         })
         .collect();
@@ -82,7 +86,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
             let res = twitter::lists::members::Create::new(list_id, user).send(
                 credentials.twitter.client.as_ref(),
                 token.as_ref(),
-                &client,
+                &mut client,
             );
             future::join(res, future::ready(user))
         })

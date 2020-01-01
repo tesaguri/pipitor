@@ -1,31 +1,42 @@
 mod retweet_queue;
 
+use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use diesel::prelude::*;
 use failure::Fallible;
 use futures::ready;
-use futures::stream::{FuturesUnordered, StreamExt};
-use hyper::client::connect::Connect;
+use futures::stream::{FuturesUnordered, Stream};
+use http_body::Body;
+use pin_project::pin_project;
 use serde::de;
 
 use crate::rules::Outbox;
 use crate::twitter;
-use crate::util::ResolveWith;
+use crate::util::{HttpResponseFuture, HttpService, ResolveWith};
 
 use super::{Core, TwitterRequestExt as _};
 
 use self::retweet_queue::{PendingRetweets, RetweetQueue};
 
 /// A non-thread-safe object that sends entries to corresponding outboxes.
-#[derive(Default)]
-pub struct Sender {
+#[pin_project]
+pub struct Sender<F>
+where
+    F: HttpResponseFuture,
+{
+    #[pin]
     find_duplicate_tweet_queue:
-        FuturesUnordered<ResolveWith<twitter::ResponseFuture<de::IgnoredAny>, twitter::Tweet>>,
-    retweet_queue: RetweetQueue,
+        FuturesUnordered<ResolveWith<twitter::ResponseFuture<de::IgnoredAny, F>, twitter::Tweet>>,
+    #[pin]
+    retweet_queue: RetweetQueue<F>,
 }
 
-impl Sender {
+impl<F> Sender<F>
+where
+    F: HttpResponseFuture,
+    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+{
     pub fn new() -> Self {
         Default::default()
     }
@@ -34,11 +45,15 @@ impl Sender {
         !self.retweet_queue.is_empty()
     }
 
-    pub fn send_tweet<C>(&mut self, tweet: twitter::Tweet, core: &Core<C>) -> Fallible<()>
+    pub fn send_tweet<S>(
+        self: Pin<&mut Self>,
+        tweet: twitter::Tweet,
+        core: &Core<S>,
+    ) -> Fallible<()>
     where
-        C: Connect + Clone + Send + Sync + 'static,
+        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
     {
-        trace_fn!(Sender::send_tweet::<C>, "tweet={:?}", tweet);
+        trace_fn!(Sender::<F>::send_tweet::<S>, "tweet={:?}", tweet);
 
         let conn = core.conn()?;
 
@@ -99,14 +114,20 @@ impl Sender {
         Ok(())
     }
 
-    pub fn poll_done<C>(&mut self, core: &Core<C>, cx: &mut Context<'_>) -> Poll<Fallible<()>>
+    pub fn poll_done<S>(
+        mut self: Pin<&mut Self>,
+        core: &Core<S>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Fallible<()>>
     where
-        C: Connect + Clone + Send + Sync + 'static,
+        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        F::Error: 'static,
+        <F::Body as Body>::Error: 'static,
     {
         let mut ready = true;
 
-        ready &= self.poll_find_duplicate_tweet(core, cx).is_ready();
-        ready &= self.retweet_queue.poll(core, cx)?.is_ready();
+        ready &= self.as_mut().poll_find_duplicate_tweet(core, cx).is_ready();
+        ready &= self.project().retweet_queue.poll(core, cx)?.is_ready();
 
         if ready {
             Poll::Ready(Ok(()))
@@ -115,26 +136,35 @@ impl Sender {
         }
     }
 
-    fn poll_find_duplicate_tweet<C>(&mut self, core: &Core<C>, cx: &mut Context<'_>) -> Poll<()>
+    fn poll_find_duplicate_tweet<S>(
+        mut self: Pin<&mut Self>,
+        core: &Core<S>,
+        cx: &mut Context<'_>,
+    ) -> Poll<()>
     where
-        C: Connect + Clone + Send + Sync + 'static,
+        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        F::Error: 'static,
+        <F::Body as Body>::Error: 'static,
     {
-        while let Some((result, tweet)) =
-            ready!(self.find_duplicate_tweet_queue.poll_next_unpin(cx))
+        while let Some((result, tweet)) = ready!(self
+            .as_mut()
+            .project()
+            .find_duplicate_tweet_queue
+            .poll_next(cx))
         {
             if result.is_err() {
                 // Either the duplicate Tweet does not exist anymore (404)
                 // or the Tweet's existence could not be verified because of an error.
-                self.retweet(tweet, core);
+                self.as_mut().retweet(tweet, core);
             }
         }
 
         Poll::Ready(())
     }
 
-    fn retweet<C>(&mut self, tweet: twitter::Tweet, core: &Core<C>)
+    fn retweet<S>(self: Pin<&mut Self>, tweet: twitter::Tweet, core: &Core<S>)
     where
-        C: Connect + Clone + Send + Sync + 'static,
+        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
     {
         let mut retweets = PendingRetweets::new();
 
@@ -150,6 +180,19 @@ impl Sender {
             }
         }
 
-        self.retweet_queue.insert(tweet, retweets);
+        self.project().retweet_queue.insert(tweet, retweets);
+    }
+}
+
+impl<F> Default for Sender<F>
+where
+    F: HttpResponseFuture,
+    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+{
+    fn default() -> Self {
+        Sender {
+            find_duplicate_tweet_queue: Default::default(),
+            retweet_queue: Default::default(),
+        }
     }
 }

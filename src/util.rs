@@ -1,3 +1,6 @@
+mod http_response_future;
+mod http_service;
+
 use std::convert::TryInto;
 use std::fs;
 use std::marker::Unpin;
@@ -8,12 +11,15 @@ use std::task::{Context, Poll};
 
 use bytes::Buf;
 use failure::{Fallible, ResultExt};
-use futures::{ready, Future, FutureExt};
+use futures::{ready, Future};
 use http_body::Body;
-use pin_project::pin_project;
+use pin_project::{pin_project, project};
 use serde::{de, Deserialize};
 
 use crate::Credentials;
+
+pub use self::http_response_future::HttpResponseFuture;
+pub use self::http_service::HttpService;
 
 #[pin_project]
 pub struct ConcatBody<B> {
@@ -30,7 +36,9 @@ pub enum Maybe<T> {
 }
 
 /// A future that resolves to `(F::Output, T).
+#[pin_project]
 pub struct ResolveWith<F, T> {
+    #[pin]
     future: F,
     value: Option<T>,
 }
@@ -77,7 +85,7 @@ impl<B: Body> Future for ConcatBody<B> {
 
 impl<F, T> ResolveWith<F, T>
 where
-    F: Future + Unpin,
+    F: Future,
     T: Unpin,
 {
     pub fn new(future: F, value: T) -> Self {
@@ -90,17 +98,18 @@ where
 
 impl<F, T> Future for ResolveWith<F, T>
 where
-    F: Future + Unpin,
+    F: Future,
     T: Unpin,
 {
     type Output = (F::Output, T);
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.future.poll_unpin(cx).map(|x| {
-            let y = self
-                .value
-                .take()
-                .expect("polled `ResolveWith` after completion");
+    #[project]
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        #[project]
+        let ResolveWith { future, value } = self.project();
+
+        future.poll(cx).map(|x| {
+            let y = value.take().expect("polled `ResolveWith` after completion");
             (x, y)
         })
     }

@@ -9,35 +9,35 @@ use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
 use futures::{Future, FutureExt};
-use hyper::client::connect::Connect;
-use hyper::{Body, Client};
+use http_body::Body;
 use pin_project::pin_project;
 use twitter_stream::TwitterStream;
 
 use crate::models;
-use crate::util::open_credentials;
+use crate::util::{open_credentials, HttpService};
 use crate::{Credentials, Manifest};
 
 use super::TwitterListTimeline;
 
 /// An object referenced by `poll`-like methods under `app` module.
 #[pin_project]
-pub struct Core<C> {
+pub struct Core<S> {
     manifest: Manifest,
     credentials: Credentials,
     pool: Pool<ConnectionManager<SqliteConnection>>,
     #[pin]
-    client: Client<C>,
+    client: S,
     pub(super) twitter_tokens: HashMap<i64, oauth1::Credentials<Box<str>>>,
     twitter_dump: Option<BufWriter<File>>,
 }
 
-impl<C> Core<C>
+impl<S> Core<S>
 where
-    C: Connect + Clone + Send + Sync + 'static,
+    S: HttpService<hyper::Body> + Clone,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
-    pub fn new(manifest: Manifest, client: Client<C>) -> Fallible<Self> {
-        trace_fn!(Core::<C>::new);
+    pub fn new(manifest: Manifest, client: S) -> Fallible<Self> {
+        trace_fn!(Core::<S>::new);
 
         let pool = Pool::new(ConnectionManager::new(manifest.database_url()))
             .context("failed to initialize the connection pool")?;
@@ -73,8 +73,8 @@ where
         Ok(ret)
     }
 
-    pub fn init_twitter(&self) -> impl Future<Output = Fallible<TwitterStream<Body>>> {
-        trace_fn!(Core::<C>::init_twitter);
+    pub fn init_twitter(&self) -> impl Future<Output = Fallible<TwitterStream<S::ResponseBody>>> {
+        trace_fn!(Core::<S>::init_twitter);
 
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
 
@@ -94,11 +94,11 @@ where
 
         twitter_stream::Builder::filter(stream_token)
             .follow(&*twitter_topics)
-            .listen_with_client(self.client.clone())
+            .listen_with_client(self.client.clone().into_service())
             .map(|result| Ok(result.context("error while connecting to Twitter's Streaming API")?))
     }
 
-    pub(super) fn init_twitter_list(&self) -> Fallible<TwitterListTimeline> {
+    pub(super) fn init_twitter_list(&self) -> Fallible<TwitterListTimeline<S::Future>> {
         use crate::schema::last_tweet::dsl::*;
 
         let list = if let Some(list) = self.manifest.twitter.list {
@@ -114,7 +114,7 @@ where
             .optional()?
             .filter(|&n| n > 0);
 
-        Ok(TwitterListTimeline::new(list, since_id, self))
+        Ok(TwitterListTimeline::<S::Future>::new(list, since_id, self))
     }
 
     pub fn load_twitter_tokens(&mut self) -> Fallible<()> {
@@ -151,7 +151,7 @@ where
     }
 }
 
-impl<C> Core<C> {
+impl<S> Core<S> {
     pub fn manifest(&self) -> &Manifest {
         &self.manifest
     }
@@ -176,7 +176,7 @@ impl<C> Core<C> {
         &mut self.pool
     }
 
-    pub fn http_client(&self) -> &Client<C> {
+    pub fn http_client(&self) -> &S {
         &self.client
     }
 

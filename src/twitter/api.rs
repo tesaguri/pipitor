@@ -43,7 +43,7 @@ macro_rules! api_requests {
         impl $crate::twitter::Request for $Name {
             type Data = $Data;
 
-            const METHOD: hyper::Method = hyper::Method::$method;
+            const METHOD: http::Method = http::Method::$method;
             const FORM: bool = $form;
             const URI: &'static str = $uri;
         }
@@ -67,32 +67,36 @@ use std::task::{Context, Poll};
 
 use failure::Fail;
 use flate2::bufread::GzDecoder;
-use futures::{ready, Future, FutureExt};
-use hyper::client::connect::Connect;
-use hyper::client::{Client, ResponseFuture as HyperResponseFuture};
-use hyper::header::{HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE};
-use hyper::{Body, Method, StatusCode, Uri};
+use futures::{ready, Future};
+use http::header::{HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE};
+use http::{Method, StatusCode, Uri};
+use http_body::Body;
 use oauth1::Credentials;
+use pin_project::{pin_project, project};
 use serde::{de, Deserialize};
 
-use crate::util::ConcatBody;
+use crate::util::{ConcatBody, HttpResponseFuture, HttpService};
 
 pub struct Response<T> {
     pub data: T,
     pub rate_limit: Option<RateLimit>,
 }
 
-pub struct ResponseFuture<T> {
-    inner: ResponseFutureInner,
+#[pin_project]
+pub struct ResponseFuture<T, F: HttpResponseFuture> {
+    #[pin]
+    inner: ResponseFutureInner<F>,
     marker: PhantomData<fn() -> T>,
 }
 
-enum ResponseFutureInner {
-    Resp(HyperResponseFuture),
+#[pin_project]
+enum ResponseFutureInner<F: HttpResponseFuture> {
+    Resp(#[pin] F),
     Body {
         status: StatusCode,
         rate_limit: Option<RateLimit>,
-        body: ConcatBody<Body>,
+        #[pin]
+        body: ConcatBody<F::Body>,
         gzip: bool,
     },
 }
@@ -105,11 +109,17 @@ pub struct RateLimit {
 }
 
 #[derive(Debug, Fail)]
-pub enum Error {
+pub enum Error<SE, BE>
+where
+    SE: std::error::Error + Send + Sync + 'static,
+    BE: std::error::Error + Send + Sync + 'static,
+{
     #[fail(display = "Failed to deserialize the response body.")]
     Deserializing(#[cause] json::Error),
     #[fail(display = "HTTP error")]
-    Hyper(#[cause] hyper::Error),
+    Service(#[cause] SE),
+    #[fail(display = "Error while reading the response body")]
+    Body(#[cause] BE),
     #[fail(display = "Twitter returned error(s)")]
     Twitter(#[cause] TwitterErrors),
     #[fail(display = "Unexpected error occured.")]
@@ -129,8 +139,6 @@ pub struct ErrorCode {
     pub message: String,
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
-
 pub trait Request: oauth1::Authorize {
     type Data: de::DeserializeOwned;
 
@@ -138,14 +146,14 @@ pub trait Request: oauth1::Authorize {
     const FORM: bool;
     const URI: &'static str;
 
-    fn send<'a, C>(
+    fn send<'a, S>(
         &self,
         client_credentials: Credentials<&str>,
         token_credentials: Credentials<&'a str>,
-        client: &Client<C>,
-    ) -> ResponseFuture<Self::Data>
+        mut client: S,
+    ) -> ResponseFuture<Self::Data, S::Future>
     where
-        C: Connect + Clone + Send + Sync + 'static,
+        S: HttpService<hyper::Body>,
     {
         let mut builder = oauth1::Builder::new(client_credentials, oauth1::HmacSha1);
         builder.token(token_credentials);
@@ -161,7 +169,7 @@ pub trait Request: oauth1::Authorize {
         trace!("{} {}", Self::METHOD, Self::URI);
         trace!("data: {}", data);
 
-        let req = hyper::Request::builder()
+        let req = http::Request::builder()
             .method(Self::METHOD)
             .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
             .header(AUTHORIZATION, authorization);
@@ -179,7 +187,7 @@ pub trait Request: oauth1::Authorize {
         };
 
         ResponseFuture {
-            inner: ResponseFutureInner::Resp(client.request(req)),
+            inner: ResponseFutureInner::Resp(client.call(req)),
             marker: PhantomData,
         }
     }
@@ -193,50 +201,65 @@ impl<T> Deref for Response<T> {
     }
 }
 
-impl<T: de::DeserializeOwned> Future for ResponseFuture<T> {
-    type Output = Result<Response<T>>;
+impl<T: de::DeserializeOwned, F> Future for ResponseFuture<T, F>
+where
+    F: HttpResponseFuture,
+    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+{
+    type Output = Result<Response<T>, Error<F::Error, <F::Body as Body>::Error>>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<Response<T>>> {
-        trace_fn!(ResponseFuture::<T>::poll);
+    #[project]
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Response<T>, Error<F::Error, <F::Body as Body>::Error>>> {
+        trace_fn!(ResponseFuture::<T, F>::poll);
 
-        if let ResponseFutureInner::Resp(ref mut res) = self.inner {
-            let res = ready!(res.poll_unpin(cx).map_err(Error::Hyper))?;
-            trace!("response={:?}", res);
+        #[project]
+        match self.as_mut().project().inner.project() {
+            ResponseFutureInner::Resp(res) => {
+                let res = ready!(res.poll(cx).map_err(Error::Service))?;
 
-            let gzip = res
-                .headers()
-                .get_all(CONTENT_ENCODING)
-                .iter()
-                .any(|e| e == "gzip");
+                let gzip = res
+                    .headers()
+                    .get_all(CONTENT_ENCODING)
+                    .iter()
+                    .any(|e| e == "gzip");
 
-            self.inner = ResponseFutureInner::Body {
-                status: res.status(),
-                rate_limit: rate_limit(&res),
-                body: ConcatBody::new(res.into_body()),
-                gzip,
-            };
+                self.as_mut()
+                    .project()
+                    .inner
+                    .set(ResponseFutureInner::Body {
+                        status: res.status(),
+                        rate_limit: rate_limit(&res),
+                        body: ConcatBody::new(res.into_body()),
+                        gzip,
+                    });
+            }
+            _ => {}
         }
 
-        if let ResponseFutureInner::Body {
-            status,
-            rate_limit,
-            ref mut body,
-            gzip,
-        } = self.inner
-        {
-            let body = ready!(body.poll_unpin(cx).map_err(Error::Hyper))?;
+        #[project]
+        match self.project().inner.project() {
+            ResponseFutureInner::Body {
+                status,
+                rate_limit,
+                body,
+                gzip,
+            } => {
+                let body = ready!(body.poll(cx).map_err(Error::Body))?;
 
-            trace!("done reading response body");
+                trace!("done reading response body");
 
-            Poll::Ready(make_response(status, rate_limit, &body, |body| {
-                if gzip {
-                    json::from_reader(GzDecoder::new(body)).map_err(Error::Deserializing)
-                } else {
-                    json::from_slice(body).map_err(Error::Deserializing)
-                }
-            }))
-        } else {
-            unreachable!();
+                Poll::Ready(make_response(*status, *rate_limit, &body, |body| {
+                    if *gzip {
+                        json::from_reader(GzDecoder::new(body)).map_err(Error::Deserializing)
+                    } else {
+                        json::from_slice(body).map_err(Error::Deserializing)
+                    }
+                }))
+            }
+            _ => unreachable!(),
         }
     }
 }
@@ -278,14 +301,16 @@ impl Display for ErrorCode {
     }
 }
 
-fn make_response<T, F>(
+fn make_response<T, F, SE, BE>(
     status: StatusCode,
     rate_limit: Option<RateLimit>,
     body: &[u8],
     parse: F,
-) -> Result<Response<T>>
+) -> Result<Response<T>, Error<SE, BE>>
 where
-    F: FnOnce(&[u8]) -> Result<T>,
+    F: FnOnce(&[u8]) -> Result<T, Error<SE, BE>>,
+    SE: std::error::Error + Send + Sync,
+    BE: std::error::Error + Send + Sync,
 {
     if let StatusCode::OK = status {
         parse(body).map(|data| Response { data, rate_limit })
@@ -306,7 +331,7 @@ where
     }
 }
 
-fn rate_limit<T>(res: &hyper::Response<T>) -> Option<RateLimit> {
+fn rate_limit<T>(res: &http::Response<T>) -> Option<RateLimit> {
     Some(RateLimit {
         limit: header(res, "x-rate-limit-limit")?,
         remaining: header(res, "x-rate-limit-remaining")?,
@@ -314,7 +339,7 @@ fn rate_limit<T>(res: &hyper::Response<T>) -> Option<RateLimit> {
     })
 }
 
-fn header<T>(res: &hyper::Response<T>, name: &str) -> Option<u64> {
+fn header<T>(res: &http::Response<T>, name: &str) -> Option<u64> {
     res.headers()
         .get(name)
         .and_then(|value| atoi::atoi(value.as_bytes()))

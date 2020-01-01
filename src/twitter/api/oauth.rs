@@ -1,18 +1,19 @@
-use hyper::client::connect::Connect;
-use hyper::header::AUTHORIZATION;
-use hyper::{Client, Uri};
+use http::header::AUTHORIZATION;
+use http::Uri;
+use http_body::Body;
 use oauth1::Credentials;
 
-use crate::util::ConcatBody;
+use crate::util::{ConcatBody, HttpResponseFuture, HttpService};
 
-use super::{Error, Response, Result};
+use super::{Error, Response};
 
-pub async fn request_token<'a, C>(
+pub async fn request_token<'a, S>(
     client_credentials: Credentials<&'a str>,
-    client: &'a Client<C>,
-) -> Result<Response<Credentials>>
+    mut client: S,
+) -> Result<Response<Credentials>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
-    C: Connect + Clone + Send + Sync + 'static,
+    S: HttpService<hyper::Body>,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
     const URI: &str = "https://api.twitter.com/oauth/request_token";
 
@@ -21,18 +22,22 @@ where
             .callback("oob")
             .post_form(URI, ());
 
-    let req = hyper::Request::post(Uri::from_static(URI))
+    let req = http::Request::post(Uri::from_static(URI))
         .header(AUTHORIZATION, authorization)
         .body(Default::default())
         .unwrap();
 
-    let res = client.request(req).await.map_err(Error::Hyper)?;
+    let res = client
+        .call(req)
+        .into_future()
+        .await
+        .map_err(Error::Service)?;
 
     let status = res.status();
     let rate_limit = super::rate_limit(&res);
     let body = ConcatBody::new(res.into_body())
         .await
-        .map_err(Error::Hyper)?;
+        .map_err(Error::Body)?;
 
     #[derive(serde::Deserialize)]
     struct Token {
@@ -50,14 +55,15 @@ where
     })
 }
 
-pub async fn access_token<'a, C>(
+pub async fn access_token<'a, S>(
     oauth_verifier: &'a str,
     client_credentials: Credentials<&'a str>,
     temporary_credentials: Credentials<&'a str>,
-    client: &'a Client<C>,
-) -> Result<Response<(i64, Credentials)>>
+    mut client: S,
+) -> Result<Response<(i64, Credentials)>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
-    C: Connect + Clone + Send + Sync + 'static,
+    S: HttpService<hyper::Body>,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
     const URI: &str = "https://api.twitter.com/oauth/access_token";
 
@@ -67,18 +73,22 @@ where
             .verifier(oauth_verifier)
             .post_form(URI, ());
 
-    let req = hyper::Request::post(Uri::from_static(URI))
+    let req = http::Request::post(Uri::from_static(URI))
         .header(AUTHORIZATION, authorization)
         .body(Default::default())
         .unwrap();
 
-    let res = client.request(req).await.map_err(Error::Hyper)?;
+    let res = client
+        .call(req)
+        .into_future()
+        .await
+        .map_err(Error::Service)?;
 
     let status = res.status();
     let rate_limit = super::rate_limit(&res);
     let body = ConcatBody::new(res.into_body())
         .await
-        .map_err(Error::Hyper)?;
+        .map_err(Error::Body)?;
 
     #[derive(serde::Deserialize)]
     struct Token {

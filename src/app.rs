@@ -16,14 +16,13 @@ use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
 use futures::future;
 use futures::{Future, StreamExt, TryFutureExt};
-use hyper::client::connect::Connect;
-use hyper::{Body, Client};
+use http_body::Body;
 use pin_project::pin_project;
 use twitter_stream::TwitterStream;
 
 use crate::rules::TopicId;
 use crate::twitter;
-use crate::util::{open_credentials, Maybe};
+use crate::util::{open_credentials, HttpService, Maybe};
 use crate::{Credentials, Manifest};
 
 use self::core::Core;
@@ -32,33 +31,37 @@ use self::twitter_list_timeline::TwitterListTimeline;
 use self::twitter_request_ext::TwitterRequestExt;
 
 #[pin_project]
-pub struct App<C> {
+pub struct App<S>
+where
+    S: HttpService<hyper::Body>,
+{
     #[pin]
-    core: Core<C>,
-    twitter_list: TwitterListTimeline,
-    twitter: TwitterStream<Body>,
+    core: Core<S>,
+    #[pin]
+    twitter_list: TwitterListTimeline<S::Future>,
+    #[pin]
+    twitter: TwitterStream<S::ResponseBody>,
     twitter_done: bool,
-    sender: Sender,
+    #[pin]
+    sender: Sender<S::Future>,
 }
 
 #[cfg(feature = "native-tls")]
-impl App<hyper_tls::HttpsConnector<hyper::client::HttpConnector>> {
+impl App<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>> {
     pub fn new(manifest: Manifest) -> impl Future<Output = Fallible<Self>> {
         let conn = hyper_tls::HttpsConnector::new();
-        let client = Client::builder().build(conn);
+        let client = hyper::Client::builder().build(conn);
         Self::with_http_client(client, manifest)
     }
 }
 
-impl<C: Connect> App<C>
+impl<S> App<S>
 where
-    C: Connect + Clone + Send + Sync + 'static,
+    S: HttpService<hyper::Body> + Clone,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
-    pub fn with_http_client(
-        client: Client<C>,
-        manifest: Manifest,
-    ) -> impl Future<Output = Fallible<Self>> {
-        trace_fn!(App::<C>::with_http_client);
+    pub fn with_http_client(client: S, manifest: Manifest) -> impl Future<Output = Fallible<Self>> {
+        trace_fn!(App::<S>::with_http_client);
         future::ready(Core::new(manifest, client)).and_then(|core| {
             core.init_twitter().and_then(|twitter| {
                 future::ready(core.init_twitter_list()).map_ok(|twitter_list| App {
@@ -82,9 +85,9 @@ where
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
         let mut this = self.project();
-        let poll_backfill = this
-            .twitter_list
-            .poll_backfill(this.core.as_mut(), this.sender, cx)?;
+        let poll_backfill =
+            this.twitter_list
+                .poll_backfill(this.core.as_mut(), this.sender.as_mut(), cx)?;
         match (poll_backfill, this.sender.poll_done(&this.core, cx)?) {
             (Poll::Ready(()), Poll::Ready(())) => Poll::Ready(Ok(())),
             _ => Poll::Pending,
@@ -93,8 +96,8 @@ where
 
     pub async fn reset(mut self: Pin<&mut Self>) -> Fallible<()> {
         let twitter_list = if self.twitter_done {
-            let this = self.as_mut().project();
-            *this.twitter = this.core.init_twitter().await?;
+            let mut this = self.as_mut().project();
+            this.twitter.set(this.core.init_twitter().await?);
             *this.twitter_done = false;
             self.core.init_twitter_list()?
         } else {
@@ -104,7 +107,7 @@ where
         self.as_mut().shutdown().await?;
         debug_assert!(!self.sender.has_pending());
 
-        *self.project().twitter_list = twitter_list;
+        self.project().twitter_list.set(twitter_list);
 
         Ok(())
     }
@@ -141,13 +144,19 @@ where
         let old = mem::replace(self.manifest_mut(), manifest);
 
         // An RAII guard to rollback the `App`'s state when the future is canceled.
-        struct Guard<'a, C> {
-            this: &'a mut App<C>,
+        struct Guard<'a, S>
+        where
+            S: HttpService<hyper::Body>,
+        {
+            this: &'a mut App<S>,
             old: Option<(Manifest, Credentials)>,
             old_pool: Option<Pool<ConnectionManager<SqliteConnection>>>,
         }
 
-        impl<C> Guard<'_, C> {
+        impl<S> Guard<'_, S>
+        where
+            S: HttpService<hyper::Body>,
+        {
             fn rollback(&mut self) -> Manifest {
                 let (old, credentials) = self.old.take().unwrap();
                 *self.this.core.credentials_mut() = credentials;
@@ -163,7 +172,10 @@ where
             }
         }
 
-        impl<C> Drop for Guard<'_, C> {
+        impl<S> Drop for Guard<'_, S>
+        where
+            S: HttpService<hyper::Body>,
+        {
             fn drop(&mut self) {
                 self.rollback();
             }
@@ -262,7 +274,7 @@ where
                         .contains_topic(&TopicId::Twitter(to))
                 });
             if will_process {
-                this.sender.send_tweet(tweet, &this.core)?;
+                this.sender.as_mut().send_tweet(tweet, &this.core)?;
             }
         }
 
@@ -270,7 +282,7 @@ where
     }
 }
 
-impl<C> App<C> {
+impl<S: HttpService<hyper::Body>> App<S> {
     pub fn manifest(&self) -> &Manifest {
         self.core.manifest()
     }
@@ -287,27 +299,31 @@ impl<C> App<C> {
         self.core.database_pool()
     }
 
-    pub fn http_client(&self) -> &Client<C> {
+    pub fn http_client(&self) -> &S {
         self.core.http_client()
     }
 }
 
-impl<C> Future for App<C>
+impl<S> Future for App<S>
 where
-    C: Connect + Clone + Send + Sync + 'static,
+    S: HttpService<hyper::Body> + Clone,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
     type Output = Fallible<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
-        trace_fn!(App::<C>::poll);
+        trace_fn!(App::<S>::poll);
 
-        let this = self.as_mut().project();
-
-        let _ = this.twitter_list.poll(&this.core, this.sender, cx)?;
+        let mut this = self.as_mut().project();
 
         let _ = this
             .twitter_list
-            .poll_backfill(this.core, this.sender, cx)?;
+            .as_mut()
+            .poll(&this.core, this.sender.as_mut(), cx)?;
+
+        let _ = this
+            .twitter_list
+            .poll_backfill(this.core, this.sender.as_mut(), cx)?;
 
         if let Poll::Ready(result) = self.as_mut().poll_twitter(cx) {
             return Poll::Ready(result);

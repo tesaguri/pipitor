@@ -6,31 +6,55 @@ use diesel::prelude::*;
 use failure::Fallible;
 use futures::future::Future;
 use futures::ready;
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::stream::{FuturesUnordered, Stream};
+use http_body::Body;
+use pin_project::pin_project;
 use serde::de;
 
 use crate::twitter;
+use crate::util::HttpResponseFuture;
 
 use super::super::Core;
 
-#[derive(Default)]
-pub struct RetweetQueue {
-    queue: FuturesUnordered<PendingRetweets>,
+#[pin_project]
+pub struct RetweetQueue<F>
+where
+    F: HttpResponseFuture,
+{
+    #[pin]
+    queue: FuturesUnordered<PendingRetweets<F>>,
     tweet_ids: HashSet<i64>,
 }
 
-pub struct PendingRetweets {
+#[pin_project]
+pub struct PendingRetweets<F>
+where
+    F: HttpResponseFuture,
+{
     tweet: Option<twitter::Tweet>,
-    queue: FuturesUnordered<twitter::ResponseFuture<de::IgnoredAny>>,
+    #[pin]
+    queue: FuturesUnordered<twitter::ResponseFuture<de::IgnoredAny, F>>,
 }
 
-impl RetweetQueue {
-    pub fn poll<C>(&mut self, core: &Core<C>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
+impl<F> RetweetQueue<F>
+where
+    F: HttpResponseFuture,
+    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+{
+    pub fn poll<S>(
+        mut self: Pin<&mut Self>,
+        core: &Core<S>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Fallible<()>>
+    where
+        F::Error: 'static,
+        <F::Body as Body>::Error: 'static,
+    {
         use crate::models::NewTweet;
         use crate::schema::tweets::dsl::*;
 
         let mut conn = None;
-        while let Some(retweeted_status) = ready!(self.queue.poll_next_unpin(cx)?) {
+        while let Some(retweeted_status) = ready!(self.as_mut().project().queue.poll_next(cx)?) {
             let conn = if let Some(ref c) = conn {
                 c
             } else {
@@ -41,7 +65,10 @@ impl RetweetQueue {
             diesel::replace_into(tweets)
                 .values(&NewTweet::from(&retweeted_status))
                 .execute(&*conn)?;
-            self.tweet_ids.remove(&retweeted_status.id);
+            self.as_mut()
+                .project()
+                .tweet_ids
+                .remove(&retweeted_status.id);
         }
 
         Poll::Ready(Ok(()))
@@ -51,7 +78,7 @@ impl RetweetQueue {
         self.tweet_ids.contains(&tweet_id)
     }
 
-    pub fn insert(&mut self, tweet: twitter::Tweet, mut retweets: PendingRetweets) {
+    pub fn insert(&mut self, tweet: twitter::Tweet, mut retweets: PendingRetweets<F>) {
         if retweets.is_empty() {
             return;
         }
@@ -64,7 +91,11 @@ impl RetweetQueue {
     }
 }
 
-impl PendingRetweets {
+impl<F> PendingRetweets<F>
+where
+    F: HttpResponseFuture,
+    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+{
     pub fn new() -> Self {
         PendingRetweets {
             tweet: None,
@@ -72,7 +103,7 @@ impl PendingRetweets {
         }
     }
 
-    pub fn push(&mut self, request: twitter::ResponseFuture<de::IgnoredAny>) {
+    pub fn push(&mut self, request: twitter::ResponseFuture<de::IgnoredAny, F>) {
         self.queue.push(request)
     }
 
@@ -81,13 +112,17 @@ impl PendingRetweets {
     }
 }
 
-impl Future for PendingRetweets {
-    type Output = Result<twitter::Tweet, twitter::Error>;
+impl<F> Future for PendingRetweets<F>
+where
+    F: HttpResponseFuture,
+    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+{
+    type Output = Result<twitter::Tweet, twitter::Error<F::Error, <F::Body as Body>::Error>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        trace_fn!(PendingRetweets::poll);
+        trace_fn!(PendingRetweets::<F>::poll);
 
-        while let Poll::Ready(v) = self.queue.poll_next_unpin(cx) {
+        while let Poll::Ready(v) = self.as_mut().project().queue.poll_next(cx) {
             match v {
                 Some(Ok(_)) => {}
                 Some(Err(e)) => {
@@ -104,6 +139,7 @@ impl Future for PendingRetweets {
                 }
                 None => {
                     return Poll::Ready(Ok(self
+                        .project()
                         .tweet
                         .take()
                         .expect("polled `PendingRetweets` after completion")));
@@ -112,5 +148,18 @@ impl Future for PendingRetweets {
         }
 
         Poll::Pending
+    }
+}
+
+impl<F> Default for RetweetQueue<F>
+where
+    F: HttpResponseFuture,
+    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+{
+    fn default() -> Self {
+        RetweetQueue {
+            queue: Default::default(),
+            tweet_ids: Default::default(),
+        }
     }
 }

@@ -7,8 +7,8 @@ use diesel::SqliteConnection;
 use failure::{Fallible, ResultExt};
 use futures::future;
 use futures::stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt};
+use http::StatusCode;
 use hyper::client::Client;
-use hyper::StatusCode;
 use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
 use tokio::io::AsyncBufReadExt;
@@ -25,7 +25,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let credentials = open_credentials(opt, &manifest)?;
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = Pool::new(manager).context("failed to initialize the connection pool")?;
-    let client = Client::builder().build(https_connector());
+    let mut client = Client::builder().build(https_connector());
 
     let unauthed_users: FuturesUnordered<_> = manifest
         .rule
@@ -41,7 +41,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
                 .context("failed to load tokens from the database")?;
 
             // Make borrowck happy
-            let (credentials, client) = (&credentials, &client);
+            let (credentials, client) = (&credentials, client.clone());
             Ok(async move {
                 if let Some(token) = token {
                     match twitter::account::VerifyCredentials::new()
@@ -79,9 +79,10 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let mut stdin = tokio::io::BufReader::new(stdin).lines();
 
     while !unauthed_users.is_empty() {
-        let temporary = twitter::oauth::request_token(credentials.twitter.client.as_ref(), &client)
-            .await
-            .context("error while getting OAuth request token from Twitter")?;
+        let temporary =
+            twitter::oauth::request_token(credentials.twitter.client.as_ref(), &mut client)
+                .await
+                .context("error while getting OAuth request token from Twitter")?;
 
         let verifier = input_verifier(&mut stdin, temporary.identifier(), &unauthed_users).await?;
 
@@ -89,7 +90,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
             &verifier,
             credentials.twitter.client.as_ref(),
             temporary.as_ref(),
-            &client,
+            &mut client,
         )
         .await
         .context("error while getting OAuth access token from Twitter")?
