@@ -64,10 +64,11 @@ where
     F: HttpResponseFuture,
     <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
-    pub fn new<S>(list_id: NonZeroU64, since_id: Option<i64>, core: &Core<S>) -> Self
+    pub fn new<S, B>(list_id: NonZeroU64, since_id: Option<i64>, core: &Core<S>) -> Self
     where
-        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+        B: Default + From<Vec<u8>>,
     {
         let backfill = since_id.map(|since_id| {
             let response = twitter::lists::Statuses::new(list_id)
@@ -95,17 +96,18 @@ where
         TwitterListTimeline { inner: None }
     }
 
-    pub fn poll<S>(
+    pub fn poll<S, B>(
         self: Pin<&mut Self>,
         core: &Core<S>,
         mut sender: Pin<&mut Sender<F>>,
         cx: &mut Context<'_>,
     ) -> Poll<Fallible<()>>
     where
-        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+        B: Default + From<Vec<u8>>,
     {
-        trace_fn!(TwitterListTimeline::<F>::poll::<S>);
+        trace_fn!(TwitterListTimeline::<F>::poll::<S, B>);
 
         let mut inner = if let Some(inner) = self.project().inner.as_pin_mut() {
             inner
@@ -165,16 +167,17 @@ where
     }
 
     #[project]
-    pub fn poll_backfill<S>(
+    pub fn poll_backfill<S, B>(
         self: Pin<&mut Self>,
         mut core: Pin<&mut Core<S>>,
         mut sender: Pin<&mut Sender<F>>,
         cx: &mut Context<'_>,
     ) -> Poll<Fallible<()>>
     where
-        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
         F::Error: 'static,
         <F::Body as Body>::Error: 'static,
+        B: Default + From<Vec<u8>>,
     {
         #[project]
         let Inner {
@@ -269,11 +272,12 @@ where
         Poll::Pending
     }
 
-    fn send_request<S>(&mut self, core: &Core<S>)
+    fn send_request<S, B>(&mut self, core: &Core<S>)
     where
-        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        B: Default + From<Vec<u8>>,
     {
-        trace_fn!(Unpinned::<F>::send_request::<S>);
+        trace_fn!(Unpinned::<F>::send_request::<S, B>);
 
         let count = if self.since_id.is_some() { 200 } else { 1 };
         let resp = twitter::lists::Statuses::new(self.list_id)

@@ -6,11 +6,10 @@ use diesel::SqliteConnection;
 use failure::{Fallible, ResultExt};
 use futures::future;
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
-use hyper::client::Client;
 use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
 
-use crate::common::{https_connector, open_credentials, open_manifest};
+use crate::common::{client, open_credentials, open_manifest};
 
 #[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
@@ -31,7 +30,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = Pool::new(manager).context("failed to initialize the connection pool")?;
 
-    let mut client = Client::builder().build(https_connector());
+    let mut client = client();
 
     let token: oauth1::Credentials = twitter_tokens
         .find(&manifest.twitter.user)

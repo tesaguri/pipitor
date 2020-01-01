@@ -7,6 +7,7 @@ use std::{env, fs, io};
 use failure::{AsFail, Fail, Fallible, ResultExt};
 use futures::future::{self, Future, FutureExt};
 use futures::{Stream, StreamExt};
+use hyper::client::{connect::Connect, Client};
 use pipitor::{Credentials, Manifest};
 use serde::{Deserialize, Serialize};
 
@@ -129,6 +130,10 @@ impl<P: AsRef<Path>> Drop for RmGuard<P> {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
     }
+}
+
+pub fn client() -> Client<impl Connect + Clone + Send + Sync> {
+    Client::builder().build(https_connector())
 }
 
 pub fn ipc_path<P: AsRef<Path>>(manifest_path: P) -> PathBuf {

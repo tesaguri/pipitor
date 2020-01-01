@@ -45,15 +45,16 @@ where
         !self.retweet_queue.is_empty()
     }
 
-    pub fn send_tweet<S>(
+    pub fn send_tweet<S, B>(
         self: Pin<&mut Self>,
         tweet: twitter::Tweet,
         core: &Core<S>,
     ) -> Fallible<()>
     where
-        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        B: Default + From<Vec<u8>>,
     {
-        trace_fn!(Sender::<F>::send_tweet::<S>, "tweet={:?}", tweet);
+        trace_fn!(Sender::<F>::send_tweet::<S, B>, "tweet={:?}", tweet);
 
         let conn = core.conn()?;
 
@@ -114,15 +115,16 @@ where
         Ok(())
     }
 
-    pub fn poll_done<S>(
+    pub fn poll_done<S, B>(
         mut self: Pin<&mut Self>,
         core: &Core<S>,
         cx: &mut Context<'_>,
     ) -> Poll<Fallible<()>>
     where
-        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
         F::Error: 'static,
         <F::Body as Body>::Error: 'static,
+        B: Default + From<Vec<u8>>,
     {
         let mut ready = true;
 
@@ -136,15 +138,16 @@ where
         }
     }
 
-    fn poll_find_duplicate_tweet<S>(
+    fn poll_find_duplicate_tweet<S, B>(
         mut self: Pin<&mut Self>,
         core: &Core<S>,
         cx: &mut Context<'_>,
     ) -> Poll<()>
     where
-        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
         F::Error: 'static,
         <F::Body as Body>::Error: 'static,
+        B: Default + From<Vec<u8>>,
     {
         while let Some((result, tweet)) = ready!(self
             .as_mut()
@@ -162,9 +165,10 @@ where
         Poll::Ready(())
     }
 
-    fn retweet<S>(self: Pin<&mut Self>, tweet: twitter::Tweet, core: &Core<S>)
+    fn retweet<S, B>(self: Pin<&mut Self>, tweet: twitter::Tweet, core: &Core<S>)
     where
-        S: HttpService<hyper::Body, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
+        B: Default + From<Vec<u8>>,
     {
         let mut retweets = PendingRetweets::new();
 

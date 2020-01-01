@@ -6,6 +6,7 @@ mod twitter_request_ext;
 
 use std::fs::File;
 use std::io::{self, Write};
+use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -31,9 +32,9 @@ use self::twitter_list_timeline::TwitterListTimeline;
 use self::twitter_request_ext::TwitterRequestExt;
 
 #[pin_project]
-pub struct App<S>
+pub struct App<S, B>
 where
-    S: HttpService<hyper::Body>,
+    S: HttpService<B>,
 {
     #[pin]
     core: Core<S>,
@@ -44,10 +45,11 @@ where
     twitter_done: bool,
     #[pin]
     sender: Sender<S::Future>,
+    body_marker: PhantomData<B>,
 }
 
 #[cfg(feature = "native-tls")]
-impl App<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>> {
+impl App<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>, hyper::Body> {
     pub fn new(manifest: Manifest) -> impl Future<Output = Fallible<Self>> {
         let conn = hyper_tls::HttpsConnector::new();
         let client = hyper::Client::builder().build(conn);
@@ -55,13 +57,14 @@ impl App<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>>
     }
 }
 
-impl<S> App<S>
+impl<S, B> App<S, B>
 where
-    S: HttpService<hyper::Body> + Clone,
+    S: HttpService<B> + Clone,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>>,
 {
     pub fn with_http_client(client: S, manifest: Manifest) -> impl Future<Output = Fallible<Self>> {
-        trace_fn!(App::<S>::with_http_client);
+        trace_fn!(App::<S, B>::with_http_client);
         future::ready(Core::new(manifest, client)).and_then(|core| {
             core.init_twitter().and_then(|twitter| {
                 future::ready(core.init_twitter_list()).map_ok(|twitter_list| App {
@@ -70,6 +73,7 @@ where
                     twitter,
                     twitter_done: false,
                     sender: Sender::new(),
+                    body_marker: PhantomData,
                 })
             })
         })
@@ -144,18 +148,18 @@ where
         let old = mem::replace(self.manifest_mut(), manifest);
 
         // An RAII guard to rollback the `App`'s state when the future is canceled.
-        struct Guard<'a, S>
+        struct Guard<'a, S, B>
         where
-            S: HttpService<hyper::Body>,
+            S: HttpService<B>,
         {
-            this: &'a mut App<S>,
+            this: &'a mut App<S, B>,
             old: Option<(Manifest, Credentials)>,
             old_pool: Option<Pool<ConnectionManager<SqliteConnection>>>,
         }
 
-        impl<S> Guard<'_, S>
+        impl<S, B> Guard<'_, S, B>
         where
-            S: HttpService<hyper::Body>,
+            S: HttpService<B>,
         {
             fn rollback(&mut self) -> Manifest {
                 let (old, credentials) = self.old.take().unwrap();
@@ -172,9 +176,9 @@ where
             }
         }
 
-        impl<S> Drop for Guard<'_, S>
+        impl<S, B> Drop for Guard<'_, S, B>
         where
-            S: HttpService<hyper::Body>,
+            S: HttpService<B>,
         {
             fn drop(&mut self) {
                 self.rollback();
@@ -282,7 +286,7 @@ where
     }
 }
 
-impl<S: HttpService<hyper::Body>> App<S> {
+impl<S: HttpService<B>, B> App<S, B> {
     pub fn manifest(&self) -> &Manifest {
         self.core.manifest()
     }
@@ -304,15 +308,16 @@ impl<S: HttpService<hyper::Body>> App<S> {
     }
 }
 
-impl<S> Future for App<S>
+impl<S, B> Future for App<S, B>
 where
-    S: HttpService<hyper::Body> + Clone,
+    S: HttpService<B> + Clone,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>>,
 {
     type Output = Fallible<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
-        trace_fn!(App::<S>::poll);
+        trace_fn!(App::<S, B>::poll);
 
         let mut this = self.as_mut().project();
 

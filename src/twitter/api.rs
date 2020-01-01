@@ -146,14 +146,15 @@ pub trait Request: oauth1::Authorize {
     const FORM: bool;
     const URI: &'static str;
 
-    fn send<'a, S>(
+    fn send<'a, S, B>(
         &self,
         client_credentials: Credentials<&str>,
         token_credentials: Credentials<&'a str>,
         mut client: S,
     ) -> ResponseFuture<Self::Data, S::Future>
     where
-        S: HttpService<hyper::Body>,
+        S: HttpService<B>,
+        B: Default + From<Vec<u8>>,
     {
         let mut builder = oauth1::Builder::new(client_credentials, oauth1::HmacSha1);
         builder.token(token_credentials);

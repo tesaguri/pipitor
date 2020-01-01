@@ -44,7 +44,7 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
 
     let opt = opt.clone();
     runtime.block_on(async move {
-        let client = hyper::Client::builder().build(https_connector());
+        let client = client();
         let app = App::with_http_client(client, manifest)
             .await
             .context("failed to initialize the application")?;

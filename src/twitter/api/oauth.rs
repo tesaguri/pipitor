@@ -7,13 +7,14 @@ use crate::util::{ConcatBody, HttpResponseFuture, HttpService};
 
 use super::{Error, Response};
 
-pub async fn request_token<'a, S>(
+pub async fn request_token<'a, S, B>(
     client_credentials: Credentials<&'a str>,
     mut client: S,
 ) -> Result<Response<Credentials>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
-    S: HttpService<hyper::Body>,
+    S: HttpService<B>,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>>,
 {
     const URI: &str = "https://api.twitter.com/oauth/request_token";
 
@@ -55,15 +56,16 @@ where
     })
 }
 
-pub async fn access_token<'a, S>(
+pub async fn access_token<'a, S, B>(
     oauth_verifier: &'a str,
     client_credentials: Credentials<&'a str>,
     temporary_credentials: Credentials<&'a str>,
     mut client: S,
 ) -> Result<Response<(i64, Credentials)>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
-    S: HttpService<hyper::Body>,
+    S: HttpService<B>,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>>,
 {
     const URI: &str = "https://api.twitter.com/oauth/access_token";
 

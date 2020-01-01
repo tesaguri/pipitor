@@ -14,6 +14,7 @@ A Twitter bot that gathers, filters and Retweets Tweets automatically.
 [[bin]]
 name = "pipitor"
 path = "src/bin/pipitor/main.rs"
+required-features = ["hyper"]
 
 [dependencies]
 atoi = "0.3"
@@ -30,7 +31,6 @@ fs2 = "0.4"
 futures = "0.3"
 http = "0.2"
 http-body = "0.3"
-hyper = "0.13"
 json = { version = "1", package = "serde_json" }
 log = "0.4.6"
 oauth1 = { version = "0.3", package = "oauth1-request" }
@@ -48,6 +48,7 @@ toml = "0.5"
 twitter-stream = { version = "=0.10.0-alpha.4", default-features = false }
 
 ct-logs = { version = "0.6", optional = true }
+hyper = { version = "0.13", optional = true }
 hyper-rustls = { version = "0.19", optional = true }
 rustls-pkg = { version = "0.16", package = "rustls", optional = true }
 webpki-roots = { version = "0.18", optional = true }
@@ -58,7 +59,7 @@ libsqlite3-sys = { version = ">=0.8.0, <0.13.0", optional = true }
 
 [features]
 default = ["native-tls"]
-native-tls = ["hyper-tls"]
+native-tls = ["hyper", "hyper-tls"]
 openssl-vendored = ["hyper-tls/vendored"]
 rustls = ["ct-logs", "hyper-rustls", "rustls-pkg", "webpki-roots"]
 sqlite-bundled = ["libsqlite3-sys/bundled"]

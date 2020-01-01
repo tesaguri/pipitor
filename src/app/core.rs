@@ -31,12 +31,12 @@ pub struct Core<S> {
     twitter_dump: Option<BufWriter<File>>,
 }
 
-impl<S> Core<S>
-where
-    S: HttpService<hyper::Body> + Clone,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-{
-    pub fn new(manifest: Manifest, client: S) -> Fallible<Self> {
+impl<S> Core<S> {
+    pub fn new<B>(manifest: Manifest, client: S) -> Fallible<Self>
+    where
+        S: HttpService<B> + Clone,
+        <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    {
         trace_fn!(Core::<S>::new);
 
         let pool = Pool::new(ConnectionManager::new(manifest.database_url()))
@@ -73,7 +73,12 @@ where
         Ok(ret)
     }
 
-    pub fn init_twitter(&self) -> impl Future<Output = Fallible<TwitterStream<S::ResponseBody>>> {
+    pub fn init_twitter<B>(&self) -> impl Future<Output = Fallible<TwitterStream<S::ResponseBody>>>
+    where
+        S: HttpService<B> + Clone,
+        <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+        B: Default + From<Vec<u8>>,
+    {
         trace_fn!(Core::<S>::init_twitter);
 
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
@@ -98,7 +103,12 @@ where
             .map(|result| Ok(result.context("error while connecting to Twitter's Streaming API")?))
     }
 
-    pub(super) fn init_twitter_list(&self) -> Fallible<TwitterListTimeline<S::Future>> {
+    pub(super) fn init_twitter_list<B>(&self) -> Fallible<TwitterListTimeline<S::Future>>
+    where
+        S: HttpService<B> + Clone,
+        <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+        B: Default + From<Vec<u8>>,
+    {
         use crate::schema::last_tweet::dsl::*;
 
         let list = if let Some(list) = self.manifest.twitter.list {
