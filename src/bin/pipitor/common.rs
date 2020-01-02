@@ -292,7 +292,7 @@ mod imp {
     }
 
     pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
-        let cc = Box::pin(tokio::signal::ctrl_c()).map(|result| result.unwrap());
+        let cc = Box::pin(ctrl_c()).map(|result| result.unwrap());
         let cb = ctrl_break()?;
         Ok(super::merge_select(cc, super::first(cb)))
     }
