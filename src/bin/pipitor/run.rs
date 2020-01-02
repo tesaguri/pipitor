@@ -30,20 +30,20 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
     let mut runtime = tokio::runtime::Runtime::new().context("failed to start a Tokio runtime")?;
 
     let ipc_path = ipc_path(manifest_path);
-    let (ipc, _guard) = match ipc_server(&ipc_path) {
-        Ok(ipc) => (ipc.left_stream().fuse(), Some(RmGuard(ipc_path))),
-        Err(e) => {
-            let e = e.context(format!("failed to create an IPC socket at {:?}", ipc_path));
-            error!("{}", DisplayFailChain(&e));
-            (stream::empty().right_stream().fuse(), None)
-        }
-    };
-    pin_mut!(ipc);
-
-    let mut signal = quit_signal().unwrap().fuse();
-
     let opt = opt.clone();
     runtime.block_on(async move {
+        let (ipc, _guard) = match ipc_server(&ipc_path) {
+            Ok(ipc) => (ipc.left_stream().fuse(), Some(RmGuard(ipc_path))),
+            Err(e) => {
+                let e = e.context(format!("failed to create an IPC socket at {:?}", ipc_path));
+                error!("{}", DisplayFailChain(&e));
+                (stream::empty().right_stream().fuse(), None)
+            }
+        };
+        pin_mut!(ipc);
+
+        let mut signal = quit_signal().unwrap().fuse();
+
         let client = client();
         let app = App::with_http_client(client, manifest)
             .await
