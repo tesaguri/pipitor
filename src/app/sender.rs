@@ -13,7 +13,7 @@ use serde::de;
 
 use crate::rules::Outbox;
 use crate::twitter;
-use crate::util::{HttpResponseFuture, HttpService, ResolveWith};
+use crate::util::{HttpService, ResolveWith};
 
 use super::{Core, TwitterRequestExt as _};
 
@@ -21,21 +21,23 @@ use self::retweet_queue::{PendingRetweets, RetweetQueue};
 
 /// A non-thread-safe object that sends entries to corresponding outboxes.
 #[pin_project]
-pub struct Sender<F>
+pub struct Sender<S, B>
 where
-    F: HttpResponseFuture,
+    S: HttpService<B>,
 {
     #[pin]
-    find_duplicate_tweet_queue:
-        FuturesUnordered<ResolveWith<twitter::ResponseFuture<de::IgnoredAny, F>, twitter::Tweet>>,
+    find_duplicate_tweet_queue: FuturesUnordered<
+        ResolveWith<twitter::ResponseFuture<de::IgnoredAny, S, B>, twitter::Tweet>,
+    >,
     #[pin]
-    retweet_queue: RetweetQueue<F>,
+    retweet_queue: RetweetQueue<S, B>,
 }
 
-impl<F> Sender<F>
+impl<S, B> Sender<S, B>
 where
-    F: HttpResponseFuture,
-    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+    S: HttpService<B> + Clone,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>>,
 {
     pub fn new() -> Self {
         Default::default()
@@ -45,16 +47,8 @@ where
         !self.retweet_queue.is_empty()
     }
 
-    pub fn send_tweet<S, B>(
-        self: Pin<&mut Self>,
-        tweet: twitter::Tweet,
-        core: &Core<S>,
-    ) -> Fallible<()>
-    where
-        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
-        B: Default + From<Vec<u8>>,
-    {
-        trace_fn!(Sender::<F>::send_tweet::<S, B>, "tweet={:?}", tweet);
+    pub fn send_tweet(self: Pin<&mut Self>, tweet: twitter::Tweet, core: &Core<S>) -> Fallible<()> {
+        trace_fn!(Sender::<S, B>::send_tweet, "tweet={:?}", tweet);
 
         let conn = core.conn()?;
 
@@ -115,17 +109,11 @@ where
         Ok(())
     }
 
-    pub fn poll_done<S, B>(
+    pub fn poll_done(
         mut self: Pin<&mut Self>,
         core: &Core<S>,
         cx: &mut Context<'_>,
-    ) -> Poll<Fallible<()>>
-    where
-        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
-        F::Error: 'static,
-        <F::Body as Body>::Error: 'static,
-        B: Default + From<Vec<u8>>,
-    {
+    ) -> Poll<Fallible<()>> {
         let mut ready = true;
 
         ready &= self.as_mut().poll_find_duplicate_tweet(core, cx).is_ready();
@@ -138,17 +126,11 @@ where
         }
     }
 
-    fn poll_find_duplicate_tweet<S, B>(
+    fn poll_find_duplicate_tweet(
         mut self: Pin<&mut Self>,
         core: &Core<S>,
         cx: &mut Context<'_>,
-    ) -> Poll<()>
-    where
-        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
-        F::Error: 'static,
-        <F::Body as Body>::Error: 'static,
-        B: Default + From<Vec<u8>>,
-    {
+    ) -> Poll<()> {
         while let Some((result, tweet)) = ready!(self
             .as_mut()
             .project()
@@ -165,11 +147,7 @@ where
         Poll::Ready(())
     }
 
-    fn retweet<S, B>(self: Pin<&mut Self>, tweet: twitter::Tweet, core: &Core<S>)
-    where
-        S: HttpService<B, ResponseBody = F::Body, Error = F::Error, Future = F> + Clone,
-        B: Default + From<Vec<u8>>,
-    {
+    fn retweet(self: Pin<&mut Self>, tweet: twitter::Tweet, core: &Core<S>) {
         let mut retweets = PendingRetweets::new();
 
         for outbox in core.manifest().rule.route_tweet(&tweet) {
@@ -188,10 +166,11 @@ where
     }
 }
 
-impl<F> Default for Sender<F>
+impl<S, B> Default for Sender<S, B>
 where
-    F: HttpResponseFuture,
-    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+    S: HttpService<B> + Clone,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>>,
 {
     fn default() -> Self {
         Sender {

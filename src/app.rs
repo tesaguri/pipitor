@@ -39,12 +39,12 @@ where
     #[pin]
     core: Core<S>,
     #[pin]
-    twitter_list: TwitterListTimeline<S::Future>,
+    twitter_list: TwitterListTimeline<S, B>,
     #[pin]
     twitter: TwitterStream<S::ResponseBody>,
     twitter_done: bool,
     #[pin]
-    sender: Sender<S::Future>,
+    sender: Sender<S, B>,
     body_marker: PhantomData<B>,
 }
 

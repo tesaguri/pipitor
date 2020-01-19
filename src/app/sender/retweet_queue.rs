@@ -12,44 +12,40 @@ use pin_project::pin_project;
 use serde::de;
 
 use crate::twitter;
-use crate::util::HttpResponseFuture;
+use crate::util::HttpService;
 
 use super::super::Core;
 
 #[pin_project]
-pub struct RetweetQueue<F>
+pub struct RetweetQueue<S, B>
 where
-    F: HttpResponseFuture,
+    S: HttpService<B>,
 {
     #[pin]
-    queue: FuturesUnordered<PendingRetweets<F>>,
+    queue: FuturesUnordered<PendingRetweets<S, B>>,
     tweet_ids: HashSet<i64>,
 }
 
 #[pin_project]
-pub struct PendingRetweets<F>
+pub struct PendingRetweets<S, B>
 where
-    F: HttpResponseFuture,
+    S: HttpService<B>,
 {
     tweet: Option<twitter::Tweet>,
     #[pin]
-    queue: FuturesUnordered<twitter::ResponseFuture<de::IgnoredAny, F>>,
+    queue: FuturesUnordered<twitter::ResponseFuture<de::IgnoredAny, S, B>>,
 }
 
-impl<F> RetweetQueue<F>
+impl<S, B> RetweetQueue<S, B>
 where
-    F: HttpResponseFuture,
-    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+    S: HttpService<B>,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
-    pub fn poll<S>(
+    pub fn poll(
         mut self: Pin<&mut Self>,
         core: &Core<S>,
         cx: &mut Context<'_>,
-    ) -> Poll<Fallible<()>>
-    where
-        F::Error: 'static,
-        <F::Body as Body>::Error: 'static,
-    {
+    ) -> Poll<Fallible<()>> {
         use crate::models::NewTweet;
         use crate::schema::tweets::dsl::*;
 
@@ -78,7 +74,7 @@ where
         self.tweet_ids.contains(&tweet_id)
     }
 
-    pub fn insert(&mut self, tweet: twitter::Tweet, mut retweets: PendingRetweets<F>) {
+    pub fn insert(&mut self, tweet: twitter::Tweet, mut retweets: PendingRetweets<S, B>) {
         if retweets.is_empty() {
             return;
         }
@@ -91,10 +87,10 @@ where
     }
 }
 
-impl<F> PendingRetweets<F>
+impl<S, B> PendingRetweets<S, B>
 where
-    F: HttpResponseFuture,
-    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+    S: HttpService<B>,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
     pub fn new() -> Self {
         PendingRetweets {
@@ -103,7 +99,7 @@ where
         }
     }
 
-    pub fn push(&mut self, request: twitter::ResponseFuture<de::IgnoredAny, F>) {
+    pub fn push(&mut self, request: twitter::ResponseFuture<de::IgnoredAny, S, B>) {
         self.queue.push(request)
     }
 
@@ -112,15 +108,16 @@ where
     }
 }
 
-impl<F> Future for PendingRetweets<F>
+impl<S, B> Future for PendingRetweets<S, B>
 where
-    F: HttpResponseFuture,
-    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+    S: HttpService<B>,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
-    type Output = Result<twitter::Tweet, twitter::Error<F::Error, <F::Body as Body>::Error>>;
+    type Output =
+        Result<twitter::Tweet, twitter::Error<S::Error, <S::ResponseBody as Body>::Error>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        trace_fn!(PendingRetweets::<F>::poll);
+        trace_fn!(PendingRetweets::<S, B>::poll);
 
         while let Poll::Ready(v) = self.as_mut().project().queue.poll_next(cx) {
             match v {
@@ -151,10 +148,10 @@ where
     }
 }
 
-impl<F> Default for RetweetQueue<F>
+impl<S, B> Default for RetweetQueue<S, B>
 where
-    F: HttpResponseFuture,
-    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+    S: HttpService<B>,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
     fn default() -> Self {
         RetweetQueue {

@@ -8,7 +8,7 @@ pub trait TwitterRequestExt: twitter::Request {
         &self,
         core: &Core<S>,
         user: impl Into<Option<i64>>,
-    ) -> twitter::ResponseFuture<Self::Data, S::Future>
+    ) -> twitter::ResponseFuture<Self::Data, S, B>
     where
         S: HttpService<B> + Clone,
         B: Default + From<Vec<u8>>;
@@ -22,7 +22,7 @@ where
         &self,
         core: &Core<S>,
         user: impl Into<Option<i64>>,
-    ) -> twitter::ResponseFuture<Self::Data, S::Future>
+    ) -> twitter::ResponseFuture<Self::Data, S, B>
     where
         S: HttpService<B> + Clone,
         B: Default + From<Vec<u8>>,

@@ -1,5 +1,4 @@
-mod http_response_future;
-mod http_service;
+pub mod http_service;
 
 use std::convert::TryInto;
 use std::fs;
@@ -18,7 +17,6 @@ use serde::{de, Deserialize};
 
 use crate::Credentials;
 
-pub use self::http_response_future::HttpResponseFuture;
 pub use self::http_service::HttpService;
 
 #[pin_project]

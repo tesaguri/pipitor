@@ -74,8 +74,10 @@ use http_body::Body;
 use oauth1::Credentials;
 use pin_project::{pin_project, project};
 use serde::{de, Deserialize};
+use tower_util::{Oneshot, ServiceExt};
 
-use crate::util::{ConcatBody, HttpResponseFuture, HttpService};
+use crate::util::http_service::{HttpService, IntoService};
+use crate::util::ConcatBody;
 
 pub struct Response<T> {
     pub data: T,
@@ -83,20 +85,20 @@ pub struct Response<T> {
 }
 
 #[pin_project]
-pub struct ResponseFuture<T, F: HttpResponseFuture> {
+pub struct ResponseFuture<T, S: HttpService<B>, B> {
     #[pin]
-    inner: ResponseFutureInner<F>,
+    inner: ResponseFutureInner<S, B>,
     marker: PhantomData<fn() -> T>,
 }
 
 #[pin_project]
-enum ResponseFutureInner<F: HttpResponseFuture> {
-    Resp(#[pin] F),
+enum ResponseFutureInner<S: HttpService<B>, B> {
+    Resp(#[pin] Oneshot<IntoService<S>, http::Request<B>>),
     Body {
         status: StatusCode,
         rate_limit: Option<RateLimit>,
         #[pin]
-        body: ConcatBody<F::Body>,
+        body: ConcatBody<S::ResponseBody>,
         gzip: bool,
     },
 }
@@ -150,8 +152,8 @@ pub trait Request: oauth1::Authorize {
         &self,
         client_credentials: Credentials<&str>,
         token_credentials: Credentials<&'a str>,
-        mut client: S,
-    ) -> ResponseFuture<Self::Data, S::Future>
+        client: S,
+    ) -> ResponseFuture<Self::Data, S, B>
     where
         S: HttpService<B>,
         B: Default + From<Vec<u8>>,
@@ -188,7 +190,7 @@ pub trait Request: oauth1::Authorize {
         };
 
         ResponseFuture {
-            inner: ResponseFutureInner::Resp(client.call(req)),
+            inner: ResponseFutureInner::Resp(client.into_service().oneshot(req)),
             marker: PhantomData,
         }
     }
@@ -202,19 +204,19 @@ impl<T> Deref for Response<T> {
     }
 }
 
-impl<T: de::DeserializeOwned, F> Future for ResponseFuture<T, F>
+impl<T: de::DeserializeOwned, S, B> Future for ResponseFuture<T, S, B>
 where
-    F: HttpResponseFuture,
-    <F::Body as Body>::Error: std::error::Error + Send + Sync + 'static,
+    S: HttpService<B>,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
-    type Output = Result<Response<T>, Error<F::Error, <F::Body as Body>::Error>>;
+    type Output = Result<Response<T>, Error<S::Error, <S::ResponseBody as Body>::Error>>;
 
     #[project]
     fn poll(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Response<T>, Error<F::Error, <F::Body as Body>::Error>>> {
-        trace_fn!(ResponseFuture::<T, F>::poll);
+    ) -> Poll<Result<Response<T>, Error<S::Error, <S::ResponseBody as Body>::Error>>> {
+        trace_fn!(ResponseFuture::<T, S, B>::poll);
 
         #[project]
         match self.as_mut().project().inner.project() {

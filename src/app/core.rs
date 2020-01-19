@@ -103,7 +103,7 @@ impl<S> Core<S> {
             .map(|result| Ok(result.context("error while connecting to Twitter's Streaming API")?))
     }
 
-    pub(super) fn init_twitter_list<B>(&self) -> Fallible<TwitterListTimeline<S::Future>>
+    pub(super) fn init_twitter_list<B>(&self) -> Fallible<TwitterListTimeline<S, B>>
     where
         S: HttpService<B> + Clone,
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
@@ -124,7 +124,7 @@ impl<S> Core<S> {
             .optional()?
             .filter(|&n| n > 0);
 
-        Ok(TwitterListTimeline::<S::Future>::new(list, since_id, self))
+        Ok(TwitterListTimeline::new(list, since_id, self))
     }
 
     pub fn load_twitter_tokens(&mut self) -> Fallible<()> {

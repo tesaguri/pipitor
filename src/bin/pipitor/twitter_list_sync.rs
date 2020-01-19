@@ -65,7 +65,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
             twitter::lists::members::Destroy::new(list_id, user).send(
                 credentials.twitter.client.as_ref(),
                 token.as_ref(),
-                &mut client,
+                client.clone(),
             )
         })
         .collect();
@@ -85,7 +85,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
             let res = twitter::lists::members::Create::new(list_id, user).send(
                 credentials.twitter.client.as_ref(),
                 token.as_ref(),
-                &mut client,
+                client.clone(),
             );
             future::join(res, future::ready(user))
         })

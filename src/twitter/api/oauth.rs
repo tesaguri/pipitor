@@ -2,14 +2,15 @@ use http::header::AUTHORIZATION;
 use http::Uri;
 use http_body::Body;
 use oauth1::Credentials;
+use tower_util::ServiceExt;
 
-use crate::util::{ConcatBody, HttpResponseFuture, HttpService};
+use crate::util::{ConcatBody, HttpService};
 
 use super::{Error, Response};
 
 pub async fn request_token<'a, S, B>(
     client_credentials: Credentials<&'a str>,
-    mut client: S,
+    client: S,
 ) -> Result<Response<Credentials>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
     S: HttpService<B>,
@@ -29,8 +30,8 @@ where
         .unwrap();
 
     let res = client
-        .call(req)
-        .into_future()
+        .into_service()
+        .oneshot(req)
         .await
         .map_err(Error::Service)?;
 
@@ -60,7 +61,7 @@ pub async fn access_token<'a, S, B>(
     oauth_verifier: &'a str,
     client_credentials: Credentials<&'a str>,
     temporary_credentials: Credentials<&'a str>,
-    mut client: S,
+    client: S,
 ) -> Result<Response<(i64, Credentials)>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
     S: HttpService<B>,
@@ -81,8 +82,8 @@ where
         .unwrap();
 
     let res = client
-        .call(req)
-        .into_future()
+        .into_service()
+        .oneshot(req)
         .await
         .map_err(Error::Service)?;
 

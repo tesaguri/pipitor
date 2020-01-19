@@ -43,6 +43,7 @@ smallvec = { version = "1", features = ["serde"] }
 structopt = "0.3"
 tokio = { version = "0.2", features = ["io-std", "signal", "stream", "time", "uds"] }
 tower-service = "0.3"
+tower-util = "0.3"
 toml = "0.5"
 twitter-stream = { version = "=0.10.0-alpha.5", default-features = false }
 

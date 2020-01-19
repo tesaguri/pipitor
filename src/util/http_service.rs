@@ -1,16 +1,15 @@
 use std::error::Error;
+use std::future::Future;
 use std::task::{Context, Poll};
 
 use http::{Request, Response};
 use http_body::Body;
 use tower_service::Service;
 
-use super::{http_response_future::IntoFuture, HttpResponseFuture};
-
 pub trait HttpService<B> {
     type ResponseBody: Body;
     type Error: Error + Send + Sync + 'static;
-    type Future: HttpResponseFuture<Body = Self::ResponseBody, Error = Self::Error>;
+    type Future: Future<Output = Result<Response<Self::ResponseBody>, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>>;
     fn call(&mut self, request: Request<B>) -> Self::Future;
@@ -49,13 +48,13 @@ where
 {
     type Response = Response<S::ResponseBody>;
     type Error = S::Error;
-    type Future = IntoFuture<S::Future>;
+    type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), S::Error>> {
         HttpService::poll_ready(&mut self.0, cx)
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        HttpService::call(&mut self.0, request).into_future()
+        HttpService::call(&mut self.0, request)
     }
 }
