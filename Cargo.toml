@@ -21,7 +21,6 @@ atoi = "0.3"
 cfg-if = "0.1"
 bytes = "0.5"
 diesel = { version = "1.4.3", default-features = false, features = ["r2d2", "sqlite"] }
-diesel_derives = "1.4"
 diesel_migrations = { version = "1", default-features = false, features = ["sqlite"] }
 dotenv = "0.15"
 env_logger = "0.7"
