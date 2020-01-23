@@ -16,7 +16,7 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
 use futures::future;
-use futures::{Future, StreamExt, TryFutureExt};
+use futures::{Future, StreamExt};
 use http_body::Body;
 use pin_project::pin_project;
 use twitter_stream::TwitterStream;
@@ -63,19 +63,18 @@ where
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>>,
 {
-    pub fn with_http_client(client: S, manifest: Manifest) -> impl Future<Output = Fallible<Self>> {
+    pub async fn with_http_client(client: S, manifest: Manifest) -> Fallible<Self> {
         trace_fn!(App::<S, B>::with_http_client);
-        future::ready(Core::new(manifest, client)).and_then(|core| {
-            core.init_twitter().and_then(|twitter| {
-                future::ready(core.init_twitter_list()).map_ok(|twitter_list| App {
-                    core,
-                    twitter_list,
-                    twitter,
-                    twitter_done: false,
-                    sender: Sender::new(),
-                    body_marker: PhantomData,
-                })
-            })
+        let core = Core::new(manifest, client)?;
+        let twitter = core.init_twitter().await?;
+        let twitter_list = core.init_twitter_list()?;
+        Ok(App {
+            core,
+            twitter_list,
+            twitter,
+            twitter_done: false,
+            sender: Sender::new(),
+            body_marker: PhantomData,
         })
     }
 

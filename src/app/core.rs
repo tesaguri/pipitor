@@ -8,7 +8,7 @@ use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
 use failure::{Fail, Fallible, ResultExt};
-use futures::{Future, FutureExt};
+use futures::{future, Future, FutureExt, TryFutureExt};
 use http_body::Body;
 use pin_project::pin_project;
 use twitter_stream::TwitterStream;
@@ -73,10 +73,13 @@ impl<S> Core<S> {
         Ok(ret)
     }
 
-    pub fn init_twitter<B>(&self) -> impl Future<Output = Fallible<TwitterStream<S::ResponseBody>>>
+    pub fn init_twitter<'a, B>(
+        &'a self,
+    ) -> impl Future<Output = Fallible<TwitterStream<S::ResponseBody>>> + 'a
     where
         S: HttpService<B> + Clone,
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+        S::Future: 'a,
         B: Default + From<Vec<u8>>,
     {
         trace_fn!(Core::<S>::init_twitter);
@@ -85,7 +88,7 @@ impl<S> Core<S> {
 
         let stream_token = twitter_stream::Token::from_credentials(
             self.credentials().twitter.client.as_ref(),
-            token.as_ref(),
+            token,
         );
 
         let mut twitter_topics: Vec<_> = self
@@ -97,10 +100,21 @@ impl<S> Core<S> {
         twitter_topics.sort();
         twitter_topics.dedup();
 
-        twitter_stream::Builder::filter(stream_token)
-            .follow(&*twitter_topics)
-            .listen_with_client(self.client.clone().into_service())
-            .map(|result| Ok(result.context("error while connecting to Twitter's Streaming API")?))
+        let mut client = Some(self.client.clone().into_service());
+        future::poll_fn(move |cx| {
+            client.as_mut().unwrap().poll_ready(cx).map(|result| {
+                result.context("error while connecting to Twitter's Streaming API")?;
+                Ok(client.take().unwrap())
+            })
+        })
+        .and_then(move |client| {
+            twitter_stream::Builder::filter(stream_token)
+                .follow(&*twitter_topics)
+                .listen_with_client(client)
+                .map(|result| {
+                    Ok(result.context("error while connecting to Twitter's Streaming API")?)
+                })
+        })
     }
 
     pub(super) fn init_twitter_list<B>(&self) -> Fallible<TwitterListTimeline<S, B>>
