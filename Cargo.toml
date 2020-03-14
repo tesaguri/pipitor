@@ -45,7 +45,7 @@ tokio = { version = "0.2", features = ["io-std", "signal", "stream", "time", "ud
 tower-service = "0.3"
 tower-util = "0.3"
 toml = "0.5"
-twitter-stream = { version = "=0.10.0-alpha.5", default-features = false }
+twitter-stream = { version = "=0.10.0-alpha.6", default-features = false, features = ["gzip"] }
 
 ct-logs = { version = "0.6", optional = true }
 hyper = { version = "0.13", optional = true }

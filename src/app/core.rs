@@ -108,7 +108,7 @@ impl<S> Core<S> {
             })
         })
         .and_then(move |client| {
-            twitter_stream::Builder::filter(stream_token)
+            twitter_stream::Builder::new(stream_token)
                 .follow(&*twitter_topics)
                 .listen_with_client(client)
                 .map(|result| {
