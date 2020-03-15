@@ -12,9 +12,9 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use anyhow::Context as _;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
-use failure::{Fail, Fallible, ResultExt};
 use futures::future;
 use futures::{Future, StreamExt};
 use http_body::Body;
@@ -50,7 +50,7 @@ where
 
 #[cfg(feature = "native-tls")]
 impl App<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>, hyper::Body> {
-    pub fn new(manifest: Manifest) -> impl Future<Output = Fallible<Self>> {
+    pub fn new(manifest: Manifest) -> impl Future<Output = anyhow::Result<Self>> {
         let conn = hyper_tls::HttpsConnector::new();
         let client = hyper::Client::builder().build(conn);
         Self::with_http_client(client, manifest)
@@ -63,7 +63,7 @@ where
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>>,
 {
-    pub async fn with_http_client(client: S, manifest: Manifest) -> Fallible<Self> {
+    pub async fn with_http_client(client: S, manifest: Manifest) -> anyhow::Result<Self> {
         trace_fn!(App::<S, B>::with_http_client);
         let core = Core::new(manifest, client)?;
         let twitter = core.init_twitter().await?;
@@ -82,11 +82,13 @@ where
         self.core.set_twitter_dump(twitter_dump)
     }
 
-    pub fn shutdown<'a>(mut self: Pin<&'a mut Self>) -> impl Future<Output = Fallible<()>> + 'a {
+    pub fn shutdown<'a>(
+        mut self: Pin<&'a mut Self>,
+    ) -> impl Future<Output = anyhow::Result<()>> + 'a {
         future::poll_fn(move |cx| self.as_mut().poll_shutdown(cx))
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
         let mut this = self.project();
         let poll_backfill =
             this.twitter_list
@@ -97,7 +99,7 @@ where
         }
     }
 
-    pub async fn reset(mut self: Pin<&mut Self>) -> Fallible<()> {
+    pub async fn reset(mut self: Pin<&mut Self>) -> anyhow::Result<()> {
         let twitter_list = if self.twitter_done {
             let mut this = self.as_mut().project();
             this.twitter.set(this.core.init_twitter().await?);
@@ -125,7 +127,7 @@ where
     pub async fn replace_manifest(
         &mut self,
         manifest: Manifest,
-    ) -> Result<Manifest, (failure::Error, Manifest)> {
+    ) -> Result<Manifest, (anyhow::Error, Manifest)> {
         macro_rules! try_ {
             ($r:expr) => {
                 match $r {
@@ -229,7 +231,7 @@ where
         }
     }
 
-    fn poll_twitter(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
+    fn poll_twitter(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
         let mut this = self.project();
 
         while let Poll::Ready(v) = this.twitter.poll_next_unpin(cx) {
@@ -240,10 +242,13 @@ where
                 return Poll::Ready(Ok(()));
             };
 
-            let json = result.map_err(|e| {
-                *this.twitter_done = true;
-                e.context("error while listening to Twitter's Streaming API")
-            })?;
+            let json = match result.context("error while listening to Twitter's Streaming API") {
+                Ok(json) => json,
+                Err(e) => {
+                    *this.twitter_done = true;
+                    return Poll::Ready(Err(e));
+                }
+            };
 
             this.core.as_mut().with_twitter_dump(|dump| {
                 dump.write_all(json.trim_end().as_bytes())?;
@@ -313,9 +318,9 @@ where
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>>,
 {
-    type Output = Fallible<()>;
+    type Output = anyhow::Result<()>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Fallible<()>> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
         trace_fn!(App::<S, B>::poll);
 
         let mut this = self.as_mut().project();

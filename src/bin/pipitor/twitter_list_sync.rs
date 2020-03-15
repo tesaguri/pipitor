@@ -1,9 +1,9 @@
 use std::collections::hash_set::HashSet;
 
+use anyhow::Context;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
-use failure::{Fallible, ResultExt};
 use futures::future;
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use pipitor::models;
@@ -14,7 +14,7 @@ use crate::common::{client, open_credentials, open_manifest};
 #[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
 
-pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
+pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     use pipitor::schema::twitter_tokens::dsl::*;
 
     let manifest = open_manifest(opt)?;
@@ -37,7 +37,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
         .get_result::<models::TwitterToken>(&*pool.get()?)
         .optional()
         .context("failed to load tokens from the database")?
-        .ok_or_else(|| failure::err_msg("please run `pipitor twitter-login` first to login"))?
+        .context("please run `pipitor twitter-login` first to login")?
         .into();
 
     let res_fut = twitter::lists::Members::new(list_id)

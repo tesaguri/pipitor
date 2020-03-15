@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use diesel::prelude::*;
-use failure::Fallible;
 use futures::ready;
 use futures::stream::{FuturesUnordered, Stream};
 use http_body::Body;
@@ -47,7 +46,11 @@ where
         !self.retweet_queue.is_empty()
     }
 
-    pub fn send_tweet(self: Pin<&mut Self>, tweet: twitter::Tweet, core: &Core<S>) -> Fallible<()> {
+    pub fn send_tweet(
+        self: Pin<&mut Self>,
+        tweet: twitter::Tweet,
+        core: &Core<S>,
+    ) -> anyhow::Result<()> {
         trace_fn!(Sender::<S, B>::send_tweet, "tweet={:?}", tweet);
 
         let conn = core.conn()?;
@@ -113,7 +116,7 @@ where
         mut self: Pin<&mut Self>,
         core: &Core<S>,
         cx: &mut Context<'_>,
-    ) -> Poll<Fallible<()>> {
+    ) -> Poll<anyhow::Result<()>> {
         let mut ready = true;
 
         ready &= self.as_mut().poll_find_duplicate_tweet(core, cx).is_ready();

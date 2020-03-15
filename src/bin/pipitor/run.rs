@@ -1,7 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
-use failure::{Fail, Fallible, ResultExt};
+use anyhow::Context;
 use fs2::FileExt;
 use futures::{future, stream};
 use futures::{pin_mut, FutureExt, StreamExt, TryFutureExt};
@@ -19,7 +19,7 @@ pub struct Opt {
     twitter_dump: Option<PathBuf>,
 }
 
-pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
+pub fn main(opt: &crate::Opt, subopt: Opt) -> anyhow::Result<()> {
     let manifest = open_manifest(opt)?;
 
     let manifest_path: &Path = opt.manifest_path();
@@ -32,11 +32,12 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
     let ipc_path = ipc_path(manifest_path);
     let opt = opt.clone();
     runtime.block_on(async move {
-        let (ipc, _guard) = match ipc_server(&ipc_path) {
+        let (ipc, _guard) = match ipc_server(&ipc_path)
+            .with_context(|| format!("failed to create an IPC socket at {:?}", ipc_path))
+        {
             Ok(ipc) => (ipc.left_stream().fuse(), Some(RmGuard(ipc_path))),
             Err(e) => {
-                let e = e.context(format!("failed to create an IPC socket at {:?}", ipc_path));
-                error!("{}", DisplayFailChain(&e));
+                error!("{:?}", e);
                 (stream::empty().right_stream().fuse(), None)
             }
         };
@@ -55,10 +56,9 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
                 .write(true)
                 .create(true)
                 .open(path)
-                .context(format!(
-                    "failed to open {:?}",
-                    subopt.twitter_dump.as_ref().unwrap(),
-                ))?;
+                .with_context(|| {
+                    format!("failed to open {:?}", subopt.twitter_dump.as_ref().unwrap())
+                })?;
             app.set_twitter_dump(f).unwrap();
         };
 
@@ -72,7 +72,7 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
                         Ok(()) => info!("disconnected from Twitter Streaming API"),
                         Err(e) => {
                             // TODO: do not retry immediately if the error is Too Many Requests or Forbidden
-                            error!("{}", DisplayFailChain(&e));
+                            error!("{:?}", e);
                         }
                     }
                     info!("restarting the application");
@@ -98,7 +98,7 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
                             async {
                                 write.write_all($body).await?;
                                 write.flush().await?;
-                                Ok(()) as Fallible<()>
+                                Ok(()) as std::io::Result<_>
                             }
                                 .map_err(|e| warn!("failed to write IPC response: {}", e))
                         };

@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
 
-use failure::Fallible;
 use futures::future::Future;
 use futures::ready;
 use futures::stream::StreamExt;
@@ -98,7 +97,7 @@ where
         core: &Core<S>,
         mut sender: Pin<&mut Sender<S, B>>,
         cx: &mut Context<'_>,
-    ) -> Poll<Fallible<()>> {
+    ) -> Poll<anyhow::Result<()>> {
         trace_fn!(TwitterListTimeline::<S, B>::poll);
 
         let mut inner = if let Some(inner) = self.project().inner.as_pin_mut() {
@@ -164,7 +163,7 @@ where
         mut core: Pin<&mut Core<S>>,
         mut sender: Pin<&mut Sender<S, B>>,
         cx: &mut Context<'_>,
-    ) -> Poll<Fallible<()>> {
+    ) -> Poll<anyhow::Result<()>> {
         #[project]
         let Inner {
             unpin,

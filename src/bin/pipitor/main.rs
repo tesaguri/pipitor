@@ -17,10 +17,9 @@ mod twitter_login;
 
 use std::process;
 
-use failure::Fallible;
 use structopt::StructOpt;
 
-use common::{DisplayFailChain, Opt};
+use common::Opt;
 
 #[derive(StructOpt)]
 struct Args {
@@ -50,13 +49,13 @@ fn main() {
     env_logger::init();
 
     if let Err(e) = run() {
-        error!("{}", DisplayFailChain(&e));
+        error!("{:?}", e);
         info!("exiting abnormally");
         process::exit(1);
     }
 }
 
-fn run() -> Fallible<()> {
+fn run() -> anyhow::Result<()> {
     let Args { opt, cmd } = Args::from_args();
 
     match cmd {

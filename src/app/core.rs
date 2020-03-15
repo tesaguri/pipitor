@@ -3,11 +3,11 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::pin::Pin;
 
+use anyhow::Context;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
-use failure::{Fail, Fallible, ResultExt};
 use futures::{future, Future, FutureExt, TryFutureExt};
 use http_body::Body;
 use pin_project::pin_project;
@@ -32,7 +32,7 @@ pub struct Core<S> {
 }
 
 impl<S> Core<S> {
-    pub fn new<B>(manifest: Manifest, client: S) -> Fallible<Self>
+    pub fn new<B>(manifest: Manifest, client: S) -> anyhow::Result<Self>
     where
         S: HttpService<B> + Clone,
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
@@ -75,7 +75,7 @@ impl<S> Core<S> {
 
     pub fn init_twitter<'a, B>(
         &'a self,
-    ) -> impl Future<Output = Fallible<TwitterStream<S::ResponseBody>>> + 'a
+    ) -> impl Future<Output = anyhow::Result<TwitterStream<S::ResponseBody>>> + 'a
     where
         S: HttpService<B> + Clone,
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
@@ -111,13 +111,11 @@ impl<S> Core<S> {
             twitter_stream::Builder::new(stream_token)
                 .follow(&*twitter_topics)
                 .listen_with_client(client)
-                .map(|result| {
-                    Ok(result.context("error while connecting to Twitter's Streaming API")?)
-                })
+                .map(|result| result.context("error while connecting to Twitter's Streaming API"))
         })
     }
 
-    pub(super) fn init_twitter_list<B>(&self) -> Fallible<TwitterListTimeline<S, B>>
+    pub(super) fn init_twitter_list<B>(&self) -> anyhow::Result<TwitterListTimeline<S, B>>
     where
         S: HttpService<B> + Clone,
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
@@ -141,7 +139,7 @@ impl<S> Core<S> {
         Ok(TwitterListTimeline::new(list, since_id, self))
     }
 
-    pub fn load_twitter_tokens(&mut self) -> Fallible<()> {
+    pub fn load_twitter_tokens(&mut self) -> anyhow::Result<()> {
         let manifest = self.manifest();
 
         let unauthed_users = manifest
@@ -162,11 +160,10 @@ impl<S> Core<S> {
                 .load(&*self.conn()?)?
         };
 
-        if unauthed_users.len() != tokens.len() {
-            return Err(failure::err_msg(
-                "not all Twitter users are authorized; please run `pipitor twitter-login`",
-            ));
-        }
+        anyhow::ensure!(
+            unauthed_users.len() == tokens.len(),
+            "not all Twitter users are authorized; please run `pipitor twitter-login`",
+        );
 
         self.twitter_tokens
             .extend(tokens.into_iter().map(|token| (token.id, token.into())));
@@ -204,7 +201,7 @@ impl<S> Core<S> {
         &self.client
     }
 
-    pub fn conn(&self) -> Fallible<PooledConnection<ConnectionManager<SqliteConnection>>> {
+    pub fn conn(&self) -> anyhow::Result<PooledConnection<ConnectionManager<SqliteConnection>>> {
         self.pool
             .get()
             .context("failed to retrieve a connection from the connection pool")
@@ -217,18 +214,18 @@ impl<S> Core<S> {
             .map(oauth1::Credentials::as_ref)
     }
 
-    pub fn with_twitter_dump<F, E>(self: Pin<&mut Self>, f: F) -> Fallible<()>
+    pub fn with_twitter_dump<F, E>(self: Pin<&mut Self>, f: F) -> anyhow::Result<()>
     where
         F: FnOnce(&mut BufWriter<File>) -> Result<(), E>,
-        E: Fail,
+        E: std::error::Error + Send + Sync + 'static,
     {
         let twitter_dump = self.project().twitter_dump;
 
         if let Some(ref mut dump) = twitter_dump {
-            f(dump).map_err(|e| {
+            if let Err(e) = f(dump).context("failed to write a Tweet to the dump file") {
                 *twitter_dump = None;
-                e.context("failed to write a Tweet to the dump file")
-            })?;
+                return Err(e);
+            }
         }
 
         Ok(())

@@ -8,8 +8,8 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use bytes::Buf;
-use failure::{Fallible, ResultExt};
 use futures::{ready, Future};
 use http_body::Body;
 use pin_project::{pin_project, project};
@@ -152,7 +152,7 @@ pub fn char_index_to_byte_index(s: &str, char_index: usize) -> Option<usize> {
     None
 }
 
-pub fn open_credentials(path: &str) -> Fallible<Credentials> {
+pub fn open_credentials(path: &str) -> anyhow::Result<Credentials> {
     let ret = fs::read(path)
         .context("failed to open the credentials file")
         .and_then(|buf| toml::from_slice(&buf).context("failed to parse the credentials file"))?;

@@ -1,17 +1,15 @@
 use std::ffi::OsString;
 use std::fmt::{self, Debug, Display, Formatter};
+use std::fs;
 use std::marker::Unpin;
 use std::path::{Path, PathBuf};
-use std::{env, fs, io};
 
-use failure::{AsFail, Fail, Fallible, ResultExt};
+use anyhow::Context;
 use futures::future::{self, Future, FutureExt};
 use futures::{Stream, StreamExt};
 use hyper::client::{connect::Connect, Client};
 use pipitor::{Credentials, Manifest};
 use serde::{Deserialize, Serialize};
-
-pub struct DisplayFailChain<'a, F>(pub &'a F);
 
 #[derive(Deserialize, Serialize)]
 pub enum IpcRequest {
@@ -21,7 +19,7 @@ pub enum IpcRequest {
     Shutdown {},
 }
 
-#[derive(Debug, Default, Deserialize, Fail, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize, thiserror::Error)]
 pub struct IpcResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -45,34 +43,6 @@ pub struct Opt {
 }
 
 pub struct RmGuard<P: AsRef<Path>>(pub P);
-
-impl<'a, F: AsFail> Display for DisplayFailChain<'a, F> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let fail = self.0.as_fail();
-
-        write!(f, "Error: {}", fail)?;
-
-        for e in fail.iter_causes() {
-            write!(f, "\nCaused by: {}", e)?;
-        }
-
-        if let Some(backtrace) = fail.backtrace() {
-            let backtrace_enabled = match env::var_os("RUST_FAILURE_BACKTRACE") {
-                Some(ref v) if v != "0" => true,
-                Some(_) => false,
-                _ => match env::var_os("RUST_BACKTRACE") {
-                    Some(ref v) if v != "0" => true,
-                    _ => false,
-                },
-            };
-            if backtrace_enabled {
-                write!(f, "\n{}", backtrace)?;
-            }
-        }
-
-        Ok(())
-    }
-}
 
 impl IpcResponse {
     pub fn new(code: IpcResponseCode, message: impl Into<Option<String>>) -> Self {
@@ -149,38 +119,32 @@ fn ipc_path_(manifest_path: &Path) -> PathBuf {
     manifest_path.with_file_name(sock)
 }
 
-pub fn open_manifest(opt: &Opt) -> Fallible<Manifest> {
+pub fn open_manifest(opt: &Opt) -> anyhow::Result<Manifest> {
     let path: &str;
     let mut manifest: Manifest = if let Some(ref p) = opt.manifest_path {
         path = p;
-        let buf = fs::read(path)
-            .with_context(|_| format!("could not open the manifest at `{}`", path))?;
+        let buf =
+            fs::read(path).with_context(|| format!("could not open the manifest at `{}`", path))?;
         toml::from_slice(&buf).context("failed to parse the manifest file")?
     } else {
         path = "Pipitor.toml";
-        let buf = fs::read(path).with_context(|e| match e.kind() {
-            io::ErrorKind::NotFound => "could not find `Pipitor.toml` in the current directory",
-            _ => "could not open `Pipitor.toml`",
-        })?;
+        let buf = fs::read(path).context("could not open `Pipitor.toml`")?;
         toml::from_slice(&buf).context("failed to parse `Pipitor.toml`")?
     };
     manifest.resolve_paths(path);
     Ok(manifest)
 }
 
-pub fn open_credentials(opt: &Opt, manifest: &Manifest) -> Fallible<Credentials> {
+pub fn open_credentials(opt: &Opt, manifest: &Manifest) -> anyhow::Result<Credentials> {
     if opt.manifest_path.is_none() && manifest.credentials.is_none() {
-        let buf = fs::read("credentials.toml").with_context(|e| match e.kind() {
-            io::ErrorKind::NotFound => "could not find `credentials.toml` in the current directory",
-            _ => "could not open `credentials.toml`",
-        })?;
-        return Ok(toml::from_slice(&buf).context("failed to parse `credentials.toml`")?);
+        let buf = fs::read("credentials.toml").context("could not open `credentials.toml`")?;
+        return toml::from_slice(&buf).context("failed to parse `credentials.toml`");
     }
 
     let path = manifest.credentials_path();
     let buf =
-        fs::read(path).with_context(|_| format!("could not open the credentials at {}", path))?;
-    Ok(toml::from_slice(&buf).context("failed to parse the credentials file")?)
+        fs::read(path).with_context(|| format!("could not open the credentials at {}", path))?;
+    toml::from_slice(&buf).context("failed to parse the credentials file")
 }
 
 cfg_if::cfg_if! {

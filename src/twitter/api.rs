@@ -65,7 +65,6 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use failure::Fail;
 use flate2::bufread::GzDecoder;
 use futures::{ready, Future};
 use http::header::{HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE};
@@ -110,21 +109,21 @@ pub struct RateLimit {
     pub reset: u64,
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error<SE, BE>
 where
-    SE: std::error::Error + Send + Sync + 'static,
-    BE: std::error::Error + Send + Sync + 'static,
+    SE: std::error::Error + 'static,
+    BE: std::error::Error + 'static,
 {
-    #[fail(display = "Failed to deserialize the response body.")]
-    Deserializing(#[cause] json::Error),
-    #[fail(display = "HTTP error")]
-    Service(#[cause] SE),
-    #[fail(display = "Error while reading the response body")]
-    Body(#[cause] BE),
-    #[fail(display = "Twitter returned error(s)")]
-    Twitter(#[cause] TwitterErrors),
-    #[fail(display = "Unexpected error occured.")]
+    #[error("Failed to deserialize the response body.")]
+    Deserializing(#[source] json::Error),
+    #[error("HTTP error")]
+    Service(#[source] SE),
+    #[error("Error while reading the response body")]
+    Body(#[source] BE),
+    #[error("Twitter returned error(s)")]
+    Twitter(#[source] TwitterErrors),
+    #[error("Unexpected error occured.")]
     Unexpected,
 }
 

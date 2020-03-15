@@ -1,6 +1,6 @@
 use std::net::Shutdown;
 
-use failure::{Fallible, ResultExt};
+use anyhow::Context;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
@@ -8,7 +8,7 @@ use crate::common::{ipc_path, IpcRequest, IpcResponse};
 
 use super::*;
 
-pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
+pub async fn main(opt: &crate::Opt, subopt: Opt) -> anyhow::Result<()> {
     let manifest_path = opt.manifest_path();
     let ipc_path = ipc_path(&manifest_path);
     let ipc = UnixStream::connect(&ipc_path);
@@ -21,7 +21,7 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> Fallible<()> {
 
     let mut ipc = ipc
         .await
-        .with_context(|_| format!("failed to open the IPC socket at {:?}", ipc_path))?;
+        .with_context(|| format!("failed to open the IPC socket at {:?}", ipc_path))?;
 
     ipc.write_all(&req).await?;
     ipc.flush().await?;

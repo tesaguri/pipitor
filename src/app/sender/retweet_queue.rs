@@ -3,7 +3,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use diesel::prelude::*;
-use failure::Fallible;
 use futures::future::Future;
 use futures::ready;
 use futures::stream::{FuturesUnordered, Stream};
@@ -45,7 +44,7 @@ where
         mut self: Pin<&mut Self>,
         core: &Core<S>,
         cx: &mut Context<'_>,
-    ) -> Poll<Fallible<()>> {
+    ) -> Poll<anyhow::Result<()>> {
         use crate::models::NewTweet;
         use crate::schema::tweets::dsl::*;
 

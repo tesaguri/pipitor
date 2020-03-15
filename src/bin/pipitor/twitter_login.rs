@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 use std::io::{self, Write};
 
+use anyhow::Context;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
-use failure::{Fallible, ResultExt};
 use futures::future;
 use futures::stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt};
 use http::StatusCode;
@@ -17,7 +17,7 @@ use crate::common::{client, open_credentials, open_manifest};
 #[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
 
-pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
+pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     use pipitor::schema::twitter_tokens::dsl::*;
 
     let manifest = open_manifest(opt)?;
@@ -51,10 +51,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
                         Err(twitter::Error::Twitter(ref e))
                             if e.status == StatusCode::UNAUTHORIZED => {}
                         Err(e) => {
-                            return Err(e)
-                                .context("error while verifying Twitter credentials")
-                                .map_err(Into::into)
-                                as Fallible<_>;
+                            return Err(e).context("error while verifying Twitter credentials");
                         }
                     }
                 }
@@ -62,7 +59,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> Fallible<()> {
                 Ok(Some(user))
             })
         })
-        .collect::<Fallible<_>>()?;
+        .collect::<anyhow::Result<_>>()?;
 
     let mut unauthed_users: HashSet<_> = unauthed_users
         .try_filter_map(future::ok)
