@@ -44,7 +44,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
             Ok(async move {
                 if let Some(token) = token {
                     match twitter::account::VerifyCredentials::new()
-                        .send(credentials.twitter.client.as_ref(), (&token).into(), client)
+                        .send(&credentials.twitter.client, &(&token).into(), client)
                         .await
                     {
                         Ok(_) => return Ok(None),

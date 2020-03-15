@@ -95,7 +95,8 @@ where
             use diesel::dsl::*;
 
             tweets
-                .filter(user_id.eq(&tweet.user.id).and(text.eq(&*tweet.text)))
+                .filter(user_id.eq(&tweet.user.id))
+                .filter(text.eq(&*tweet.text))
                 .select(max(id))
                 .first::<Option<i64>>(&*conn)?
         };

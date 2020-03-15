@@ -30,8 +30,8 @@ where
         let user = user.into().unwrap_or_else(|| core.manifest().twitter.user);
         twitter::Request::send(
             self,
-            core.credentials().twitter.client.as_ref(),
-            core.twitter_token(user).unwrap(),
+            &core.credentials().twitter.client,
+            &core.twitter_token(user).unwrap(),
             core.http_client().clone(),
         )
     }

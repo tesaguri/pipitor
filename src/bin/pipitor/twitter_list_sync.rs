@@ -4,7 +4,7 @@ use anyhow::Context;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
-use futures::future;
+use futures::future::{self, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
@@ -42,11 +42,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
     let res_fut = twitter::lists::Members::new(list_id)
         .count(Some(5000))
-        .send(
-            credentials.twitter.client.as_ref(),
-            token.as_ref(),
-            &mut client,
-        );
+        .send(&credentials.twitter.client, &token, &mut client);
     println!("Retrieving the list...");
 
     let users: HashSet<i64> = manifest.rule.twitter_topics().collect();
@@ -63,8 +59,8 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .difference(&users)
         .map(|&user| {
             twitter::lists::members::Destroy::new(list_id, user).send(
-                credentials.twitter.client.as_ref(),
-                token.as_ref(),
+                &credentials.twitter.client,
+                &token,
                 client.clone(),
             )
         })
@@ -82,12 +78,9 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let create: FuturesUnordered<_> = users
         .difference(&list)
         .map(|&user| {
-            let res = twitter::lists::members::Create::new(list_id, user).send(
-                credentials.twitter.client.as_ref(),
-                token.as_ref(),
-                client.clone(),
-            );
-            future::join(res, future::ready(user))
+            twitter::lists::members::Create::new(list_id, user)
+                .send(&credentials.twitter.client, &token, client.clone())
+                .map(move |r| (r, user))
         })
         .collect();
     if !create.is_empty() {

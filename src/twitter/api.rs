@@ -1,8 +1,6 @@
 macro_rules! api_requests {
-    (POST $($rest:tt)+) => { api_requests! { @inner true; POST $($rest)+ } };
-    ($method:ident $($rest:tt)+) => { api_requests! { @inner false; $method $($rest)+ } };
     (
-        @inner $form:expr; $method:ident $uri:expr => $Data:ty;
+        $method:ident $uri:expr => $Data:ty;
         $(#[$attr:meta])*
         pub struct $Name:ident {
             $($(#[$req_attr:meta])* $required:ident: $req_ty:ty),*;
@@ -44,7 +42,6 @@ macro_rules! api_requests {
             type Data = $Data;
 
             const METHOD: http::Method = http::Method::$method;
-            const FORM: bool = $form;
             const URI: &'static str = $uri;
         }
 
@@ -58,6 +55,7 @@ pub mod lists;
 pub mod oauth;
 pub mod statuses;
 
+use std::borrow::Borrow;
 use std::error;
 use std::fmt::{self, Display, Formatter};
 use std::marker::PhantomData;
@@ -144,52 +142,30 @@ pub trait Request: oauth1::Authorize {
     type Data: de::DeserializeOwned;
 
     const METHOD: Method;
-    const FORM: bool;
     const URI: &'static str;
 
-    fn send<'a, S, B>(
+    fn send<C, T, S, B>(
         &self,
-        client_credentials: Credentials<&str>,
-        token_credentials: Credentials<&'a str>,
-        client: S,
+        client: &Credentials<C>,
+        token: &Credentials<T>,
+        http: S,
     ) -> ResponseFuture<Self::Data, S, B>
     where
+        C: Borrow<str>,
+        T: Borrow<str>,
         S: HttpService<B>,
-        B: Default + From<Vec<u8>>,
+        B: From<Vec<u8>>,
     {
-        let mut builder = oauth1::Builder::new(client_credentials, oauth1::HmacSha1);
-        builder.token(token_credentials);
-        let oauth1::Request {
-            authorization,
-            data,
-        } = if Self::FORM {
-            builder.build_form(Self::METHOD.as_str(), Self::URI, self)
-        } else {
-            builder.build(Self::METHOD.as_str(), Self::URI, self)
-        };
-
-        trace!("{} {}", Self::METHOD, Self::URI);
-        trace!("data: {}", data);
-
-        let req = http::Request::builder()
-            .method(Self::METHOD)
-            .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
-            .header(AUTHORIZATION, authorization);
-
-        let req = if Self::FORM {
-            req.uri(Uri::from_static(Self::URI))
-                .header(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static("application/x-www-form-urlencoded"),
-                )
-                .body(data.into_bytes().into())
-                .unwrap()
-        } else {
-            req.uri(data).body(Default::default()).unwrap()
-        };
+        let req = prepare_request(
+            &Self::METHOD,
+            Self::URI,
+            self,
+            client.as_ref(),
+            token.as_ref(),
+        );
 
         ResponseFuture {
-            inner: ResponseFutureInner::Resp(client.into_service().oneshot(req)),
+            inner: ResponseFutureInner::Resp(http.into_service().oneshot(req.map(Into::into))),
             marker: PhantomData,
         }
     }
@@ -211,10 +187,7 @@ where
     type Output = Result<Response<T>, Error<S::Error, <S::ResponseBody as Body>::Error>>;
 
     #[project]
-    fn poll(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Response<T>, Error<S::Error, <S::ResponseBody as Body>::Error>>> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         trace_fn!(ResponseFuture::<T, S, B>::poll);
 
         #[project]
@@ -330,6 +303,50 @@ where
                     rate_limit,
                 }))
             })
+    }
+}
+
+fn prepare_request<R>(
+    method: &Method,
+    uri: &'static str,
+    req: &R,
+    client: Credentials<&str>,
+    token: Credentials<&str>,
+) -> http::Request<Vec<u8>>
+where
+    R: oauth1::Authorize + ?Sized,
+{
+    let form = method == Method::POST;
+
+    let mut builder = oauth1::Builder::new(client, oauth1::HmacSha1);
+    builder.token(token);
+    let oauth1::Request {
+        authorization,
+        data,
+    } = if form {
+        builder.build_form(method.as_str(), uri, req)
+    } else {
+        builder.build(method.as_str(), uri, req)
+    };
+
+    trace!("{} {}", method, uri);
+    trace!("data: {}", data);
+
+    let req = http::Request::builder()
+        .method(method)
+        .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
+        .header(AUTHORIZATION, authorization);
+
+    if form {
+        req.uri(Uri::from_static(uri))
+            .header(
+                CONTENT_TYPE,
+                HeaderValue::from_static("application/x-www-form-urlencoded"),
+            )
+            .body(data.into_bytes().into())
+            .unwrap()
+    } else {
+        req.uri(data).body(Vec::default()).unwrap()
     }
 }
 
