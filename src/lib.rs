@@ -10,6 +10,7 @@ pub mod credentials;
 pub mod manifest;
 pub mod models;
 pub mod rules;
+#[rustfmt::skip]
 pub mod schema;
 pub mod twitter;
 
