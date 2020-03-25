@@ -11,10 +11,9 @@ use pin_project::pin_project;
 use twitter_stream::TwitterStream;
 
 use crate::models;
+use crate::twitter;
 use crate::util::{open_credentials, HttpService};
 use crate::{Credentials, Manifest};
-
-use super::TwitterListTimeline;
 
 /// An object referenced by `poll`-like methods under `app` module.
 #[pin_project]
@@ -110,7 +109,7 @@ impl<S> Core<S> {
         })
     }
 
-    pub(super) fn init_twitter_list<B>(&self) -> anyhow::Result<TwitterListTimeline<S, B>>
+    pub(super) fn init_twitter_list<B>(&self) -> anyhow::Result<twitter::ListTimeline<S, B>>
     where
         S: HttpService<B> + Clone,
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
@@ -121,7 +120,7 @@ impl<S> Core<S> {
         let list = if let Some(list) = self.manifest.twitter.list {
             list
         } else {
-            return Ok(TwitterListTimeline::empty());
+            return Ok(twitter::ListTimeline::empty());
         };
 
         let since_id = last_tweet
@@ -131,7 +130,15 @@ impl<S> Core<S> {
             .optional()?
             .filter(|&n| n > 0);
 
-        Ok(TwitterListTimeline::new(list, since_id, self))
+        let user = self.manifest().twitter.user;
+        let client = self.credentials().twitter.client.clone();
+        let token = self.twitter_tokens.get(&user).unwrap().clone();
+
+        let http = self.client.clone();
+
+        Ok(twitter::ListTimeline::new(
+            list, since_id, client, token, http,
+        ))
     }
 
     pub fn load_twitter_tokens(&mut self) -> anyhow::Result<()> {

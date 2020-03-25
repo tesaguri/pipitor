@@ -51,6 +51,29 @@ where
         tweet: twitter::Tweet,
         core: &Core<S>,
     ) -> anyhow::Result<()> {
+        self.send_tweet_(tweet, core, true)
+    }
+
+    pub fn send_tweets<I>(mut self: Pin<&mut Self>, tweets: I, core: &Core<S>) -> anyhow::Result<()>
+    where
+        I: IntoIterator<Item = twitter::Tweet>,
+        I::IntoIter: DoubleEndedIterator,
+    {
+        // Tweets are assumed to be sorted in descending order of posted time.
+        let mut tweets = tweets.into_iter().rev().peekable();
+        while let Some(t) = tweets.next() {
+            self.as_mut()
+                .send_tweet_(t, core, tweets.peek().is_none())?;
+        }
+        Ok(())
+    }
+
+    fn send_tweet_(
+        self: Pin<&mut Self>,
+        tweet: twitter::Tweet,
+        core: &Core<S>,
+        update_last_tweet: bool,
+    ) -> anyhow::Result<()> {
         trace_fn!(Sender::<S, B>::send_tweet, "tweet={:?}", tweet);
 
         let conn = core.conn()?;
@@ -68,7 +91,7 @@ where
             return Ok(());
         }
 
-        {
+        if update_last_tweet {
             use crate::schema::last_tweet::dsl::*;
 
             diesel::update(last_tweet)

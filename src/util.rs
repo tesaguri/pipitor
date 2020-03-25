@@ -7,6 +7,7 @@ use std::mem;
 use std::ops::Range;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
 use bytes::Buf;
@@ -157,6 +158,16 @@ pub fn open_credentials(path: &str) -> anyhow::Result<Credentials> {
         .context("failed to open the credentials file")
         .and_then(|buf| toml::from_slice(&buf).context("failed to parse the credentials file"))?;
     Ok(ret)
+}
+
+pub fn snowflake_to_system_time(id: u64) -> SystemTime {
+    // timestamp_ms = (snowflake >> 22) + 1_288_834_974_657
+    let snowflake_time_ms = id >> 22;
+    let timestamp = Duration::new(
+        snowflake_time_ms / 1_000 + 1_288_834_974,
+        (snowflake_time_ms as u32 % 1_000 + 657) * 1_000 * 1_000,
+    );
+    UNIX_EPOCH + timestamp
 }
 
 #[cfg(test)]

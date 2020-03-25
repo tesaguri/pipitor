@@ -3,21 +3,22 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
 
-use futures::future::Future;
-use futures::ready;
-use futures::stream::StreamExt;
+use futures::{ready, Future, Stream, StreamExt};
 use http_body::Body;
+use oauth1::Credentials;
 use pin_project::{pin_project, project};
 use smallvec::SmallVec;
 use tokio::time::Interval;
 
-use crate::twitter;
-use crate::util::HttpService;
+use crate::util::{snowflake_to_system_time, HttpService};
 
-use super::{Core, Sender, TwitterRequestExt as _};
+use super::{Request, Tweet};
 
+/// A stream that continuously yields Tweets from a list timeline.
+///
+/// This optionally _backfill_s past Tweets since the specified Tweet ID.
 #[pin_project]
-pub struct TwitterListTimeline<S, B>
+pub struct ListTimeline<S, B>
 where
     S: HttpService<B>,
 {
@@ -32,20 +33,22 @@ struct Inner<S, B>
 where
     S: HttpService<B>,
 {
-    unpin: Unpinned<S, B>,
+    current: Current<S, B>,
     #[pin]
     backfill: Option<Backfill<S, B>>,
 }
 
-struct Unpinned<S, B>
+struct Current<S, B>
 where
     S: HttpService<B>,
 {
     list_id: NonZeroU64,
     since_id: Option<i64>,
-    responses:
-        SmallVec<[Pin<Box<twitter::ResponseFuture<Vec<twitter::Tweet>, S, B>>>; RESP_BUF_CAP]>,
+    responses: SmallVec<[Pin<Box<super::ResponseFuture<Vec<Tweet>, S, B>>>; RESP_BUF_CAP]>,
     interval: Interval,
+    client: Credentials<Box<str>>,
+    token: Credentials<Box<str>>,
+    http: S,
 }
 
 #[pin_project]
@@ -55,66 +58,96 @@ where
 {
     since_id: i64,
     #[pin]
-    response: twitter::ResponseFuture<Vec<twitter::Tweet>, S, B>,
+    response: super::ResponseFuture<Vec<Tweet>, S, B>,
 }
 
-impl<S, B> TwitterListTimeline<S, B>
+impl<S, B> ListTimeline<S, B>
 where
     S: HttpService<B> + Clone,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>>,
 {
-    pub fn new(list_id: NonZeroU64, since_id: Option<i64>, core: &Core<S>) -> Self {
+    pub fn new(
+        list_id: NonZeroU64,
+        since_id: Option<i64>,
+        client: Credentials<Box<str>>,
+        token: Credentials<Box<str>>,
+        http: S,
+    ) -> Self {
         let backfill = since_id.map(|since_id| {
-            let response = twitter::lists::Statuses::new(list_id)
+            let response = super::lists::Statuses::new(list_id)
                 .since_id(Some(since_id))
-                .send(core, None);
+                .send(&client, &token, http.clone());
             Backfill { since_id, response }
         });
 
-        let mut inner = Inner {
-            unpin: Unpinned {
-                list_id,
-                since_id: None,
-                responses: SmallVec::new(),
-                // Rate limit of GET lists/statuses (user auth): 900 reqs/15-min window (1 req/sec)
-                interval: tokio::time::interval(Duration::from_secs(1)),
-            },
-            backfill,
+        let mut current = Current {
+            list_id,
+            since_id: None,
+            responses: SmallVec::new(),
+            // Rate limit of GET lists/statuses (user auth): 900 reqs/15-min window (1 req/sec)
+            interval: tokio::time::interval(Duration::from_secs(1)),
+            client,
+            token,
+            http,
         };
-        inner.unpin.send_request(core);
+        current.send_request();
 
-        TwitterListTimeline { inner: Some(inner) }
+        let inner = Inner { current, backfill };
+        ListTimeline { inner: Some(inner) }
     }
 
     pub fn empty() -> Self {
-        TwitterListTimeline { inner: None }
+        ListTimeline { inner: None }
     }
 
-    pub fn poll(
+    pub fn poll_next_backfill(
         self: Pin<&mut Self>,
-        core: &Core<S>,
-        mut sender: Pin<&mut Sender<S, B>>,
         cx: &mut Context<'_>,
-    ) -> Poll<anyhow::Result<()>> {
-        trace_fn!(TwitterListTimeline::<S, B>::poll);
+    ) -> Poll<Option<Vec<Tweet>>> {
+        match self.project().inner.as_pin_mut() {
+            Some(inner) => inner.poll_next_backfill(cx),
+            None => return Poll::Ready(None),
+        }
+    }
+}
 
-        let mut inner = if let Some(inner) = self.project().inner.as_pin_mut() {
-            inner
-        } else {
-            return Poll::Ready(Ok(()));
+impl<S, B> Stream for ListTimeline<S, B>
+where
+    S: HttpService<B> + Clone,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>>,
+{
+    type Item = anyhow::Result<Vec<Tweet>>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        trace_fn!(ListTimeline::<S, B>::poll_next);
+
+        let mut inner = match self.project().inner.as_pin_mut() {
+            Some(inner) => inner,
+            None => return Poll::Ready(None),
         };
 
-        if let Poll::Ready(Some(_)) = inner.as_mut().project().unpin.interval.poll_next_unpin(cx) {
-            inner.as_mut().project().unpin.send_request(core);
+        if let Poll::Ready(Some(tweets)) = inner.as_mut().poll_next_backfill(cx) {
+            return Poll::Ready(Some(Ok(tweets)));
         }
 
-        let tweets = match ready!(inner.as_mut().project().unpin.poll_next(cx)) {
+        if let Poll::Ready(Some(_)) = inner
+            .as_mut()
+            .project()
+            .current
+            .interval
+            .poll_next_unpin(cx)
+        {
+            inner.as_mut().project().current.send_request();
+        }
+
+        let tweets = match ready!(inner.as_mut().project().current.poll_next(cx)) {
             Ok(resp) => resp.data,
             Err(e) => {
                 // Skip the error as the list timeline is only for complementary purpose.
                 warn!("error while retrieving Tweets from the list: {:?}", e);
-                if let twitter::Error::Twitter(e) = e {
+                if let super::Error::Twitter(e) = e {
                     if let Some(limit) = e.rate_limit {
                         if limit.remaining == 0 {
                             let reset = SystemTime::UNIX_EPOCH + Duration::from_secs(limit.reset);
@@ -123,7 +156,7 @@ where
                                 .duration_since(now_s)
                                 .unwrap_or(Duration::from_secs(0));
                             let at = (now_i + eta).into();
-                            inner.project().unpin.interval =
+                            inner.project().current.interval =
                                 tokio::time::interval_at(at, Duration::from_secs(1));
                         }
                     }
@@ -132,49 +165,35 @@ where
             }
         };
 
-        // Reverse the order so that older Tweets get Retweeted first.
-        let mut tweets = tweets.into_iter().rev();
-
-        if let Some(t) = tweets.next() {
-            inner.project().unpin.since_id = Some(t.id);
+        if let Some(t) = tweets.last() {
+            inner.project().current.since_id = Some(t.id);
 
             if log_enabled!(log::Level::Trace) {
-                let created_at = super::snowflake_to_system_time(t.id as u64);
+                let created_at = snowflake_to_system_time(t.id as u64);
                 match SystemTime::now().duration_since(created_at) {
                     Ok(latency) => trace!("Twitter list worst latency: {:.2?}", latency),
                     Err(e) => trace!("Twitter list worst latency: -{:.2?}", e.duration()),
                 }
             }
-
-            sender.as_mut().send_tweet(t, core)?;
         }
 
-        for t in tweets {
-            sender.as_mut().send_tweet(t, core)?;
-        }
-
-        Poll::Pending
+        Poll::Ready(Some(Ok(tweets)))
     }
+}
 
+impl<S, B> Inner<S, B>
+where
+    S: HttpService<B> + Clone,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>>,
+{
     #[project]
-    pub fn poll_backfill(
-        self: Pin<&mut Self>,
-        core: Pin<&mut Core<S>>,
-        mut sender: Pin<&mut Sender<S, B>>,
-        cx: &mut Context<'_>,
-    ) -> Poll<anyhow::Result<()>> {
+    fn poll_next_backfill(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Vec<Tweet>>> {
         #[project]
         let Inner {
-            unpin,
+            current,
             backfill: mut backfill_opt,
-        } = {
-            match self.project().inner.as_pin_mut() {
-                Some(inner) => inner.project(),
-                _ => {
-                    return Poll::Ready(Ok(()));
-                }
-            }
-        };
+        } = self.project();
 
         #[project]
         let Backfill {
@@ -183,46 +202,41 @@ where
         } = if let Some(bf) = backfill_opt.as_mut().as_pin_mut() {
             bf.project()
         } else {
-            return Poll::Ready(Ok(()));
+            return Poll::Ready(None);
         };
 
         let tweets = match ready!(response.as_mut().poll(cx)) {
             Ok(resp) => resp.data,
             Err(e) => {
+                warn!("error while backfilling the list: {:?}", e);
+                // Just discard the backfill.
                 backfill_opt.set(None);
-                return Poll::Ready(Err(e.into()));
+                return Poll::Ready(None);
             }
         };
 
         if tweets.is_empty() {
             debug!("timeline backfilling completed");
             backfill_opt.set(None);
-            return Poll::Ready(Ok(()));
+            return Poll::Ready(None);
         }
 
-        if unpin.since_id.is_none() {
-            unpin.since_id = tweets.first().map(|t| t.id);
+        if current.since_id.is_none() {
+            current.since_id = tweets.first().map(|t| t.id);
         }
 
         let max_id = tweets.last().map(|t| t.id - 1);
-        response.set(
-            twitter::lists::Statuses::new(unpin.list_id)
-                .since_id(Some(*backfill_since_id))
-                .max_id(max_id)
-                .send(&core, None),
-        );
+        let res = super::lists::Statuses::new(current.list_id)
+            .since_id(Some(*backfill_since_id))
+            .max_id(max_id)
+            .send(&current.client, &current.token, current.http.clone());
+        response.set(res);
 
-        for t in tweets {
-            if t.retweeted_status.is_none() {
-                sender.as_mut().send_tweet(t, &core)?;
-            }
-        }
-
-        Poll::Pending
+        Poll::Ready(Some(tweets))
     }
 }
 
-impl<S, B> Unpinned<S, B>
+impl<S, B> Current<S, B>
 where
     S: HttpService<B> + Clone,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
@@ -233,8 +247,8 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<
         Result<
-            twitter::Response<Vec<twitter::Tweet>>,
-            twitter::Error<S::Error, <S::ResponseBody as Body>::Error>,
+            super::Response<Vec<Tweet>>,
+            super::Error<S::Error, <S::ResponseBody as Body>::Error>,
         >,
     > {
         // Iterate from later responses.
@@ -253,15 +267,15 @@ where
         Poll::Pending
     }
 
-    fn send_request(&mut self, core: &Core<S>) {
-        trace_fn!(Unpinned::<S, B>::send_request);
+    fn send_request(&mut self) {
+        trace_fn!(Current::<S, B>::send_request);
 
         let count = if self.since_id.is_some() { 200 } else { 1 };
-        let resp = twitter::lists::Statuses::new(self.list_id)
+        let resp = super::lists::Statuses::new(self.list_id)
             .count(Some(count))
             .include_rts(Some(false))
             .since_id(self.since_id)
-            .send(core, None);
+            .send(&self.client, &self.token, self.http.clone());
 
         if self.responses.len() == self.responses.capacity() {
             debug!("respone buffer reached its capacity");

@@ -1,7 +1,6 @@
 pub(crate) mod core;
 
 mod sender;
-mod twitter_list_timeline;
 mod twitter_request_ext;
 
 use std::marker::PhantomData;
@@ -13,8 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Context as _;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
-use futures::future;
-use futures::{Future, StreamExt};
+use futures::{future, ready, Future, Stream, StreamExt};
 use http_body::Body;
 use pin_project::pin_project;
 use twitter_stream::TwitterStream;
@@ -26,7 +24,6 @@ use crate::{Credentials, Manifest};
 
 use self::core::Core;
 use self::sender::Sender;
-use self::twitter_list_timeline::TwitterListTimeline;
 use self::twitter_request_ext::TwitterRequestExt;
 
 #[pin_project]
@@ -37,7 +34,7 @@ where
     #[pin]
     core: Core<S>,
     #[pin]
-    twitter_list: TwitterListTimeline<S, B>,
+    twitter_list: twitter::ListTimeline<S, B>,
     #[pin]
     twitter: TwitterStream<S::ResponseBody>,
     twitter_done: bool,
@@ -84,13 +81,11 @@ where
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
         let mut this = self.project();
-        let poll_backfill =
-            this.twitter_list
-                .poll_backfill(this.core.as_mut(), this.sender.as_mut(), cx)?;
-        match (poll_backfill, this.sender.poll_done(&this.core, cx)?) {
-            (Poll::Ready(()), Poll::Ready(())) => Poll::Ready(Ok(())),
-            _ => Poll::Pending,
+        let poll_sender = this.sender.as_mut().poll_done(&this.core, cx);
+        while let Some(tweets) = ready!(this.twitter_list.as_mut().poll_next_backfill(cx)) {
+            this.sender.as_mut().send_tweets(tweets, &this.core)?;
         }
+        poll_sender
     }
 
     pub async fn reset(mut self: Pin<&mut Self>) -> anyhow::Result<()> {
@@ -100,7 +95,7 @@ where
             *this.twitter_done = false;
             self.core.init_twitter_list()?
         } else {
-            TwitterListTimeline::empty()
+            twitter::ListTimeline::empty()
         };
 
         self.as_mut().shutdown().await?;
@@ -314,14 +309,9 @@ where
 
         let mut this = self.as_mut().project();
 
-        let _ = this
-            .twitter_list
-            .as_mut()
-            .poll(&this.core, this.sender.as_mut(), cx)?;
-
-        let _ = this
-            .twitter_list
-            .poll_backfill(this.core, this.sender.as_mut(), cx)?;
+        while let Poll::Ready(Some(tweets)) = this.twitter_list.as_mut().poll_next(cx)? {
+            this.sender.as_mut().send_tweets(tweets, &this.core)?;
+        }
 
         if let Poll::Ready(result) = self.as_mut().poll_twitter(cx) {
             return Poll::Ready(result);
