@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::num::NonZeroU64;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -160,7 +159,7 @@ where
     #[project]
     pub fn poll_backfill(
         self: Pin<&mut Self>,
-        mut core: Pin<&mut Core<S>>,
+        core: Pin<&mut Core<S>>,
         mut sender: Pin<&mut Sender<S, B>>,
         cx: &mut Context<'_>,
     ) -> Poll<anyhow::Result<()>> {
@@ -214,10 +213,6 @@ where
         );
 
         for t in tweets {
-            core.as_mut().with_twitter_dump(|mut dump| {
-                json::to_writer(&mut dump, &t)?;
-                dump.write_all(b"\n")
-            })?;
             if t.retweeted_status.is_none() {
                 sender.as_mut().send_tweet(t, &core)?;
             }

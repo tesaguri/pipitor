@@ -4,8 +4,6 @@ mod sender;
 mod twitter_list_timeline;
 mod twitter_request_ext;
 
-use std::fs::File;
-use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
@@ -76,10 +74,6 @@ where
             sender: Sender::new(),
             body_marker: PhantomData,
         })
-    }
-
-    pub fn set_twitter_dump(&mut self, twitter_dump: File) -> io::Result<()> {
-        self.core.set_twitter_dump(twitter_dump)
     }
 
     pub fn shutdown<'a>(
@@ -249,11 +243,6 @@ where
                     return Poll::Ready(Err(e));
                 }
             };
-
-            this.core.as_mut().with_twitter_dump(|dump| {
-                dump.write_all(json.trim_end().as_bytes())?;
-                dump.write_all(b"\n")
-            })?;
 
             let tweet = if let Maybe::Just(t) = json::from_str::<Maybe<twitter::Tweet>>(&json)? {
                 t

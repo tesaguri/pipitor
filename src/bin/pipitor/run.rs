@@ -1,5 +1,5 @@
-use std::fs::{File, OpenOptions};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::path::Path;
 
 use anyhow::Context;
 use fs2::FileExt;
@@ -11,15 +11,9 @@ use tokio::io::AsyncWriteExt;
 use crate::common::*;
 
 #[derive(structopt::StructOpt)]
-pub struct Opt {
-    #[structopt(
-        long = "twitter-dump",
-        help = "File to dump Twitter Streaming API output"
-    )]
-    twitter_dump: Option<PathBuf>,
-}
+pub struct Opt {}
 
-pub fn main(opt: &crate::Opt, subopt: Opt) -> anyhow::Result<()> {
+pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let manifest = open_manifest(opt)?;
 
     let manifest_path: &Path = opt.manifest_path();
@@ -50,17 +44,6 @@ pub fn main(opt: &crate::Opt, subopt: Opt) -> anyhow::Result<()> {
             .await
             .context("failed to initialize the application")?;
         pin_mut!(app);
-
-        if let Some(ref path) = subopt.twitter_dump {
-            let f = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(path)
-                .with_context(|| {
-                    format!("failed to open {:?}", subopt.twitter_dump.as_ref().unwrap())
-                })?;
-            app.set_twitter_dump(f).unwrap();
-        };
 
         info!("initialized the application");
 

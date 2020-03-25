@@ -1,7 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
-use std::pin::Pin;
 
 use anyhow::Context;
 use diesel::prelude::*;
@@ -28,7 +25,6 @@ pub struct Core<S> {
     #[pin]
     client: S,
     pub(super) twitter_tokens: HashMap<i64, oauth1::Credentials<Box<str>>>,
-    twitter_dump: Option<BufWriter<File>>,
 }
 
 impl<S> Core<S> {
@@ -65,7 +61,6 @@ impl<S> Core<S> {
             pool,
             client,
             twitter_tokens: HashMap::new(),
-            twitter_dump: None,
         };
 
         ret.load_twitter_tokens()?;
@@ -212,29 +207,5 @@ impl<S> Core<S> {
         self.twitter_tokens
             .get(&user)
             .map(oauth1::Credentials::as_ref)
-    }
-
-    pub fn with_twitter_dump<F, E>(self: Pin<&mut Self>, f: F) -> anyhow::Result<()>
-    where
-        F: FnOnce(&mut BufWriter<File>) -> Result<(), E>,
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        let twitter_dump = self.project().twitter_dump;
-
-        if let Some(ref mut dump) = twitter_dump {
-            if let Err(e) = f(dump).context("failed to write a Tweet to the dump file") {
-                *twitter_dump = None;
-                return Err(e);
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn set_twitter_dump(&mut self, twitter_dump: File) -> io::Result<()> {
-        if let Some(mut old) = self.twitter_dump.replace(BufWriter::new(twitter_dump)) {
-            old.flush()?;
-        }
-        Ok(())
     }
 }
