@@ -1,11 +1,14 @@
 pub mod http_service;
 
 use std::convert::TryInto;
+use std::fmt;
 use std::fs;
-use std::marker::Unpin;
+use std::marker::{PhantomData, Unpin};
 use std::mem;
 use std::ops::Range;
 use std::pin::Pin;
+use std::str::FromStr;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,10 +18,13 @@ use futures::{ready, Future};
 use http_body::Body;
 use pin_project::{pin_project, project};
 use serde::{de, Deserialize};
+use tower_service::Service;
 
 use crate::Credentials;
 
 pub use self::http_service::HttpService;
+
+pub struct ArcService<S>(pub Arc<S>);
 
 #[pin_project]
 pub struct ConcatBody<B> {
@@ -60,6 +66,24 @@ macro_rules! trace_fn {
     }};
 }
 
+impl<S, T, R, E, F> Service<T> for ArcService<S>
+where
+    for<'a> &'a S: Service<T, Response = R, Error = E, Future = F>,
+    F: Future<Output = Result<R, E>>,
+{
+    type Response = R;
+    type Error = E;
+    type Future = F;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        (&*self.0).poll_ready(cx)
+    }
+
+    fn call(&mut self, req: T) -> Self::Future {
+        (&*self.0).call(req)
+    }
+}
+
 impl<B: Body> ConcatBody<B> {
     pub fn new(body: B) -> Self {
         let cap = body.size_hint().lower();
@@ -82,6 +106,12 @@ impl<B: Body> Future for ConcatBody<B> {
                 None => return Poll::Ready(Ok(mem::take(this.accum))),
             }
         }
+    }
+}
+
+impl From<Never> for Box<dyn std::error::Error + Send + Sync> {
+    fn from(n: Never) -> Self {
+        match n {}
     }
 }
 
@@ -154,6 +184,39 @@ pub fn char_index_to_byte_index(s: &str, char_index: usize) -> Option<usize> {
     }
 
     None
+}
+
+pub fn deserialize_from_str<'de, T, D>(d: D) -> Result<T, D::Error>
+where
+    T: FromStr,
+    D: serde::Deserializer<'de>,
+{
+    struct Visitor<T>(PhantomData<T>);
+
+    impl<'de, T> serde::de::Visitor<'de> for Visitor<T>
+    where
+        T: FromStr,
+    {
+        type Value = T;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(std::any::type_name::<T>())
+        }
+
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            v.parse()
+                .map_err(|_| E::invalid_value(serde::de::Unexpected::Str(v), &self))
+        }
+    }
+
+    d.deserialize_str(Visitor::<T>(PhantomData))
+}
+
+pub fn now_epoch() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 pub fn open_credentials(path: &str) -> anyhow::Result<Credentials> {

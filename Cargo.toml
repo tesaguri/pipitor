@@ -19,6 +19,8 @@ required-features = ["hyper"]
 [dependencies]
 anyhow = "1"
 atoi = "0.3"
+atom = { version = "0.9", package = "atom_syndication" }
+base64 = "0.12"
 cfg-if = "0.1"
 bytes = "0.5"
 diesel = { version = "1.4.4", default-features = false, features = ["r2d2", "sqlite"] }
@@ -28,18 +30,26 @@ env_logger = "0.7"
 flate2 = "1"
 fs2 = "0.4"
 futures = "0.3"
+hex = "0.4"
+hmac = "0.7"
 http = "0.2"
 http-body = "0.3"
+hyper = { version = "0.13", default-features = false, features = ["stream"] }
 json = { version = "1", package = "serde_json" }
 log = "0.4.6"
+mime = "0.3"
 oauth1 = { version = "0.3", package = "oauth1-request" }
 pin-project = "0.4"
+rand = "0.7"
 regex = "1.0.3"
+rss = "1"
 serde = { version = "1.0.34", features = ["derive", "rc"] }
 serde_derive = "1.0.34"
 serde_regex = "0.4"
 serde_urlencoded = "0.6"
+sha-1 = "0.8"
 smallvec = { version = "1", features = ["serde"] }
+string = { version = "0.2", default-features = false }
 structopt = "0.3"
 thiserror = "1"
 tokio = { version = "0.2", features = ["io-std", "io-util", "signal", "stream", "time", "uds"] }
@@ -49,7 +59,6 @@ toml = "0.5"
 twitter-stream = { version = "=0.10.0-alpha.6", default-features = false, features = ["gzip"] }
 
 ct-logs = { version = "0.6", optional = true }
-hyper = { version = "0.13", optional = true }
 hyper-rustls = { version = "0.20", optional = true }
 rustls-pkg = { version = "0.17", package = "rustls", optional = true }
 webpki-roots = { version = "0.19", optional = true }
@@ -60,7 +69,7 @@ libsqlite3-sys = { version = ">=0.8.0, <0.18.0", optional = true }
 
 [features]
 default = ["native-tls"]
-native-tls = ["hyper", "hyper-tls"]
+native-tls = ["hyper-tls"]
 openssl-vendored = ["hyper-tls/vendored"]
 rustls = ["ct-logs", "hyper-rustls", "rustls-pkg", "webpki-roots"]
 sqlite-bundled = ["libsqlite3-sys/bundled"]

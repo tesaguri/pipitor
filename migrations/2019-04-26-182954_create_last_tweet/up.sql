@@ -1,4 +1,4 @@
 CREATE TABLE last_tweet (
   id INTEGER NOT NULL PRIMARY KEY,
-  status_id INTEGER NOT NULL
+  status_id BIGINT NOT NULL
 )

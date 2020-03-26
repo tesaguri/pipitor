@@ -1,0 +1,1 @@
+DROP TABLE websub_active_subscriptions;

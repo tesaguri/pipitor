@@ -15,6 +15,9 @@ pub mod schema;
 pub mod twitter;
 
 mod app;
+mod feed;
+mod query;
+mod websub;
 
 pub use app::App;
 pub use credentials::Credentials;
