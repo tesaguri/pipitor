@@ -1,8 +1,12 @@
 pub(crate) mod core;
 
+mod builder;
 mod sender;
 mod twitter_request_ext;
 
+pub use builder::Builder;
+
+use std::error::Error;
 use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
@@ -12,23 +16,25 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Context as _;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
-use futures::{future, ready, Future, Stream, StreamExt};
+use futures::{future, ready, stream, Future, Stream, StreamExt, TryStream};
 use http_body::Body;
 use pin_project::pin_project;
+use tokio::io::{AsyncRead, AsyncWrite};
 use twitter_stream::TwitterStream;
 
 use crate::credentials::Credentials;
 use crate::manifest::{Manifest, TopicId};
 use crate::router::Router;
 use crate::twitter;
-use crate::util::{open_credentials, HttpService, Maybe};
+use crate::util::{open_credentials, HttpService, Maybe, Never};
+use crate::websub;
 
 use self::core::Core;
 use self::sender::Sender;
 use self::twitter_request_ext::TwitterRequestExt;
 
 #[pin_project]
-pub struct App<S, B>
+pub struct App<I, S, B>
 where
     S: HttpService<B>,
 {
@@ -40,40 +46,31 @@ where
     twitter: TwitterStream<S::ResponseBody>,
     twitter_done: bool,
     #[pin]
+    websub: Option<websub::Subscriber<I, S, B>>,
+    #[pin]
     sender: Sender<S, B>,
     body_marker: PhantomData<B>,
 }
 
 #[cfg(feature = "native-tls")]
-impl App<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>, hyper::Body> {
+impl
+    App<
+        stream::Pending<Result<Never, Never>>,
+        hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>,
+        hyper::Body,
+    >
+{
     pub fn new(manifest: Manifest) -> impl Future<Output = anyhow::Result<Self>> {
-        let conn = hyper_tls::HttpsConnector::new();
-        let client = hyper::Client::builder().build(conn);
-        Self::with_http_client(client, manifest)
+        Builder::new().build(manifest)
     }
 }
 
-impl<S, B> App<S, B>
+impl<I, S, B> App<I, S, B>
 where
     S: HttpService<B> + Clone,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>>,
 {
-    pub async fn with_http_client(client: S, manifest: Manifest) -> anyhow::Result<Self> {
-        trace_fn!(App::<S, B>::with_http_client);
-        let core = Core::new(manifest, client)?;
-        let twitter = core.init_twitter().await?;
-        let twitter_list = core.init_twitter_list()?;
-        Ok(App {
-            core,
-            twitter_list,
-            twitter,
-            twitter_done: false,
-            sender: Sender::new(),
-            body_marker: PhantomData,
-        })
-    }
-
     pub fn shutdown<'a>(
         mut self: Pin<&'a mut Self>,
     ) -> impl Future<Output = anyhow::Result<()>> + 'a {
@@ -139,16 +136,16 @@ where
         let old = mem::replace(self.manifest_mut(), manifest);
 
         // An RAII guard to rollback the `App`'s state when the future is canceled.
-        struct Guard<'a, S, B>
+        struct Guard<'a, I, S, B>
         where
             S: HttpService<B>,
         {
-            this: &'a mut App<S, B>,
+            this: &'a mut App<I, S, B>,
             old: Option<(Manifest, Credentials)>,
             old_pool: Option<Pool<ConnectionManager<SqliteConnection>>>,
         }
 
-        impl<S, B> Guard<'_, S, B>
+        impl<I, S, B> Guard<'_, I, S, B>
         where
             S: HttpService<B>,
         {
@@ -167,7 +164,7 @@ where
             }
         }
 
-        impl<S, B> Drop for Guard<'_, S, B>
+        impl<I, S, B> Drop for Guard<'_, I, S, B>
         where
             S: HttpService<B>,
         {
@@ -268,7 +265,7 @@ where
     }
 }
 
-impl<S: HttpService<B>, B> App<S, B> {
+impl<I, S: HttpService<B>, B> App<I, S, B> {
     pub fn manifest(&self) -> &Manifest {
         self.core.manifest()
     }
@@ -298,21 +295,32 @@ impl<S: HttpService<B>, B> App<S, B> {
     }
 }
 
-impl<S, B> Future for App<S, B>
+impl<I, S, B> Future for App<I, S, B>
 where
-    S: HttpService<B> + Clone,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-    B: Default + From<Vec<u8>>,
+    I: TryStream,
+    I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    I::Error: Error + Send + Sync + 'static,
+    S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Future: Send,
+    S::ResponseBody: Send,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>> + Send + 'static,
 {
     type Output = anyhow::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
-        trace_fn!(App::<S, B>::poll);
+        trace_fn!(App::<I, S, B>::poll);
 
         let mut this = self.as_mut().project();
 
         while let Poll::Ready(Some(tweets)) = this.twitter_list.as_mut().poll_next(cx)? {
             this.sender.as_mut().send_tweets(tweets, &this.core)?;
+        }
+
+        if let Some(mut websub) = this.websub.as_pin_mut() {
+            while let Poll::Ready(Some(_activity)) = websub.as_mut().poll_next(cx)? {
+                todo!();
+            }
         }
 
         if let Poll::Ready(result) = self.as_mut().poll_twitter(cx) {

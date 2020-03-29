@@ -6,6 +6,7 @@ extern crate log;
 #[macro_use]
 mod util;
 
+pub mod app;
 pub mod credentials;
 pub mod manifest;
 pub mod models;
@@ -14,7 +15,6 @@ pub mod router;
 pub mod schema;
 pub mod twitter;
 
-mod app;
 mod feed;
 mod query;
 mod websub;

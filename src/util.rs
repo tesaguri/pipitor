@@ -1,8 +1,10 @@
 pub mod http_service;
 
 use std::convert::TryInto;
-use std::fmt;
+use std::error::Error;
+use std::fmt::{self, Display};
 use std::fs;
+use std::io;
 use std::marker::{PhantomData, Unpin};
 use std::mem;
 use std::ops::Range;
@@ -109,9 +111,35 @@ impl<B: Body> Future for ConcatBody<B> {
     }
 }
 
-impl From<Never> for Box<dyn std::error::Error + Send + Sync> {
-    fn from(n: Never) -> Self {
-        match n {}
+impl Display for Never {
+    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {}
+    }
+}
+
+impl Error for Never {}
+
+impl tokio::io::AsyncRead for Never {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+        _: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        match *self {}
+    }
+}
+
+impl tokio::io::AsyncWrite for Never {
+    fn poll_write(self: Pin<&mut Self>, _: &mut Context<'_>, _: &[u8]) -> Poll<io::Result<usize>> {
+        match *self {}
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match *self {}
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match *self {}
     }
 }
 
