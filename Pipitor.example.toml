@@ -14,6 +14,8 @@ topics = [
     # `user_id`s of accounts to retrieve Tweets from
     783214, # @Twitter
     12, # @jack
+    # ... or Atom/RSS feed URLs.
+    "https://wordpress.com/blog/feed/atom/",
 ]
 # If `filter` is unspecified, the rule will match any Tweet.
 filter = "regex|to|filter the|Tweets"

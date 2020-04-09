@@ -62,9 +62,16 @@ macro_rules! trace_fn {
         #[allow(path_statements)] { $path; }
         trace!(trace_fn!(@heading $path));
     }};
-    ($path:path, $fmt:tt $($arg:tt)*) => {{
+    ($path:path, $dbg1:expr $(, $dbg:expr)*) => {{
         #[allow(path_statements)] { $path; }
-        trace!(concat!(trace_fn!(@heading $path), "; ", $fmt) $($arg)*);
+        trace!(
+            concat!(
+                trace_fn!(@heading $path), "; ",
+                stringify!($dbg1), "={:?}",
+                $(", ", stringify!($dbg), "={:?}",)*
+            ),
+            $dbg1, $($dbg,)*
+        );
     }};
 }
 

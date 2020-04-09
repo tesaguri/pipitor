@@ -67,9 +67,11 @@ impl
 
 impl<I, S, B> App<I, S, B>
 where
-    S: HttpService<B> + Clone,
+    S: HttpService<B> + Clone + Send + 'static,
+    S::Future: Send,
+    S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
-    B: Default + From<Vec<u8>>,
+    B: Default + From<Vec<u8>> + Send + 'static,
 {
     pub fn shutdown<'a>(
         mut self: Pin<&'a mut Self>,
@@ -318,8 +320,19 @@ where
         }
 
         if let Some(mut websub) = this.websub.as_pin_mut() {
-            while let Poll::Ready(Some(_activity)) = websub.as_mut().poll_next(cx)? {
-                todo!();
+            while let Poll::Ready(Some(activity)) = websub.as_mut().poll_next(cx)? {
+                match activity {
+                    websub::Activity::Update(topic, content) => {
+                        if let Some(feed) = content.parse_feed() {
+                            this.sender.as_mut().send_feed(&topic, feed, &this.core)?;
+                        } else {
+                            log::warn!("Failed to parse an updated content of topic {}", topic);
+                        }
+                    }
+                    websub::Activity::Subscription { expires_at: _ } => {
+                        // TODO
+                    }
+                }
             }
         }
 

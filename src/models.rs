@@ -1,4 +1,17 @@
+use crate::feed::Entry;
 use crate::schema::*;
+
+#[derive(Clone, Debug, Insertable)]
+#[table_name = "entries"]
+pub struct NewEntry<'a> {
+    pub topic: &'a str,
+    pub id: Option<&'a str>,
+    pub link: &'a str,
+    pub title: Option<&'a str>,
+    pub summary: Option<&'a str>,
+    pub content: Option<&'a str>,
+    pub updated: Option<i64>,
+}
 
 #[derive(Clone, Debug, Identifiable, Queryable)]
 #[table_name = "last_tweet"]
@@ -47,6 +60,21 @@ pub struct NewTwitterTokens<'a> {
     pub id: i64,
     pub access_token: &'a str,
     pub access_token_secret: &'a str,
+}
+
+impl<'a> NewEntry<'a> {
+    pub fn new(topic: &'a str, entry: &'a Entry) -> Option<Self> {
+        let link = entry.link.as_deref()?;
+        Some(NewEntry {
+            topic,
+            id: entry.id.as_deref(),
+            link,
+            title: entry.title.as_deref(),
+            summary: entry.summary.as_deref(),
+            content: entry.content.as_deref(),
+            updated: entry.updated,
+        })
+    }
 }
 
 impl From<TwitterToken> for oauth1::Credentials<Box<str>> {

@@ -2,7 +2,7 @@ macro_rules! api_requests {
     (
         $method:ident $uri:expr => $Data:ty;
         $(#[$attr:meta])*
-        pub struct $Name:ident {
+        pub struct $Name:ident $(<$($lt:lifetime),*>)? {
             $($(#[$req_attr:meta])* $required:ident: $req_ty:ty),*;
             $($(#[$opt_attr:meta])* $optional:ident: $opt_ty:ty $(= $default:expr)?),* $(,)?
         }
@@ -10,12 +10,12 @@ macro_rules! api_requests {
     ) => {
         $(#[$attr])*
         #[derive(oauth1::Authorize)]
-        pub struct $Name {
+        pub struct $Name $(<$($lt),*>)? {
             $($(#[$req_attr])* $required: $req_ty,)*
             $($(#[$opt_attr])* $optional: $opt_ty,)*
         }
 
-        impl $Name {
+        impl $(<$($lt),*>)? $Name $(<$($lt),*>)? {
             pub fn new($($required: $req_ty),*) -> Self {
                 #[allow(unused_macros)]
                 macro_rules! this_or_default {
@@ -38,7 +38,7 @@ macro_rules! api_requests {
             )*
         }
 
-        impl $crate::twitter::Request for $Name {
+        impl $(<$($lt),*>)? $crate::twitter::Request for $Name $(<$($lt),*>)? {
             type Data = $Data;
 
             const METHOD: http::Method = http::Method::$method;

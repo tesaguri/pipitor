@@ -1,8 +1,8 @@
 diff --git a/src/schema.rs b/src/schema.rs
-index d287b1a..a22c674 100644
+index 8d1576b..409b94b 100644
 --- a/src/schema.rs
 +++ b/src/schema.rs
-@@ -1,39 +1,39 @@
+@@ -13,39 +13,39 @@
  table! {
      last_tweet (id) {
 -        id -> Integer,
@@ -47,7 +47,7 @@ index d287b1a..a22c674 100644
      }
  }
  
-@@ -41,9 +41,9 @@
+@@ -59,9 +59,9 @@
  table! {
      websub_subscriptions (id) {
 -        id -> Integer,
