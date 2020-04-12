@@ -1,6 +1,8 @@
+pub mod ipc;
+
 use std::ffi::OsString;
-use std::fmt::{self, Debug, Display, Formatter};
 use std::fs;
+use std::io;
 use std::marker::Unpin;
 use std::path::{Path, PathBuf};
 
@@ -9,32 +11,6 @@ use futures::future::{self, Future, FutureExt};
 use futures::{Stream, StreamExt};
 use hyper::client::{connect::Connect, Client};
 use pipitor::{Credentials, Manifest};
-use serde::{Deserialize, Serialize};
-
-#[derive(Deserialize, Serialize)]
-pub enum IpcRequest {
-    #[serde(rename = "reload")]
-    Reload {},
-    #[serde(rename = "shutdown")]
-    Shutdown {},
-}
-
-#[derive(Debug, Default, Deserialize, Serialize, thiserror::Error)]
-pub struct IpcResponse {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    pub code: IpcResponseCode,
-}
-
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub enum IpcResponseCode {
-    #[serde(rename = "SUCCESS")]
-    Success,
-    #[serde(rename = "INTERNAL_ERROR")]
-    InternalError,
-    #[serde(rename = "REQUEST_UNRECOGNIZED")]
-    RequestUnrecognized,
-}
 
 #[derive(Clone, structopt::StructOpt)]
 pub struct Opt {
@@ -43,49 +19,6 @@ pub struct Opt {
 }
 
 pub struct RmGuard<P: AsRef<Path>>(pub P);
-
-impl IpcResponse {
-    pub fn new(code: IpcResponseCode, message: impl Into<Option<String>>) -> Self {
-        IpcResponse {
-            code,
-            message: message.into(),
-        }
-    }
-
-    pub fn result(self) -> Result<Self, Self> {
-        if let IpcResponseCode::Success = self.code {
-            Ok(self)
-        } else {
-            Err(self)
-        }
-    }
-}
-
-impl Display for IpcResponse {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if let Some(ref msg) = self.message {
-            f.write_str(msg)
-        } else {
-            f.write_str(self.code.as_str())
-        }
-    }
-}
-
-impl IpcResponseCode {
-    pub fn as_str(&self) -> &'static str {
-        match *self {
-            IpcResponseCode::Success => "SUCCESS",
-            IpcResponseCode::InternalError => "INTERNAL_ERROR",
-            IpcResponseCode::RequestUnrecognized => "REQUEST_UNRECOGNIZED",
-        }
-    }
-}
-
-impl Default for IpcResponseCode {
-    fn default() -> Self {
-        IpcResponseCode::Success
-    }
-}
 
 impl Opt {
     pub fn manifest_path(&self) -> &Path {
@@ -180,86 +113,22 @@ cfg_if::cfg_if! {
     }
 }
 
-pub use imp::*;
-
 #[cfg(unix)]
-mod imp {
-    use std::io;
-    use std::path::Path;
-    use std::task::Poll;
-
-    use futures::stream;
-    use futures::{pin_mut, ready, Future, Stream, TryStreamExt};
-    use tokio::io::{AsyncReadExt, AsyncWrite};
-    use tokio::net::UnixListener;
+pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
     use tokio::signal::unix::{signal, SignalKind};
 
-    pub fn ipc_server<P>(
-        path: &P,
-    ) -> io::Result<impl Stream<Item = io::Result<(Vec<u8>, impl AsyncWrite)>>>
-    where
-        P: AsRef<Path>,
-    {
-        ipc_server_(path.as_ref())
-    }
-
-    fn ipc_server_(
-        path: &Path,
-    ) -> io::Result<impl Stream<Item = io::Result<(Vec<u8>, impl AsyncWrite)>>> {
-        let mut listener = UnixListener::bind(path)?;
-        Ok(stream::poll_fn(move |cx| {
-            // Emulating `UnixListener::incoming` with `poll_fn` because `incoming` borrows
-            // the listener so its returned value would not be able to outlive this function.
-            let accept = listener.accept();
-            pin_mut!(accept);
-            let (socket, _) = ready!(accept.poll(cx))?;
-            Poll::Ready(Some(Ok(socket)))
-
-            // We are dropping `accept` here, which potentially cancels the future,
-            // but it's OK because `UnixListener::accept` is implemented with `future::poll_fn`
-            // so dropping it does not prevent the task from being woken
-            // (it's an implementation detail though).
-        })
-        .and_then(|mut a| async move {
-            let mut buf = Vec::new();
-            a.read_to_end(&mut buf).await?;
-            Ok((buf, a))
-        }))
-    }
-
-    pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
-        let int = signal(SignalKind::interrupt())?;
-        let term = signal(SignalKind::terminate())?;
-        Ok(super::merge_select(super::first(int), super::first(term)))
-    }
+    let int = signal(SignalKind::interrupt())?;
+    let term = signal(SignalKind::terminate())?;
+    Ok(merge_select(first(int), first(term)))
 }
 
 #[cfg(windows)]
-mod imp {
-    use std::io;
-    use std::path::Path;
-
-    use futures::stream;
-    use futures::{Future, FutureExt, Stream};
-    use tokio::io::AsyncWrite;
+pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
     use tokio::signal::{ctrl_c, windows::ctrl_break};
 
-    pub fn ipc_server<P>(
-        _: &P,
-    ) -> io::Result<impl Stream<Item = io::Result<(Vec<u8>, impl AsyncWrite)>>>
-    where
-        P: AsRef<Path>,
-    {
-        // TODO: replace this dummy impl
-        // (perhaps with named pipe or Unix socket (https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/))
-        Ok(stream::empty::<io::Result<(_, Vec<u8>)>>())
-    }
-
-    pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
-        let cc = Box::pin(ctrl_c()).map(|result| result.unwrap());
-        let cb = ctrl_break()?;
-        Ok(super::merge_select(cc, super::first(cb)))
-    }
+    let cc = Box::pin(ctrl_c()).map(|result| result.unwrap());
+    let cb = ctrl_break()?;
+    Ok(merge_select(cc, first(cb)))
 }
 
 fn first<S: Stream<Item = ()> + Unpin>(s: S) -> impl Future<Output = ()> {

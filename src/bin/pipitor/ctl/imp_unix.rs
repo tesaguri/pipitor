@@ -4,7 +4,7 @@ use anyhow::Context;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
-use crate::common::{ipc_path, IpcRequest, IpcResponse};
+use crate::common::{ipc, ipc_path};
 
 use super::*;
 
@@ -14,8 +14,8 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> anyhow::Result<()> {
     let ipc = UnixStream::connect(&ipc_path);
 
     let req = match subopt.cmd {
-        Cmd::Reload => IpcRequest::Reload {},
-        Cmd::Shutdown => IpcRequest::Shutdown {},
+        Cmd::Reload => ipc::Request::Reload {},
+        Cmd::Shutdown => ipc::Request::Shutdown {},
     };
     let req = json::to_vec(&req).unwrap();
 
@@ -29,7 +29,7 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> anyhow::Result<()> {
 
     let mut res = Vec::new();
     ipc.read_to_end(&mut res).await?;
-    let res = json::from_slice::<IpcResponse>(&res)?;
+    let res = json::from_slice::<ipc::Response>(&res)?;
 
     if let Some(msg) = res.result()?.message {
         println!("{}", msg);

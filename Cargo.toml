@@ -42,7 +42,7 @@ serde_urlencoded = "0.6"
 smallvec = { version = "1", features = ["serde"] }
 structopt = "0.3"
 thiserror = "1"
-tokio = { version = "0.2", features = ["io-std", "signal", "stream", "time", "uds"] }
+tokio = { version = "0.2", features = ["io-std", "io-util", "signal", "stream", "time", "uds"] }
 tower-service = "0.3"
 tower-util = "0.3"
 toml = "0.5"

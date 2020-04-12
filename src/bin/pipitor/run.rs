@@ -6,7 +6,6 @@ use fs2::FileExt;
 use futures::{future, stream};
 use futures::{pin_mut, FutureExt, StreamExt, TryFutureExt};
 use pipitor::App;
-use tokio::io::AsyncWriteExt;
 
 use crate::common::*;
 
@@ -26,7 +25,7 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let ipc_path = ipc_path(manifest_path);
     let opt = opt.clone();
     runtime.block_on(async move {
-        let (ipc, _guard) = match ipc_server(&ipc_path)
+        let (ipc, _guard) = match ipc::server(&ipc_path)
             .with_context(|| format!("failed to create an IPC socket at {:?}", ipc_path))
         {
             Ok(ipc) => (ipc.left_stream().fuse(), Some(RmGuard(ipc_path))),
@@ -67,81 +66,42 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
                     info!("exiting normally");
                     return Ok(());
                 }
-                result = ipc.select_next_some() => {
-                    let (req, mut write) = match result {
-                        Ok(x) => x,
-                        Err(e) => {
-                            warn!("error in the IPC socket: {}", e);
-                            continue;
-                        }
-                    };
+                conn = ipc.select_next_some() => {
+                    let (req, mut write) = conn;
 
-                    macro_rules! respond {
-                        ($body:expr) => {
-                            async {
-                                write.write_all($body).await?;
-                                write.flush().await?;
-                                Ok(()) as std::io::Result<_>
-                            }
-                                .map_err(|e| warn!("failed to write IPC response: {}", e))
-                        };
-                    }
-
-                    let req: IpcRequest = match json::from_slice(&req) {
-                        Ok(x) => x,
-                        Err(e) => {
-                            info!(
-                                "unrecognized IPC request: {:?}",
-                                String::from_utf8_lossy(&req),
-                            );
-                            let res = json::to_vec(&IpcResponse::new(
-                                IpcResponseCode::RequestUnrecognized,
-                                "request unrecognized".to_owned(),
-                            ))
-                            .unwrap();
-                            let _ = respond!(&res).await;
-                            continue;
-                        }
-                    };
-
-                    // Declaring IPC response body here to make borrowck happy
-                    let mut res = Vec::new();
                     match req {
-                        IpcRequest::Reload {} => {
+                        ipc::Request::Reload {} => {
                             info!("reloading the manifest");
-                            future::ready(open_manifest(&opt))
+
+                            let result = future::ready(open_manifest(&opt))
                                 .and_then(|manifest| {
                                     app.replace_manifest(manifest).map_err(|(e, _)| e)
                                 })
-                                .or_else(|e| {
-                                    res = json::to_vec(&IpcResponse::new(
-                                        IpcResponseCode::InternalError,
-                                        "failed to reload the manifest".to_owned(),
-                                    ))
-                                    .unwrap();
-                                    respond!(&res).then(|_| future::err(e))
-                                })
-                                .await?;
+                                .await;
+                            if let Err(e) = result {
+                                let res = ipc::Response::new(
+                                    ipc::ResponseCode::InternalError,
+                                    "failed to reload the manifest".to_owned(),
+                                );
+                                tokio::spawn(ipc::respond(res, write));
+                                return Err(e);
+                            }
 
-                            let res = json::to_vec(&IpcResponse::default()).unwrap();
-                            let _ = respond!(&res).await;
+                            tokio::spawn(ipc::respond(ipc::Response::default(), write));
                         }
-                        IpcRequest::Shutdown {} => {
+                        ipc::Request::Shutdown {} => {
                             info!("shutdown requested via IPC");
 
-                            app.shutdown()
-                                .or_else(|e| {
-                                    res = json::to_vec(&IpcResponse::new(
-                                        IpcResponseCode::InternalError,
-                                        "error occured during shutdown".to_owned(),
-                                    ))
-                                    .unwrap();
-                                    respond!(&res).then(|_| future::err(e))
-                                })
-                                .await?;
+                            if let Err(e) = app.shutdown().await {
+                                let res = ipc::Response::new(
+                                    ipc::ResponseCode::InternalError,
+                                    "error occured during shutdown".to_owned(),
+                                );
+                                ipc::respond(res, write).await;
+                                return Err(e);
+                            }
 
-                            let res = json::to_vec(&IpcResponse::default()).unwrap();
-                            let _ = respond!(&res).await;
+                            ipc::respond(ipc::Response::default(), write).await;
 
                             info!("exiting normally");
                             return Ok(());
