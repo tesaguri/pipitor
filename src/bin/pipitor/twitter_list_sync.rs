@@ -45,7 +45,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .send(&credentials.twitter.client, &token, &mut client);
     println!("Retrieving the list...");
 
-    let users: HashSet<i64> = manifest.rule.twitter_topics().collect();
+    let users: HashSet<i64> = manifest.twitter_topics().collect();
     let res = res_fut
         .await
         .context("failed to retrieve the list from Twitter")?;

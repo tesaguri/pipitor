@@ -17,10 +17,11 @@ use http_body::Body;
 use pin_project::pin_project;
 use twitter_stream::TwitterStream;
 
-use crate::rules::TopicId;
+use crate::credentials::Credentials;
+use crate::manifest::{Manifest, TopicId};
+use crate::router::Router;
 use crate::twitter;
 use crate::util::{open_credentials, HttpService, Maybe};
-use crate::{Credentials, Manifest};
 
 use self::core::Core;
 use self::sender::Sender;
@@ -191,9 +192,8 @@ where
                 != old_credentials.twitter.client.identifier
                 || new.twitter.user != old.twitter.user
                 || new
-                    .rule
                     .twitter_topics()
-                    .any(|user| !old.rule.contains_topic(&TopicId::Twitter(user)))
+                    .any(|user| !old.has_topic(&TopicId::Twitter(user)))
             {
                 let twitter = this.core.init_twitter().await?;
                 let twitter_list = this.core.init_twitter_list()?;
@@ -210,6 +210,7 @@ where
             Ok(()) => {
                 let old = guard.old.take().unwrap().0;
                 mem::forget(guard);
+                *self.core.router_mut() = Router::from_manifest(self.manifest());
                 Ok(old)
             }
             Err(e) => {
@@ -254,16 +255,9 @@ where
             }
 
             let from = tweet.user.id;
-            let will_process = this
-                .core
-                .manifest()
-                .rule
-                .contains_topic(&TopicId::Twitter(from))
+            let will_process = this.core.manifest().has_topic(&TopicId::Twitter(from))
                 && tweet.in_reply_to_user_id.map_or(true, |to| {
-                    this.core
-                        .manifest()
-                        .rule
-                        .contains_topic(&TopicId::Twitter(to))
+                    this.core.manifest().has_topic(&TopicId::Twitter(to))
                 });
             if will_process {
                 this.sender.as_mut().send_tweet(tweet, &this.core)?;
@@ -285,6 +279,14 @@ impl<S: HttpService<B>, B> App<S, B> {
 
     pub fn credentials(&self) -> &Credentials {
         self.core.credentials()
+    }
+
+    pub fn router(&self) -> &Router {
+        self.core.router()
+    }
+
+    pub fn router_mut(&mut self) -> &mut Router {
+        self.core.router_mut()
     }
 
     pub fn database_pool(&self) -> &Pool<ConnectionManager<SqliteConnection>> {

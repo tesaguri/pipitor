@@ -10,7 +10,7 @@ use http_body::Body;
 use pin_project::pin_project;
 use serde::de;
 
-use crate::rules::Outbox;
+use crate::manifest::Outbox;
 use crate::twitter;
 use crate::util::{HttpService, ResolveWith};
 
@@ -109,7 +109,7 @@ where
             return Ok(());
         }
 
-        if core.manifest().rule.route_tweet(&tweet).next().is_none() {
+        if core.router().route_tweet(&tweet).next().is_none() {
             return Ok(());
         }
 
@@ -177,7 +177,7 @@ where
     fn retweet(self: Pin<&mut Self>, tweet: twitter::Tweet, core: &Core<S>) {
         let mut retweets = PendingRetweets::new();
 
-        for outbox in core.manifest().rule.route_tweet(&tweet) {
+        for outbox in core.router().route_tweet(&tweet) {
             debug!("sending a Tweet to outbox {:?}: {:?}", outbox, tweet);
 
             match *outbox {

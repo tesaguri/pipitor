@@ -35,7 +35,7 @@ log = "0.4.6"
 oauth1 = { version = "0.3", package = "oauth1-request" }
 pin-project = "0.4"
 regex = "1.0.3"
-serde = { version = "1.0.34", features = ["derive"] }
+serde = { version = "1.0.34", features = ["derive", "rc"] }
 serde_derive = "1.0.34"
 serde_regex = "0.4"
 serde_urlencoded = "0.6"

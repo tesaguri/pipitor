@@ -34,6 +34,9 @@ pub enum Maybe<T> {
     Nothing(de::IgnoredAny),
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash)]
+pub enum Never {}
+
 /// A future that resolves to `(F::Output, T).
 #[pin_project]
 pub struct ResolveWith<F, T> {

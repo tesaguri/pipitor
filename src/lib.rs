@@ -9,7 +9,7 @@ mod util;
 pub mod credentials;
 pub mod manifest;
 pub mod models;
-pub mod rules;
+pub mod router;
 #[rustfmt::skip]
 pub mod schema;
 pub mod twitter;

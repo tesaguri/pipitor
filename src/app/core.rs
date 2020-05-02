@@ -11,6 +11,7 @@ use pin_project::pin_project;
 use twitter_stream::TwitterStream;
 
 use crate::models;
+use crate::router::Router;
 use crate::twitter;
 use crate::util::{open_credentials, HttpService};
 use crate::{Credentials, Manifest};
@@ -20,6 +21,7 @@ use crate::{Credentials, Manifest};
 pub struct Core<S> {
     manifest: Manifest,
     credentials: Credentials,
+    router: Router,
     pool: Pool<ConnectionManager<SqliteConnection>>,
     #[pin]
     client: S,
@@ -55,6 +57,7 @@ impl<S> Core<S> {
         }
 
         let mut ret = Core {
+            router: Router::from_manifest(&manifest),
             manifest,
             credentials,
             pool,
@@ -85,12 +88,8 @@ impl<S> Core<S> {
             token,
         );
 
-        let mut twitter_topics: Vec<_> = self
-            .manifest
-            .rule
-            .twitter_topics()
-            .map(|id| id as u64)
-            .collect();
+        let mut twitter_topics: Vec<_> =
+            self.manifest.twitter_topics().map(|id| id as u64).collect();
         twitter_topics.sort();
         twitter_topics.dedup();
 
@@ -145,7 +144,6 @@ impl<S> Core<S> {
         let manifest = self.manifest();
 
         let unauthed_users = manifest
-            .rule
             .twitter_outboxes()
             .chain(Some(manifest.twitter.user))
             .filter(|user| !self.twitter_tokens.contains_key(&user))
@@ -185,6 +183,14 @@ impl<S> Core<S> {
 
     pub fn credentials_mut(&mut self) -> &mut Credentials {
         &mut self.credentials
+    }
+
+    pub fn router(&self) -> &Router {
+        &self.router
+    }
+
+    pub fn router_mut(&mut self) -> &mut Router {
+        &mut self.router
     }
 
     pub fn manifest_mut(&mut self) -> &mut Manifest {

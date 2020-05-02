@@ -27,7 +27,6 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let mut client = client();
 
     let unauthed_users: FuturesUnordered<_> = manifest
-        .rule
         .twitter_outboxes()
         .chain(Some(manifest.twitter.user))
         .collect::<HashSet<_>>()
