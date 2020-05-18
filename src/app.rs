@@ -6,14 +6,17 @@ mod twitter_request_ext;
 
 pub use builder::Builder;
 
+use std::collections::HashSet;
 use std::error::Error;
 use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
+use std::str;
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
+use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use futures::{future, ready, stream, Future, Stream, StreamExt, TryStream};
@@ -25,6 +28,7 @@ use twitter_stream::TwitterStream;
 use crate::credentials::Credentials;
 use crate::manifest::{Manifest, TopicId};
 use crate::router::Router;
+use crate::schema::*;
 use crate::twitter;
 use crate::util::{open_credentials, HttpService, Maybe, Never};
 use crate::websub;
@@ -265,6 +269,29 @@ where
 
         Poll::Pending
     }
+
+    fn subscribe_to_websub_topics(&self) -> anyhow::Result<()> {
+        let websub = if let Some(ref s) = self.websub {
+            s
+        } else {
+            return Ok(());
+        };
+
+        let mut topics: HashSet<&str> = self.manifest().feed_topics().collect();
+        let subscribed: Vec<String> = websub_subscriptions::table
+            .select(websub_subscriptions::topic)
+            .filter(websub_subscriptions::topic.eq_any(&topics))
+            .load(&*self.core.conn()?)?;
+        for t in subscribed {
+            topics.remove(&*t);
+        }
+
+        for t in topics {
+            tokio::spawn(websub.service().discover_and_subscribe(t.to_owned()));
+        }
+
+        Ok(())
+    }
 }
 
 impl<I, S: HttpService<B>, B> App<I, S, B> {
@@ -320,18 +347,11 @@ where
         }
 
         if let Some(mut websub) = this.websub.as_pin_mut() {
-            while let Poll::Ready(Some(activity)) = websub.as_mut().poll_next(cx)? {
-                match activity {
-                    websub::Activity::Update(topic, content) => {
-                        if let Some(feed) = content.parse_feed() {
-                            this.sender.as_mut().send_feed(&topic, feed, &this.core)?;
-                        } else {
-                            log::warn!("Failed to parse an updated content of topic {}", topic);
-                        }
-                    }
-                    websub::Activity::Subscription { expires_at: _ } => {
-                        // TODO
-                    }
+            while let Poll::Ready(Some((topic, content))) = websub.as_mut().poll_next(cx)? {
+                if let Some(feed) = content.parse_feed() {
+                    this.sender.as_mut().send_feed(&topic, feed, &this.core)?;
+                } else {
+                    log::warn!("Failed to parse an updated content of topic {}", topic);
                 }
             }
         }

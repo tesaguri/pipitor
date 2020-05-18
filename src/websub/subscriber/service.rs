@@ -1,20 +1,25 @@
 use std::convert::{TryFrom, TryInto};
+use std::error::Error;
 use std::marker::PhantomData;
 use std::task::{Context, Poll};
 
+use bytes::Buf;
 use diesel::dsl::*;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use futures::channel::mpsc;
-use futures::{future, Future, FutureExt, TryFutureExt, TryStreamExt};
+use futures::{future, pin_mut, stream, Future, FutureExt, TryFutureExt, TryStreamExt};
 use hmac::digest::generic_array::typenum::Unsigned;
 use hmac::digest::FixedOutput;
 use hmac::{Hmac, Mac};
 use http::header::CONTENT_TYPE;
 use http::{Request, Response, StatusCode, Uri};
+use http_body::Body as _;
 use hyper::Body;
 use sha1::Sha1;
+use tower_util::ServiceExt;
 
+use crate::feed::{self, RawFeed};
 use crate::query;
 use crate::schema::*;
 use crate::util::{now_epoch, HttpService, Never};
@@ -23,11 +28,11 @@ use crate::websub::{hub, X_HUB_SIGNATURE};
 use super::Content;
 
 pub struct Service<S, B> {
-    pub host: Uri,
-    pub client: S,
-    pub pool: Pool<ConnectionManager<SqliteConnection>>,
+    pub(super) host: Uri,
+    pub(super) client: S,
+    pub(super) pool: Pool<ConnectionManager<SqliteConnection>>,
     pub(super) tx: mpsc::UnboundedSender<(String, Content)>,
-    pub _marker: PhantomData<fn() -> B>,
+    pub(super) _marker: PhantomData<fn() -> B>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -62,6 +67,75 @@ where
     S::ResponseBody: Send,
     B: From<Vec<u8>> + Send + 'static,
 {
+    pub fn discover_and_subscribe(&self, topic: String) -> impl Future<Output = anyhow::Result<()>>
+    where
+        <S::ResponseBody as http_body::Body>::Error: Error + Send + Sync + 'static,
+        B: Default,
+    {
+        log::info!("Attempting to discover WebSub hubs for topic {}", topic);
+
+        let host = self.host.clone();
+        let client = self.client.clone();
+        let pool = self.pool.clone();
+
+        let req = http::Request::get(&*topic)
+            .body(Default::default())
+            .unwrap();
+        client
+            .clone()
+            .into_service()
+            .oneshot(req)
+            .map_err(Into::into)
+            .and_then(|res| async move {
+                // TODO: Web Linking discovery
+
+                let kind = if let Some(v) = res.headers().get(CONTENT_TYPE) {
+                    if let Some(m) = v.to_str().ok().and_then(|s| s.parse().ok()) {
+                        m
+                    } else {
+                        log::warn!("Topic {}: unsupported media type `{:?}`", topic, v);
+                        return Ok(());
+                    }
+                } else {
+                    feed::MediaType::Xml
+                };
+
+                let body = res.into_body();
+                pin_mut!(body);
+                let body = stream::poll_fn(move |cx| body.as_mut().poll_data(cx))
+                    .try_fold(Vec::new(), |mut vec, chunk| {
+                        vec.extend(chunk.bytes());
+                        future::ok(vec)
+                    })
+                    .await?;
+
+                match RawFeed::parse(kind, &body) {
+                    Some(RawFeed::Atom(feed)) => {
+                        let hubs = feed
+                            .links
+                            .into_iter()
+                            .filter(|link| link.rel == "hub")
+                            .map(|link| link.href);
+                        for hub in hubs {
+                            tokio::spawn(hub::subscribe(
+                                &host,
+                                hub,
+                                topic.clone(),
+                                client.clone(),
+                                &*pool.get()?,
+                            ));
+                        }
+                    }
+                    Some(RawFeed::Rss(_)) => {
+                        log::warn!("Discovery of WebSub hubs for RSS feeds is not supported yet")
+                    }
+                    None => log::warn!("Topic {}: failed to parse the content", topic),
+                }
+
+                Ok(())
+            })
+    }
+
     pub fn subscribe(
         &self,
         hub: String,
@@ -150,7 +224,7 @@ where
             return self.verify_intent(id, q, &conn);
         }
 
-        let kind: super::MediaType = if let Some(m) = req
+        let kind: feed::MediaType = if let Some(m) = req
             .headers()
             .get(CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())

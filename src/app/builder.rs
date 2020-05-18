@@ -118,7 +118,7 @@ where
         );
 
         // XXX: The type-changing FRU syntax (Rust RFC 2528) would be useful here.
-        Ok(App {
+        let app = App {
             core: app.core,
             twitter_list: app.twitter_list,
             twitter: app.twitter,
@@ -126,6 +126,10 @@ where
             websub: Some(websub),
             sender: app.sender,
             body_marker: app.body_marker,
-        })
+        };
+
+        app.subscribe_to_websub_topics()?;
+
+        Ok(app)
     }
 }

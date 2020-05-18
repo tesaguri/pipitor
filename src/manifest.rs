@@ -116,6 +116,13 @@ impl Manifest {
         self.rule.iter().flat_map(|rule| &*rule.topics)
     }
 
+    pub fn feed_topics(&self) -> impl Iterator<Item = &str> {
+        self.topics().filter_map(|topic| match *topic {
+            TopicId::Feed(ref topic) => Some(&**topic),
+            _ => None,
+        })
+    }
+
     pub fn twitter_topics<'a>(&'a self) -> impl Iterator<Item = i64> + 'a {
         self.topics().filter_map(|topic| match *topic {
             TopicId::Twitter(user) => Some(user),

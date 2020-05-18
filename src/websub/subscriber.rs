@@ -11,11 +11,10 @@ use futures::channel::mpsc;
 use futures::{Stream, StreamExt, TryStream};
 use http::Uri;
 use hyper::server::conn::Http;
-use mime::Mime;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::feed::Feed;
+use crate::feed::{self, Feed};
 use crate::util::{ArcService, HttpService};
 
 use service::Service;
@@ -31,14 +30,8 @@ pub struct Subscriber<I, S, B> {
 }
 
 pub struct Content {
-    kind: MediaType,
+    kind: feed::MediaType,
     content: Vec<u8>,
-}
-
-enum MediaType {
-    Atom,
-    Rss,
-    Xml,
 }
 
 impl<I, S, B> Subscriber<I, S, B>
@@ -48,7 +41,7 @@ where
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
-    B: From<Vec<u8>> + Send + 'static,
+    B: Default + From<Vec<u8>> + Send + 'static,
 {
     pub fn new(
         incoming: I,
@@ -90,6 +83,15 @@ where
     }
 }
 
+impl<I, S, B> Subscriber<I, S, B> {
+    // XXX: We expose the `Service` type rather than exposing its methods through `Subscriber`
+    // to prevent the return types of the methods from being bound by `I`
+    // (https://github.com/rust-lang/rust/issues/42940).
+    pub fn service(&self) -> &Service<S, B> {
+        &self.service
+    }
+}
+
 /// The `Stream` impl yields topic updates that the server has received.
 impl<I, S, B> Stream for Subscriber<I, S, B>
 where
@@ -98,7 +100,7 @@ where
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
-    B: From<Vec<u8>> + Send + 'static,
+    B: Default + From<Vec<u8>> + Send + 'static,
 {
     type Item = Result<(String, Content), I::Error>;
 
@@ -122,43 +124,6 @@ where
 
 impl Content {
     pub fn parse_feed(&self) -> Option<Feed> {
-        match self.kind {
-            MediaType::Atom => atom::Feed::read_from(&*self.content).ok().map(Into::into),
-            MediaType::Rss => rss::Channel::read_from(&*self.content).ok().map(Into::into),
-            MediaType::Xml => atom::Feed::read_from(&*self.content)
-                .ok()
-                .map(Into::into)
-                .or_else(|| rss::Channel::read_from(&*self.content).ok().map(Into::into)),
-        }
-    }
-}
-
-impl std::str::FromStr for MediaType {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, ()> {
-        let mime = if let Ok(m) = s.parse::<Mime>() {
-            m
-        } else {
-            return Err(());
-        };
-
-        if mime.type_() == mime::APPLICATION
-            && mime.subtype() == "atom"
-            && mime.suffix() == Some(mime::XML)
-        {
-            Ok(MediaType::Atom)
-        } else if mime.type_() == mime::APPLICATION
-            && (mime.subtype() == "rss" || mime.subtype() == "rdf")
-            && mime.suffix() == Some(mime::XML)
-        {
-            Ok(MediaType::Rss)
-        } else if (mime.type_() == mime::APPLICATION || mime.type_() == mime::TEXT)
-            && mime.subtype() == mime::XML
-        {
-            Ok(MediaType::Xml)
-        } else {
-            Err(())
-        }
+        Feed::parse(self.kind, &self.content)
     }
 }
