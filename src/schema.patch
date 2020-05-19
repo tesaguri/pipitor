@@ -1,38 +1,60 @@
-diff a/src/schema.rs b/src/schema.rs
+diff --git a/src/schema.rs b/src/schema.rs
+index 8d1576b..409b94b 100644
 --- a/src/schema.rs
 +++ b/src/schema.rs
-@@ -1,7 +1,7 @@
+@@ -13,39 +13,39 @@
  table! {
      last_tweet (id) {
 -        id -> Integer,
 +        id -> BigInt,
--        status_id -> Integer,
-+        status_id -> BigInt,
+         status_id -> BigInt,
      }
  }
  
-@@ -8,10 +8,10 @@
  table! {
      tweets (id) {
 -        id -> Integer,
 +        id -> BigInt,
          text -> Text,
--        user_id -> Integer,
--        in_reply_to_status_id -> Nullable<Integer>,
--        quoted_status_id -> Nullable<Integer>,
-+        user_id -> BigInt,
-+        in_reply_to_status_id -> Nullable<BigInt>,
-+        quoted_status_id -> Nullable<BigInt>,
+         user_id -> BigInt,
+         in_reply_to_status_id -> Nullable<BigInt>,
+         quoted_status_id -> Nullable<BigInt>,
      }
  }
  
-@@ -18,8 +18,8 @@
  table! {
      twitter_tokens (id) {
 -        id -> Integer,
 +        id -> BigInt,
          access_token -> Text,
          access_token_secret -> Text,
+     }
+ }
+ 
+ table! {
+     websub_active_subscriptions (id) {
+-        id -> Integer,
++        id -> BigInt,
+         expires_at -> BigInt,
+     }
+ }
+ 
+ table! {
+     websub_pending_subscriptions (id) {
+-        id -> Integer,
++        id -> BigInt,
+         created_at -> BigInt,
+     }
+ }
+ 
+@@ -59,9 +59,9 @@
+ table! {
+     websub_subscriptions (id) {
+-        id -> Integer,
++        id -> BigInt,
+         hub -> Text,
+         topic -> Text,
+         secret -> Text,
      }
  }
  

@@ -1,18 +1,23 @@
 mod retweet_queue;
 
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use diesel::prelude::*;
-use futures::ready;
 use futures::stream::{FuturesUnordered, Stream};
+use futures::{ready, FutureExt};
 use http_body::Body;
 use pin_project::pin_project;
 use serde::de;
 
+use crate::feed::{Entry, Feed};
 use crate::manifest::Outbox;
+use crate::models::NewEntry;
+use crate::schema::*;
 use crate::twitter;
 use crate::util::{HttpService, ResolveWith};
+use diesel::dsl::*;
 
 use super::{Core, TwitterRequestExt as _};
 
@@ -34,9 +39,11 @@ where
 
 impl<S, B> Sender<S, B>
 where
-    S: HttpService<B> + Clone,
+    S: HttpService<B> + Clone + Send + 'static,
+    S::Future: Send,
+    S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-    B: Default + From<Vec<u8>>,
+    B: Default + From<Vec<u8>> + Send + 'static,
 {
     pub fn new() -> Self {
         Default::default()
@@ -44,6 +51,94 @@ where
 
     pub fn has_pending(&self) -> bool {
         !self.retweet_queue.is_empty()
+    }
+
+    pub fn send_feed(
+        mut self: Pin<&mut Self>,
+        topic: &str,
+        feed: Feed,
+        core: &Core<S>,
+    ) -> anyhow::Result<()> {
+        trace_fn!(Sender::<S, B>::send_feed, topic, feed.id);
+
+        for e in feed.entries {
+            self.as_mut().send_entry(topic, e, core)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn send_entry(
+        self: Pin<&mut Self>,
+        topic: &str,
+        entry: Entry,
+        core: &Core<S>,
+    ) -> anyhow::Result<()> {
+        trace_fn!(Sender::<S, B>::send_entry, entry);
+
+        let link = if let Some(ref link) = entry.link {
+            link
+        } else {
+            debug!("Received an entry with no link: {:?}", entry);
+            return Ok(());
+        };
+
+        let conn = core.conn()?;
+
+        let row = entries::table
+            .find((topic, &entry.id))
+            .or_filter(entries::link.eq(link));
+        let already_processed = select(exists(row)).get_result::<bool>(&*conn)?;
+        if already_processed {
+            trace!("The entry has already been processed");
+            return Ok(());
+        }
+
+        let text = if let Some(mut text) = entry.title.clone() {
+            const TITLE_LEN: usize = twitter::text::MAX_WEIGHTED_TWEET_LENGTH
+                - 1
+                - twitter::text::TRANSFORMED_URL_LENGTH;
+            twitter::text::sanitize(&mut text, TITLE_LEN);
+            text.push('\n');
+            text.push_str(link);
+            text
+        } else {
+            link.to_owned()
+        };
+
+        let shared = Arc::new((Box::<str>::from(topic), entry));
+        let entry = &shared.1;
+        let mut conn = Some(conn);
+        for outbox in core.router().route_entry(topic, &entry) {
+            debug!("sending an entry to outbox {:?}: {:?}", outbox, entry);
+
+            match *outbox {
+                Outbox::Twitter(user) => {
+                    let shared = shared.clone();
+                    let conn = conn.take().map(Ok).unwrap_or_else(|| core.conn())?;
+                    let fut = twitter::statuses::Update::new(&text)
+                        .send(core, user)
+                        .map(move |result| -> anyhow::Result<()> {
+                            result?;
+                            diesel::replace_into(entries::table)
+                                .values(&NewEntry::new(&shared.0, &shared.1).unwrap())
+                                .execute(&*conn)?;
+                            Ok(())
+                        })
+                        .map(|result| {
+                            // TODO: better error handling
+                            if let Err(e) = result {
+                                error!("{:?}", e);
+                            }
+                        });
+                    tokio::spawn(fut);
+                }
+                Outbox::None => {}
+                _ => unimplemented!(),
+            }
+        }
+
+        Ok(())
     }
 
     pub fn send_tweet(
@@ -74,29 +169,21 @@ where
         core: &Core<S>,
         update_last_tweet: bool,
     ) -> anyhow::Result<()> {
-        trace_fn!(Sender::<S, B>::send_tweet, "tweet={:?}", tweet);
+        trace_fn!(Sender::<S, B>::send_tweet, tweet);
 
         let conn = core.conn()?;
 
-        let already_processed = {
-            use crate::schema::tweets::dsl::*;
-            use diesel::dsl::*;
-
-            self.retweet_queue.contains(tweet.id)
-                || select(exists(tweets.find(&tweet.id))).get_result::<bool>(&*conn)?
-        };
-
+        let already_processed = self.retweet_queue.contains(tweet.id)
+            || select(exists(tweets::table.find(&tweet.id))).get_result::<bool>(&*conn)?;
         if already_processed {
             trace!("the Tweet has already been processed");
             return Ok(());
         }
 
         if update_last_tweet {
-            use crate::schema::last_tweet::dsl::*;
-
-            diesel::update(last_tweet)
-                .filter(status_id.lt(tweet.id))
-                .set(status_id.eq(tweet.id))
+            diesel::update(last_tweet::table)
+                .filter(last_tweet::status_id.lt(tweet.id))
+                .set(last_tweet::status_id.eq(tweet.id))
                 .execute(&*conn)?;
         }
 
@@ -113,17 +200,11 @@ where
             return Ok(());
         }
 
-        let duplicate = {
-            use crate::schema::tweets::dsl::*;
-            use diesel::dsl::*;
-
-            tweets
-                .filter(user_id.eq(&tweet.user.id))
-                .filter(text.eq(&*tweet.text))
-                .select(max(id))
-                .first::<Option<i64>>(&*conn)?
-        };
-
+        let duplicate = tweets::table
+            .filter(tweets::user_id.eq(&tweet.user.id))
+            .filter(tweets::text.eq(&*tweet.text))
+            .select(max(tweets::id))
+            .first::<Option<i64>>(&*conn)?;
         if let Some(dup) = duplicate {
             // Check whether the duplicate Tweet still exists
             let res = twitter::statuses::Show::new(dup).send(core, None);

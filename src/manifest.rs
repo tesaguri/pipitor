@@ -8,6 +8,7 @@ use regex::Regex;
 use serde::{de, Deserialize};
 use smallvec::{smallvec, SmallVec};
 
+use crate::feed::Entry;
 use crate::twitter::Tweet;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -28,7 +29,7 @@ pub struct Manifest {
 pub struct Rule {
     #[serde(flatten)]
     pub route: Arc<Route>,
-    pub topics: Box<[TopicId]>,
+    pub topics: Box<[TopicId<'static>]>,
     #[serde(skip)]
     _non_exhaustive: (),
 }
@@ -60,7 +61,8 @@ pub struct Filter {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash)]
 #[serde(untagged)]
-pub enum TopicId {
+pub enum TopicId<'a> {
+    Feed(Cow<'a, str>),
     Twitter(i64),
     #[doc(hidden)]
     _NonExhaustive(crate::util::Never),
@@ -106,12 +108,19 @@ impl Manifest {
         }
     }
 
-    pub fn has_topic(&self, topic: &TopicId) -> bool {
+    pub fn has_topic(&self, topic: &TopicId<'_>) -> bool {
         self.topics().any(|t| t == topic)
     }
 
-    pub fn topics(&self) -> impl Iterator<Item = &TopicId> {
+    pub fn topics(&self) -> impl Iterator<Item = &TopicId<'_>> {
         self.rule.iter().flat_map(|rule| &*rule.topics)
+    }
+
+    pub fn feed_topics(&self) -> impl Iterator<Item = &str> {
+        self.topics().filter_map(|topic| match *topic {
+            TopicId::Feed(ref topic) => Some(&**topic),
+            _ => None,
+        })
     }
 
     pub fn twitter_topics<'a>(&'a self) -> impl Iterator<Item = i64> + 'a {
@@ -152,6 +161,21 @@ impl Filter {
             text: None,
             _non_exhaustive: (),
         }
+    }
+
+    pub fn matches_entry(&self, entry: &Entry) -> bool {
+        entry
+            .title
+            .as_ref()
+            .map_or(false, |t| self.title.is_match(t))
+            || self.text.as_ref().map_or(false, |t| {
+                entry
+                    .content
+                    .as_ref()
+                    .into_iter()
+                    .chain(entry.summary.as_ref())
+                    .any(|c| t.is_match(&c))
+            })
     }
 
     pub fn matches_tweet(&self, tweet: &Tweet) -> bool {

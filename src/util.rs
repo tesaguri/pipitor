@@ -1,13 +1,18 @@
 pub mod http_service;
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
+use std::error::Error;
+use std::fmt::{self, Display};
 use std::fs;
-use std::marker::Unpin;
+use std::io;
+use std::marker::{PhantomData, Unpin};
 use std::mem;
 use std::ops::Range;
 use std::pin::Pin;
+use std::str::FromStr;
+use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
 use bytes::Buf;
@@ -15,10 +20,13 @@ use futures::{ready, Future};
 use http_body::Body;
 use pin_project::{pin_project, project};
 use serde::{de, Deserialize};
+use tower_service::Service;
 
 use crate::Credentials;
 
 pub use self::http_service::HttpService;
+
+pub struct ArcService<S>(pub Arc<S>);
 
 #[pin_project]
 pub struct ConcatBody<B> {
@@ -54,10 +62,35 @@ macro_rules! trace_fn {
         #[allow(path_statements)] { $path; }
         trace!(trace_fn!(@heading $path));
     }};
-    ($path:path, $fmt:tt $($arg:tt)*) => {{
+    ($path:path, $dbg1:expr $(, $dbg:expr)*) => {{
         #[allow(path_statements)] { $path; }
-        trace!(concat!(trace_fn!(@heading $path), "; ", $fmt) $($arg)*);
+        trace!(
+            concat!(
+                trace_fn!(@heading $path), "; ",
+                stringify!($dbg1), "={:?}",
+                $(", ", stringify!($dbg), "={:?}",)*
+            ),
+            $dbg1, $($dbg,)*
+        );
     }};
+}
+
+impl<S, T, R, E, F> Service<T> for ArcService<S>
+where
+    for<'a> &'a S: Service<T, Response = R, Error = E, Future = F>,
+    F: Future<Output = Result<R, E>>,
+{
+    type Response = R;
+    type Error = E;
+    type Future = F;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        (&*self.0).poll_ready(cx)
+    }
+
+    fn call(&mut self, req: T) -> Self::Future {
+        (&*self.0).call(req)
+    }
 }
 
 impl<B: Body> ConcatBody<B> {
@@ -82,6 +115,38 @@ impl<B: Body> Future for ConcatBody<B> {
                 None => return Poll::Ready(Ok(mem::take(this.accum))),
             }
         }
+    }
+}
+
+impl Display for Never {
+    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {}
+    }
+}
+
+impl Error for Never {}
+
+impl tokio::io::AsyncRead for Never {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+        _: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        match *self {}
+    }
+}
+
+impl tokio::io::AsyncWrite for Never {
+    fn poll_write(self: Pin<&mut Self>, _: &mut Context<'_>, _: &[u8]) -> Poll<io::Result<usize>> {
+        match *self {}
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match *self {}
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match *self {}
     }
 }
 
@@ -154,6 +219,46 @@ pub fn char_index_to_byte_index(s: &str, char_index: usize) -> Option<usize> {
     }
 
     None
+}
+
+pub fn deserialize_from_str<'de, T, D>(d: D) -> Result<T, D::Error>
+where
+    T: FromStr,
+    D: serde::Deserializer<'de>,
+{
+    struct Visitor<T>(PhantomData<T>);
+
+    impl<'de, T> serde::de::Visitor<'de> for Visitor<T>
+    where
+        T: FromStr,
+    {
+        type Value = T;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(std::any::type_name::<T>())
+        }
+
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            v.parse()
+                .map_err(|_| E::invalid_value(serde::de::Unexpected::Str(v), &self))
+        }
+    }
+
+    d.deserialize_str(Visitor::<T>(PhantomData))
+}
+
+pub fn instant_from_epoch(epoch: i64) -> Instant {
+    let now_i = Instant::now();
+    let now_epoch = now_epoch();
+    let eta = u64::try_from(epoch).unwrap().saturating_sub(now_epoch);
+    now_i + Duration::from_secs(eta)
+}
+
+pub fn now_epoch() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 pub fn open_credentials(path: &str) -> anyhow::Result<Credentials> {

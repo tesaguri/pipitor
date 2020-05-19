@@ -5,12 +5,13 @@ use std::sync::Arc;
 
 use smallvec::SmallVec;
 
+use crate::feed::Entry;
 use crate::manifest::{Manifest, Outbox, Route, Rule, TopicId};
 use crate::twitter::Tweet;
 
 #[derive(Clone, Default)]
 pub struct Router {
-    map: HashMap<TopicId, SmallVec<[Arc<Route>; 1]>>,
+    map: HashMap<TopicId<'static>, SmallVec<[Arc<Route>; 1]>>,
 }
 
 impl Router {
@@ -43,29 +44,44 @@ impl Router {
         }
     }
 
-    pub fn append(&mut self, topic: TopicId, route: Arc<Route>) {
+    pub fn append(&mut self, topic: TopicId<'static>, route: Arc<Route>) {
         self.map
             .entry(topic)
             .or_insert_with(SmallVec::new)
             .push(route);
     }
 
-    pub fn get(&self, topic: &TopicId) -> Option<&[Arc<Route>]> {
+    pub fn get<'a>(&'a self, topic: &TopicId<'a>) -> Option<&[Arc<Route>]> {
         self.map.get(topic).map(|vec| &**vec)
     }
 
     pub fn get_mut(
         &mut self,
-        topic: &TopicId,
+        topic: &TopicId<'static>, // FIXME: This should be `TopicId<'_>`
     ) -> Option<&mut (impl Extend<Arc<Route>> + DerefMut<Target = [Arc<Route>]>)> {
         self.map.get_mut(topic)
     }
 
     pub fn remove(
         &mut self,
-        topic: &TopicId,
+        topic: &TopicId<'static>, // FIXME: This should be `TopicId<'_>`
     ) -> Option<impl IntoIterator<Item = Arc<Route>> + DerefMut<Target = [Arc<Route>]>> {
         self.map.remove(topic)
+    }
+
+    pub fn route_entry<'a>(
+        &'a self,
+        topic: &'a str,
+        entry: &'a Entry,
+    ) -> impl Iterator<Item = &Outbox> + 'a {
+        self.get(&TopicId::Feed(topic.into()))
+            .into_iter()
+            .flatten()
+            .filter(move |r| {
+                r.filter.as_ref().map_or(true, |f| f.matches_entry(entry))
+                    && r.exclude.as_ref().map_or(true, |e| !e.matches_entry(entry))
+            })
+            .flat_map(|r| r.outbox())
     }
 
     pub fn route_tweet<'a>(&'a self, tweet: &'a Tweet) -> impl Iterator<Item = &'a Outbox> {
