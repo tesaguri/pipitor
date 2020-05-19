@@ -26,7 +26,7 @@ use service::Service;
 
 /// A WebSub subscriber server.
 #[pin_project]
-pub struct Subscriber<I, S, B> {
+pub struct Subscriber<S, B, I> {
     #[pin]
     incoming: I,
     server: Http,
@@ -42,14 +42,14 @@ pub struct Content {
 // XXX: mediocre naming
 const RENEW: u64 = 10;
 
-impl<I, S, B> Subscriber<I, S, B>
+impl<S, B, I> Subscriber<S, B, I>
 where
-    I: TryStream,
-    I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
     B: Default + From<Vec<u8>> + Send + 'static,
+    I: TryStream,
+    I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     pub fn new(
         incoming: I,
@@ -105,7 +105,7 @@ where
     }
 }
 
-impl<I, S, B> Subscriber<I, S, B> {
+impl<S, B, I> Subscriber<S, B, I> {
     // XXX: We expose the `Service` type rather than exposing its methods through `Subscriber`
     // to prevent the return types of the methods from being bound by `I`
     // (https://github.com/rust-lang/rust/issues/42940).
@@ -115,14 +115,14 @@ impl<I, S, B> Subscriber<I, S, B> {
 }
 
 /// The `Stream` impl yields topic updates that the server has received.
-impl<I, S, B> Stream for Subscriber<I, S, B>
+impl<S, B, I> Stream for Subscriber<S, B, I>
 where
-    I: TryStream,
-    I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
     B: Default + From<Vec<u8>> + Send + 'static,
+    I: TryStream,
+    I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     type Item = Result<(String, Content), I::Error>;
 

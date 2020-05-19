@@ -5,8 +5,7 @@ use anyhow::Context;
 use fs2::FileExt;
 use futures::{future, stream};
 use futures::{pin_mut, FutureExt, StreamExt, TryFutureExt};
-use pipitor::app;
-use tokio::io::AsyncWriteExt;
+use pipitor::App;
 
 use crate::common::*;
 
@@ -40,9 +39,7 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         let mut signal = quit_signal().unwrap().fuse();
 
         let client = client();
-        let app = app::Builder::new()
-            .http_client(client)
-            .build(manifest)
+        let app = App::<_, _>::with_http_client(client, manifest)
             .await
             .context("failed to initialize the application")?;
         pin_mut!(app);

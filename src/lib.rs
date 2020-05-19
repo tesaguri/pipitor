@@ -6,15 +6,16 @@ extern crate log;
 #[macro_use]
 mod util;
 
-pub mod app;
 pub mod credentials;
 pub mod manifest;
 pub mod models;
 pub mod router;
 #[rustfmt::skip]
 pub mod schema;
+pub mod socket;
 pub mod twitter;
 
+mod app;
 mod feed;
 mod query;
 mod websub;
