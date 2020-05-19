@@ -1,6 +1,6 @@
 pub mod http_service;
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::fs;
@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
 use bytes::Buf;
@@ -245,6 +245,13 @@ where
     }
 
     d.deserialize_str(Visitor::<T>(PhantomData))
+}
+
+pub fn instant_from_epoch(epoch: i64) -> Instant {
+    let now_i = Instant::now();
+    let now_epoch = now_epoch();
+    let eta = u64::try_from(epoch).unwrap().saturating_sub(now_epoch);
+    now_i + Duration::from_secs(eta)
 }
 
 pub fn now_epoch() -> u64 {

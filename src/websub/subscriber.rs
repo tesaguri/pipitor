@@ -1,13 +1,17 @@
 mod service;
+mod subscription_renewer;
 
 use std::marker::{PhantomData, Unpin};
 use std::pin::Pin;
+use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use futures::channel::mpsc;
+use futures::task::AtomicWaker;
 use futures::{Stream, StreamExt, TryStream};
 use http::Uri;
 use hyper::server::conn::Http;
@@ -15,6 +19,7 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::feed::{self, Feed};
+use crate::query;
 use crate::util::{ArcService, HttpService};
 
 use service::Service;
@@ -34,6 +39,9 @@ pub struct Content {
     content: Vec<u8>,
 }
 
+// XXX: mediocre naming
+const RENEW: u64 = 10;
+
 impl<I, S, B> Subscriber<I, S, B>
 where
     I: TryStream,
@@ -49,6 +57,16 @@ where
         client: S,
         pool: Pool<ConnectionManager<SqliteConnection>>,
     ) -> Self {
+        let expires_at = if let Some(expires_at) = query::expires_at()
+            .first::<i64>(&pool.get().unwrap())
+            .optional()
+            .unwrap()
+        {
+            expires_at
+        } else {
+            i64::MAX
+        };
+
         let (tx, rx) = mpsc::unbounded();
 
         let service = Arc::new(service::Service {
@@ -56,8 +74,12 @@ where
             client,
             pool,
             tx,
+            expires_at: AtomicI64::new(expires_at),
+            renewer_task: AtomicWaker::new(),
             _marker: PhantomData,
         });
+
+        tokio::spawn(subscription_renewer::Renewer::new(&service));
 
         Subscriber {
             incoming,
@@ -126,4 +148,8 @@ impl Content {
     pub fn parse_feed(&self) -> Option<Feed> {
         Feed::parse(self.kind, &self.content)
     }
+}
+
+fn refresh_time(expires_at: Instant) -> Instant {
+    expires_at - Duration::from_secs(RENEW)
 }
