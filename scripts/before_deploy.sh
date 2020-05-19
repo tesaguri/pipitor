@@ -17,7 +17,7 @@ main() {
 
   test -f Cargo.lock || cargo generate-lockfile
 
-  $cargo rustc --bin $PKG_NAME --target $TARGET --release --no-default-features --features 'hyper rustls sqlite-bundled' -- -C lto -C codegen-units=1
+  $cargo rustc --bin $PKG_NAME --target $TARGET --release --no-default-features --features 'rustls sqlite-bundled' -- -C lto -C codegen-units=1
   cp target/$TARGET/release/$PKG_NAME $stage/
 
   cd $stage

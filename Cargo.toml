@@ -14,7 +14,6 @@ A Twitter bot that gathers, filters and Retweets Tweets automatically.
 [[bin]]
 name = "pipitor"
 path = "src/bin/pipitor/main.rs"
-required-features = ["hyper"]
 
 [dependencies]
 anyhow = "1"
