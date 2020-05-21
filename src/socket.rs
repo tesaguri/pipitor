@@ -189,10 +189,13 @@ impl Bind<SocketAddr> for tokio::net::TcpListener {
 
 cfg_if::cfg_if! {
     if #[cfg(unix)] {
+        use std::fs;
+
         impl Bind<Path> for std::os::unix::net::UnixListener {
             type Error = io::Error;
 
             fn bind(path: &Path) -> io::Result<Self> {
+                let _ = fs::remove_file(path);
                 Self::bind(path)
             }
         }
@@ -201,6 +204,7 @@ cfg_if::cfg_if! {
             type Error = io::Error;
 
             fn bind(path: &Path) -> io::Result<Self> {
+                let _ = fs::remove_file(path);
                 Self::bind(path)
             }
         }
