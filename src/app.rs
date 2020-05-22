@@ -4,7 +4,6 @@ mod twitter_request_ext;
 
 use std::collections::HashSet;
 use std::error::Error;
-use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
 use std::str;
@@ -49,7 +48,6 @@ where
     websub: Option<websub::Subscriber<S, B, I>>,
     #[pin]
     sender: Sender<S, B>,
-    body_marker: PhantomData<B>,
 }
 
 #[cfg(feature = "native-tls")]
@@ -105,7 +103,6 @@ where
             twitter: Some(twitter),
             websub,
             sender: Sender::new(),
-            body_marker: PhantomData,
         };
 
         app.subscribe_to_websub_topics()?;
