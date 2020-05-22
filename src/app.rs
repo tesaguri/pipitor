@@ -15,7 +15,7 @@ use anyhow::Context as _;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
-use futures::{future, ready, Future, Stream, StreamExt, TryStream};
+use futures::{future, ready, Future, Stream, TryStream};
 use http_body::Body;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -44,8 +44,7 @@ where
     #[pin]
     twitter_list: twitter::ListTimeline<S, B>,
     #[pin]
-    twitter: TwitterStream<S::ResponseBody>,
-    twitter_done: bool,
+    twitter: Option<TwitterStream<S::ResponseBody>>,
     #[pin]
     websub: Option<websub::Subscriber<S, B, I>>,
     #[pin]
@@ -103,8 +102,7 @@ where
         let app = App {
             core,
             twitter_list,
-            twitter,
-            twitter_done: false,
+            twitter: Some(twitter),
             websub,
             sender: Sender::new(),
             body_marker: PhantomData,
@@ -140,19 +138,13 @@ where
     }
 
     pub async fn reset(mut self: Pin<&mut Self>) -> anyhow::Result<()> {
-        let twitter_list = if self.twitter_done {
+        if self.twitter.is_none() {
             let mut this = self.as_mut().project();
-            this.twitter.set(this.core.init_twitter().await?);
-            *this.twitter_done = false;
-            self.core.init_twitter_list()?
-        } else {
-            twitter::ListTimeline::empty()
-        };
+            this.twitter.set(Some(this.core.init_twitter().await?));
+        }
 
         self.as_mut().shutdown().await?;
         debug_assert!(!self.sender.has_pending());
-
-        self.project().twitter_list.set(twitter_list);
 
         Ok(())
     }
@@ -247,9 +239,8 @@ where
             {
                 let twitter = this.core.init_twitter().await?;
                 let twitter_list = this.core.init_twitter_list()?;
-                this.twitter = twitter;
+                this.twitter = Some(twitter);
                 this.twitter_list = twitter_list;
-                this.twitter_done = false;
             }
 
             Ok(())
@@ -274,18 +265,24 @@ where
     fn poll_twitter(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
         let mut this = self.project();
 
-        while let Poll::Ready(v) = this.twitter.poll_next_unpin(cx) {
+        let mut twitter = if let Some(twitter) = this.twitter.as_mut().as_pin_mut() {
+            twitter
+        } else {
+            return Poll::Ready(Ok(()));
+        };
+
+        while let Poll::Ready(v) = twitter.as_mut().poll_next(cx) {
             let result = if let Some(r) = v {
                 r
             } else {
-                *this.twitter_done = true;
+                this.twitter.set(None);
                 return Poll::Ready(Ok(()));
             };
 
             let json = match result.context("error while listening to Twitter's Streaming API") {
                 Ok(json) => json,
                 Err(e) => {
-                    *this.twitter_done = true;
+                    this.twitter.set(None);
                     return Poll::Ready(Err(e));
                 }
             };
@@ -305,12 +302,14 @@ where
             }
 
             let from = tweet.user.id;
-            let will_process = this.core.manifest().has_topic(&TopicId::Twitter(from))
-                && tweet.in_reply_to_user_id.map_or(true, |to| {
-                    this.core.manifest().has_topic(&TopicId::Twitter(to))
-                });
+            // Prevent the later closure from capturing `this`, which is borrowed mutably by the loop.
+            let core = this.core.as_mut();
+            let will_process = core.manifest().has_topic(&TopicId::Twitter(from))
+                && tweet
+                    .in_reply_to_user_id
+                    .map_or(true, |to| core.manifest().has_topic(&TopicId::Twitter(to)));
             if will_process {
-                this.sender.as_mut().send_tweet(tweet, &this.core)?;
+                this.sender.as_mut().send_tweet(tweet, &core)?;
             }
         }
 
