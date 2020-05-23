@@ -34,7 +34,7 @@ pub struct Service<S, B> {
     pub(super) host: Uri,
     pub(super) client: S,
     pub(super) pool: Pool<ConnectionManager<SqliteConnection>>,
-    pub(super) tx: mpsc::UnboundedSender<(String, Content)>,
+    pub(super) tx: mpsc::Sender<(String, Content)>,
     pub(super) renewer_task: AtomicWaker,
     pub(super) expires_at: AtomicI64,
     pub(super) _marker: PhantomData<fn() -> B>,
@@ -295,7 +295,7 @@ where
             (topic, mac)
         };
 
-        let tx = self.tx.clone();
+        let mut tx = self.tx.clone();
         let verify_signature = req
             .into_body()
             .try_fold((Vec::new(), mac), move |(mut vec, mut mac), chunk| {
@@ -306,8 +306,12 @@ where
             .map_ok(move |(content, mac)| {
                 let code = mac.result().code();
                 if *code == signature {
-                    tx.unbounded_send((topic, Content { kind, content }))
-                        .unwrap();
+                    if let Err(e) = tx.start_send((topic, Content { kind, content })) {
+                        // A `Sender` has a guaranteed slot in the channel capacity ([1])
+                        // so it won't return a `full` error in this case.
+                        // https://docs.rs/futures/0.3.5/futures/channel/mpsc/fn.channel.html
+                        debug_assert!(e.is_disconnected());
+                    }
                 } else {
                     log::debug!("Callback {}: signature mismatch", id);
                 }

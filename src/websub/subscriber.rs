@@ -30,7 +30,7 @@ pub struct Subscriber<S, B, I> {
     #[pin]
     incoming: I,
     server: Http,
-    rx: mpsc::UnboundedReceiver<(String, Content)>,
+    rx: mpsc::Receiver<(String, Content)>,
     service: Arc<Service<S, B>>,
 }
 
@@ -67,7 +67,7 @@ where
             i64::MAX
         };
 
-        let (tx, rx) = mpsc::unbounded();
+        let (tx, rx) = mpsc::channel(0);
 
         let service = Arc::new(service::Service {
             host,
