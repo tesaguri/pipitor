@@ -81,8 +81,6 @@ where
         trace_fn!(App::<S, B, I>::with_http_client);
 
         let core = Core::new(manifest, client)?;
-        let twitter = core.init_twitter().await?;
-        let twitter_list = core.init_twitter_list()?;
 
         let websub = if let Some(ref websub) = core.credentials().websub {
             let incoming = I::bind(&websub.bind)?;
@@ -96,6 +94,9 @@ where
         } else {
             None
         };
+
+        let twitter = core.init_twitter().await?;
+        let twitter_list = core.init_twitter_list()?;
 
         let app = App {
             core,
