@@ -1,16 +1,20 @@
+use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
 
-use futures::{ready, Future, Stream, StreamExt};
+use futures::channel::mpsc;
+use futures::task::AtomicWaker;
+use futures::{ready, Future, FutureExt, Stream, StreamExt};
 use http_body::Body;
 use oauth1::Credentials;
 use pin_project::{pin_project, project};
-use smallvec::SmallVec;
-use tokio::time::Interval;
+use tokio::time::Delay;
 
-use crate::util::{snowflake_to_system_time, HttpService};
+use crate::util::{instant_from_epoch, snowflake_to_system_time, HttpService};
 
 use super::{Request, Tweet};
 
@@ -26,29 +30,32 @@ where
     inner: Option<Inner<S, B>>,
 }
 
-const RESP_BUF_CAP: usize = 8;
-
 #[pin_project]
 struct Inner<S, B>
 where
     S: HttpService<B>,
 {
-    current: Current<S, B>,
+    rx: mpsc::Receiver<Vec<Tweet>>,
+    sender: Arc<RequestSender<S, B>>,
     #[pin]
     backfill: Option<Backfill<S, B>>,
 }
 
-struct Current<S, B>
-where
-    S: HttpService<B>,
-{
+struct RequestSender<S, B> {
     list_id: NonZeroU64,
-    since_id: Option<i64>,
-    responses: SmallVec<[Pin<Box<super::ResponseFuture<Vec<Tweet>, S, B>>>; RESP_BUF_CAP]>,
-    interval: Interval,
+    since_id: AtomicI64,
+    tx: mpsc::Sender<Vec<Tweet>>,
+    delay_until: AtomicI64,
+    task: AtomicWaker,
     client: Credentials<Box<str>>,
     token: Credentials<Box<str>>,
     http: S,
+    marker: PhantomData<fn() -> B>,
+}
+
+struct SenderTask<S, B> {
+    sender: Weak<RequestSender<S, B>>,
+    timer: Delay,
 }
 
 #[pin_project]
@@ -63,9 +70,11 @@ where
 
 impl<S, B> ListTimeline<S, B>
 where
-    S: HttpService<B> + Clone,
+    S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Future: Send + 'static,
+    S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-    B: Default + From<Vec<u8>>,
+    B: Default + From<Vec<u8>> + Send + 'static,
 {
     pub fn new(
         list_id: NonZeroU64,
@@ -81,19 +90,30 @@ where
             Backfill { since_id, response }
         });
 
-        let mut current = Current {
+        let (tx, rx) = mpsc::channel(0);
+
+        let sender = Arc::new(RequestSender {
             list_id,
-            since_id: None,
-            responses: SmallVec::new(),
-            // Rate limit of GET lists/statuses (user auth): 900 reqs/15-min window (1 req/sec)
-            interval: tokio::time::interval(Duration::from_secs(1)),
+            since_id: AtomicI64::new(0),
+            tx,
+            delay_until: AtomicI64::new(0),
+            task: AtomicWaker::new(),
             client,
             token,
             http,
-        };
-        current.send_request();
+            marker: PhantomData,
+        });
 
-        let inner = Inner { current, backfill };
+        tokio::spawn(SenderTask {
+            sender: Arc::downgrade(&sender),
+            timer: tokio::time::delay_until(Instant::now().into()),
+        });
+
+        let inner = Inner {
+            sender,
+            rx,
+            backfill,
+        };
         ListTimeline { inner: Some(inner) }
     }
 
@@ -114,9 +134,11 @@ where
 
 impl<S, B> Stream for ListTimeline<S, B>
 where
-    S: HttpService<B> + Clone,
+    S: HttpService<B> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-    B: Default + From<Vec<u8>>,
+    B: Default + From<Vec<u8>> + Send + 'static,
 {
     type Item = anyhow::Result<Vec<Tweet>>;
 
@@ -132,41 +154,10 @@ where
             return Poll::Ready(Some(Ok(tweets)));
         }
 
-        if let Poll::Ready(Some(_)) = inner
-            .as_mut()
-            .project()
-            .current
-            .interval
-            .poll_next_unpin(cx)
-        {
-            inner.as_mut().project().current.send_request();
-        }
-
-        let tweets = match ready!(inner.as_mut().project().current.poll_next(cx)) {
-            Ok(resp) => resp.data,
-            Err(e) => {
-                // Skip the error as the list timeline is only for complementary purpose.
-                warn!("error while retrieving Tweets from the list: {:?}", e);
-                if let super::Error::Twitter(e) = e {
-                    if let Some(limit) = e.rate_limit {
-                        if limit.remaining == 0 {
-                            let reset = SystemTime::UNIX_EPOCH + Duration::from_secs(limit.reset);
-                            let (now_s, now_i) = (SystemTime::now(), Instant::now());
-                            let eta = reset
-                                .duration_since(now_s)
-                                .unwrap_or(Duration::from_secs(0));
-                            let at = (now_i + eta).into();
-                            inner.project().current.interval =
-                                tokio::time::interval_at(at, Duration::from_secs(1));
-                        }
-                    }
-                }
-                return Poll::Pending;
-            }
-        };
+        let tweets = ready!(inner.as_mut().project().rx.poll_next_unpin(cx)).unwrap();
 
         if let Some(t) = tweets.last() {
-            inner.project().current.since_id = Some(t.id);
+            store_max(&inner.project().sender.since_id, t.id);
 
             if log_enabled!(log::Level::Trace) {
                 let created_at = snowflake_to_system_time(t.id as u64);
@@ -191,8 +182,9 @@ where
     fn poll_next_backfill(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Vec<Tweet>>> {
         #[project]
         let Inner {
-            current,
+            sender,
             backfill: mut backfill_opt,
+            ..
         } = self.project();
 
         #[project]
@@ -221,69 +213,135 @@ where
             return Poll::Ready(None);
         }
 
-        if current.since_id.is_none() {
-            current.since_id = tweets.first().map(|t| t.id);
-        }
+        store_max(&sender.since_id, tweets.first().unwrap().id);
 
         let max_id = tweets.last().map(|t| t.id - 1);
-        let res = super::lists::Statuses::new(current.list_id)
+        let res = super::lists::Statuses::new(sender.list_id)
             .since_id(Some(*backfill_since_id))
             .max_id(max_id)
-            .send(&current.client, &current.token, current.http.clone());
+            .send(&sender.client, &sender.token, sender.http.clone());
         response.set(res);
 
         Poll::Ready(Some(tweets))
     }
 }
 
-impl<S, B> Current<S, B>
+impl<S, B> RequestSender<S, B>
 where
-    S: HttpService<B> + Clone,
+    S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Future: Send + 'static,
+    S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-    B: Default + From<Vec<u8>>,
+    B: Default + From<Vec<u8>> + Send + 'static,
 {
-    fn poll_next(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<
-        Result<
-            super::Response<Vec<Tweet>>,
-            super::Error<S::Error, <S::ResponseBody as Body>::Error>,
-        >,
-    > {
-        // Iterate from later responses.
-        for (i, resp) in self.responses.iter_mut().enumerate().rev() {
-            if let Poll::Ready(result) = resp.as_mut().poll(cx) {
-                // Discard earlier pending responses as well since we have newer data now.
-                if i > 0 {
-                    debug!("dropping {} pending list response(s)", i);
-                }
-                self.responses.drain(0..=i);
+    fn send(self: Arc<Self>) {
+        trace_fn!(RequestSender::<S, B>::send);
 
-                return Poll::Ready(result);
+        let since_id = self.since_id.load(Ordering::SeqCst);
+        let since_id = if since_id == 0 { None } else { Some(since_id) };
+        let count = if since_id.is_some() { 200 } else { 1 };
+
+        let task = super::lists::Statuses::new(self.list_id)
+            .count(Some(count))
+            .include_rts(Some(false))
+            .since_id(since_id)
+            .send(&self.client, &self.token, self.http.clone())
+            .map(move |result| {
+                let rate_limit = match result {
+                    Ok(resp) => {
+                        if let Err(e) = self.tx.clone().start_send(resp.data) {
+                            debug_assert!(e.is_disconnected());
+                            return;
+                        }
+                        resp.rate_limit
+                    }
+                    Err(e) => {
+                        // This error should not abort the whole task
+                        // since the request will be retried soon.
+                        warn!("error while retrieving Tweets from the list: {:?}", e);
+
+                        if let super::Error::Twitter(e) = e {
+                            e.rate_limit
+                        } else {
+                            return;
+                        }
+                    }
+                };
+
+                if let Some(limit) = rate_limit {
+                    if limit.remaining == 0 {
+                        store_max(&self.delay_until, limit.reset as i64);
+                    }
+                }
+            });
+
+        tokio::spawn(task);
+    }
+}
+
+impl<S, B> RequestSender<S, B> {
+    fn decode_delay_until(&self) -> Option<Instant> {
+        let delay_until = self.delay_until.load(Ordering::SeqCst);
+        if delay_until == 0 {
+            None
+        } else {
+            Some(instant_from_epoch(delay_until))
+        }
+    }
+}
+
+impl<S, B> Drop for RequestSender<S, B> {
+    fn drop(&mut self) {
+        self.task.wake();
+    }
+}
+
+impl<S, B> Future for SenderTask<S, B>
+where
+    S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Future: Send + 'static,
+    S::ResponseBody: Send,
+    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>> + Send + 'static,
+{
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        trace_fn!(SenderTask::<S, B>::poll);
+
+        let sender = if let Some(sender) = self.sender.upgrade() {
+            sender
+        } else {
+            return Poll::Ready(());
+        };
+
+        sender.task.register(cx.waker());
+
+        if let Some(delay_until) = sender.decode_delay_until() {
+            if self.timer.deadline().into_std() < delay_until {
+                self.timer.reset(delay_until.into());
             }
         }
 
+        ready!(self.timer.poll_unpin(cx));
+
+        sender.send();
+
+        // Make the task sleep for 1 sec because the rate limit of GET lists/statuses is
+        // 900 reqs/15-min window (about 1 req/sec).
+        let next = self.timer.deadline() + Duration::from_secs(1);
+        self.timer.reset(next);
+
         Poll::Pending
     }
+}
 
-    fn send_request(&mut self) {
-        trace_fn!(Current::<S, B>::send_request);
-
-        let count = if self.since_id.is_some() { 200 } else { 1 };
-        let resp = super::lists::Statuses::new(self.list_id)
-            .count(Some(count))
-            .include_rts(Some(false))
-            .since_id(self.since_id)
-            .send(&self.client, &self.token, self.http.clone());
-
-        if self.responses.len() == self.responses.capacity() {
-            debug!("respone buffer reached its capacity");
-            let mut slot = self.responses.remove(0);
-            slot.set(resp);
-            self.responses.push(slot);
-        } else {
-            self.responses.push(Box::pin(resp));
+fn store_max(atomic: &AtomicI64, val: i64) {
+    let mut prev = atomic.load(Ordering::SeqCst);
+    while prev < val {
+        match atomic.compare_exchange_weak(prev, val, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return,
+            Err(p) => prev = p,
         }
     }
 }

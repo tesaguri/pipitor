@@ -114,7 +114,7 @@ where
 
 impl<S, B, I> App<S, B, I>
 where
-    S: HttpService<B> + Clone + Send + 'static,
+    S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,

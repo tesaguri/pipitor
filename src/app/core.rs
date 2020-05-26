@@ -110,9 +110,11 @@ impl<S> Core<S> {
 
     pub(super) fn init_twitter_list<B>(&self) -> anyhow::Result<twitter::ListTimeline<S, B>>
     where
-        S: HttpService<B> + Clone,
+        S: HttpService<B> + Clone + Send + Sync + 'static,
+        S::Future: Send + 'static,
+        S::ResponseBody: Send,
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-        B: Default + From<Vec<u8>>,
+        B: Default + From<Vec<u8>> + Send + 'static,
     {
         use crate::schema::last_tweet::dsl::*;
 
