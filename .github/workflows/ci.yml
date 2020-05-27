@@ -1,0 +1,87 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        toolchain:
+          - stable
+          - beta
+          - nightly
+        features:
+          -
+          - native-tls
+          - rustls
+        include:
+          - os: ubuntu-latest
+            toolchain: stable
+            features:
+            components: rustfmt
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install extern libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install libsqlite3-dev
+      - name: Install extern libraries (Windows)
+        if: runner.os == 'Windows'
+        run: vcpkg install sqlite3:x64-windows
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          override: true
+          profile: minimal
+          components: rustfmt
+        id: toolchain
+      - name: Cache Cargo registry
+        uses: actions/cache@v2
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ runner.os }}-${{ matrix.features }}-${{ hashFiles('Cargo.*') }}
+          restore-keys: |
+            cargo-registry-${{ runner.os }}-${{ matrix.features }}-${{ hashFiles('Cargo.*') }}
+            cargo-registry-${{ runner.os }}-${{ matrix.features }}-
+            cargo-registry-${{ runner.os }}-
+            cargo-registry-
+      - name: Cache Cargo build
+        uses: actions/cache@v2
+        with:
+          path: target
+          key: cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.*') }}
+          restore-keys: |
+            cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.*') }}
+            cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ matrix.features }}-
+            cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-
+      - name: Check format
+        if: ${{ contains(matrix.components, 'rustfmt') }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: -- --check
+      - run: echo "::set-env name=SQLITE3_LIB_DIR::${Env:VCPKG_INSTALLATION_ROOT}\installed\x64-windows\lib"
+        if: ${{ runner.os == 'Windows' }}
+      - name: Build library
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --lib --verbose --no-default-features --features=${{ matrix.features }}
+      - name: Build all
+        if: ${{ matrix.features != '' }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose --no-default-features --features=${{ matrix.features }}
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --lib --no-default-features --features=${{ matrix.features }}

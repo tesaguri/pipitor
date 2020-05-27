@@ -10,7 +10,6 @@ env:
 
 matrix:
   include:
-    - env:
     - env: TARGET=armv7-unknown-linux-gnueabihf
     - env: TARGET=x86_64-unknown-linux-musl
     - env: TARGET=x86_64-apple-darwin
@@ -23,15 +22,14 @@ before_install:
   - set -e
 
 install:
-  - sh scripts/install.sh
   - source ~/.cargo/env || true
 
-script:
-  - sh scripts/script.sh
+before_script: set +e
 
-after_script: set +e
+script: true
 
 before_deploy:
+  - sh scripts/install.sh
   - sh scripts/before_deploy.sh
 
 deploy:

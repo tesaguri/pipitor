@@ -34,12 +34,6 @@ main() {
   if [ $TRAVIS_OS_NAME = linux ]; then
     cargo install cross --force
   fi
-
-  # Install test dependencies
-  # (Components for Nightly Rust is quite unstable,
-  # so let's comment them out until we move on to Stable)
-  # rustup component add rustfmt-preview
-  # rustup component add clippy-preview
 }
 
 main
