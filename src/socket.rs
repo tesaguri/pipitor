@@ -1,3 +1,5 @@
+pub mod unix;
+
 use std::fmt::{self, Formatter};
 use std::io;
 use std::mem::MaybeUninit;
@@ -20,7 +22,7 @@ pub enum Addr {
 }
 
 #[pin_project]
-pub enum Listener<T = tokio::net::TcpListener, U = tokio::net::UnixListener> {
+pub enum Listener<T = tokio::net::TcpListener, U = unix::MaybeUnixListener> {
     Tcp(#[pin] T),
     Unix(#[pin] U),
 }
@@ -106,10 +108,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut B,
-    ) -> Poll<io::Result<usize>>
-    where
-        Self: Sized,
-    {
+    ) -> Poll<io::Result<usize>> {
         #[project]
         match self.project() {
             Stream::Tcp(s) => s.poll_read_buf(cx, buf),
@@ -159,10 +158,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut B,
-    ) -> Poll<io::Result<usize>>
-    where
-        Self: Sized,
-    {
+    ) -> Poll<io::Result<usize>> {
         #[project]
         match self.project() {
             Stream::Tcp(s) => s.poll_write_buf(cx, buf),
@@ -184,30 +180,6 @@ impl Bind<SocketAddr> for tokio::net::TcpListener {
 
     fn bind(addr: &SocketAddr) -> io::Result<Self> {
         std::net::TcpListener::bind(*addr).and_then(Self::from_std)
-    }
-}
-
-cfg_if::cfg_if! {
-    if #[cfg(unix)] {
-        use std::fs;
-
-        impl Bind<Path> for std::os::unix::net::UnixListener {
-            type Error = io::Error;
-
-            fn bind(path: &Path) -> io::Result<Self> {
-                let _ = fs::remove_file(path);
-                Self::bind(path)
-            }
-        }
-
-        impl Bind<Path> for tokio::net::UnixListener {
-            type Error = io::Error;
-
-            fn bind(path: &Path) -> io::Result<Self> {
-                let _ = fs::remove_file(path);
-                Self::bind(path)
-            }
-        }
     }
 }
 
