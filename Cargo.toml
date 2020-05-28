@@ -51,7 +51,7 @@ smallvec = { version = "1", features = ["serde"] }
 string = { version = "0.2", default-features = false }
 structopt = "0.3"
 thiserror = "1"
-tokio = { version = "0.2", features = ["io-std", "io-util", "signal", "stream", "time", "uds"] }
+tokio = { version = "0.2", features = ["io-std", "io-util", "signal", "stream", "tcp", "time", "uds"] }
 tower-service = "0.3"
 tower-util = "0.3"
 toml = "0.5"
