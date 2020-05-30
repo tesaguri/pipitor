@@ -174,6 +174,14 @@ where
         }
     }
 
+    pub fn unsubscribe_all(
+        &self,
+        topic: String,
+        conn: &SqliteConnection,
+    ) -> impl Iterator<Item = impl Future<Output = Result<(), S::Error>>> {
+        hub::unsubscribe_all(&self.host, topic, self.client.clone(), conn)
+    }
+
     fn renew(
         &self,
         id: i64,

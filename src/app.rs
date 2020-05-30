@@ -15,7 +15,7 @@ use anyhow::Context as _;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
-use futures::{future, ready, Future, Stream, TryStream};
+use futures::{future, ready, Future, FutureExt, Stream, TryStream};
 use http_body::Body;
 use listenfd::ListenFd;
 use pin_project::pin_project;
@@ -170,7 +170,7 @@ where
             sender: Sender::new(),
         };
 
-        app.subscribe_to_websub_topics()?;
+        app.sync_websub_subscriptions()?;
 
         Ok(app)
     }
@@ -378,24 +378,42 @@ where
         Poll::Pending
     }
 
-    fn subscribe_to_websub_topics(&self) -> anyhow::Result<()> {
+    fn sync_websub_subscriptions(&self) -> anyhow::Result<()> {
         let websub = if let Some(ref s) = self.websub {
             s
         } else {
             return Ok(());
         };
 
-        let mut topics: HashSet<&str> = self.manifest().feed_topics().collect();
-        let subscribed: Vec<String> = websub_subscriptions::table
+        let conn = &*self.core.conn()?;
+
+        let topics: HashSet<&str> = self.manifest().feed_topics().collect();
+        let subscribed: HashSet<String> = websub_subscriptions::table
             .select(websub_subscriptions::topic)
             .filter(websub_subscriptions::topic.eq_any(&topics))
-            .load(&*self.core.conn()?)?;
-        for t in subscribed {
-            topics.remove(&*t);
+            .load(conn)?
+            .into_iter()
+            .collect();
+
+        for &topic in topics.iter().filter(|&&t| !subscribed.contains(t)) {
+            let task = websub.service().discover_and_subscribe(topic.to_owned());
+            let task = task.map(|result| {
+                if let Err(e) = result {
+                    log::error!("Error: {:?}", e);
+                }
+            });
+            tokio::spawn(task);
         }
 
-        for t in topics {
-            tokio::spawn(websub.service().discover_and_subscribe(t.to_owned()));
+        for topic in subscribed.into_iter().filter(|t| !topics.contains(&**t)) {
+            for task in websub.service().unsubscribe_all(topic, conn) {
+                let task = task.map(|result| {
+                    if let Err(e) = result {
+                        log::error!("Error while unsubscribing from a topic: {:?}", e);
+                    }
+                });
+                tokio::spawn(task);
+            }
         }
 
         Ok(())

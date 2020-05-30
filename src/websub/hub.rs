@@ -133,6 +133,38 @@ where
     send_request(hub, topic, body, client)
 }
 
+pub fn unsubscribe_all<S, B>(
+    host: &Uri,
+    topic: String,
+    client: S,
+    conn: &SqliteConnection,
+) -> impl Iterator<Item = impl Future<Output = Result<(), S::Error>>>
+where
+    S: HttpService<B> + Clone,
+    B: From<Vec<u8>>,
+{
+    log::info!("Unsubscribing from topic at all hubs");
+
+    let rows = websub_subscriptions::table.filter(websub_subscriptions::topic.eq(&topic));
+    let subscriptions = rows
+        .select((websub_subscriptions::id, websub_subscriptions::hub))
+        .load::<(i64, String)>(conn)
+        .unwrap();
+
+    diesel::delete(rows).execute(conn).unwrap();
+
+    let host = host.clone();
+    subscriptions.into_iter().map(move |(id, hub)| {
+        let callback = &callback(host.clone(), id);
+        let body = serde_urlencoded::to_string(Form::Unsubscribe {
+            callback,
+            topic: &topic,
+        })
+        .unwrap();
+        send_request(hub, topic.clone(), body, client.clone())
+    })
+}
+
 fn send_request<S, B>(
     hub: String,
     topic: String,
