@@ -143,7 +143,7 @@ where
     S: HttpService<B> + Clone,
     B: From<Vec<u8>>,
 {
-    log::info!("Unsubscribing from topic at all hubs");
+    log::info!("Unsubscribing from topic {} at all hubs", topic);
 
     let rows = websub_subscriptions::table.filter(websub_subscriptions::topic.eq(&topic));
     let subscriptions = rows

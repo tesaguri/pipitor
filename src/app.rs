@@ -305,6 +305,8 @@ where
                 this.twitter_list = twitter_list;
             }
 
+            this.sync_websub_subscriptions()?;
+
             Ok(())
         }
         .await;
