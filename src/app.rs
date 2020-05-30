@@ -3,6 +3,7 @@ mod sender;
 mod twitter_request_ext;
 
 use std::collections::HashSet;
+use std::convert::TryInto;
 use std::error::Error;
 use std::mem;
 use std::pin::Pin;
@@ -16,6 +17,7 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
 use futures::{future, ready, Future, Stream, TryStream};
 use http_body::Body;
+use listenfd::ListenFd;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use twitter_stream::TwitterStream;
@@ -57,11 +59,29 @@ where
     I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     <I as TryStream>::Error: Error + Send + Sync + 'static,
     <I as socket::Bind<socket::Addr>>::Error: Error + Send + Sync + 'static,
+    std::net::TcpListener: TryInto<I>,
+    <std::net::TcpListener as TryInto<I>>::Error: Error + Send + Sync + 'static,
 {
-    pub fn new(manifest: Manifest) -> impl Future<Output = anyhow::Result<Self>> {
-        let conn = hyper_tls::HttpsConnector::new();
-        let client = hyper::Client::builder().build(conn);
-        Self::with_http_client(client, manifest)
+    // XXX: Switching trait boundary with `cfg` seems to be a suboptimal solution...
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] {
+            pub fn new(manifest: Manifest) -> impl Future<Output = anyhow::Result<Self>>
+            where
+                std::os::unix::net::UnixListener: TryInto<I>,
+                <std::os::unix::net::UnixListener as TryInto<I>>::Error:
+                    Error + Send + Sync + 'static,
+            {
+                let conn = hyper_tls::HttpsConnector::new();
+                let client = hyper::Client::builder().build(conn);
+                Self::with_http_client(client, manifest)
+            }
+        } else {
+            pub fn new(manifest: Manifest) -> impl Future<Output = anyhow::Result<Self>> {
+                let conn = hyper_tls::HttpsConnector::new();
+                let client = hyper::Client::builder().build(conn);
+                Self::with_http_client(client, manifest)
+            }
+        }
     }
 }
 
@@ -76,14 +96,58 @@ where
     I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     <I as TryStream>::Error: Error + Send + Sync + 'static,
     <I as socket::Bind<socket::Addr>>::Error: Error + Send + Sync + 'static,
+    std::net::TcpListener: TryInto<I>,
+    <std::net::TcpListener as TryInto<I>>::Error: Error + Send + Sync + 'static,
 {
-    pub async fn with_http_client(client: S, manifest: Manifest) -> anyhow::Result<Self> {
-        trace_fn!(App::<S, B, I>::with_http_client);
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] {
+            pub async fn with_http_client(client: S, manifest: Manifest) -> anyhow::Result<Self>
+            where
+                std::os::unix::net::UnixListener: TryInto<I>,
+                <std::os::unix::net::UnixListener as TryInto<I>>::Error:
+                    Error + Send + Sync + 'static,
+            {
+                trace_fn!(App::<S, B, I>::with_http_client);
+                Self::with_http_client_(client, manifest, |fds| {
+                    if let Some(i) = fds.take_unix_listener(0)? {
+                        Ok(Some(i.try_into()?))
+                    } else {
+                        Ok(None)
+                    }
+                })
+                .await
+            }
+        } else {
+            pub async fn with_http_client(client: S, manifest: Manifest) -> anyhow::Result<Self> {
+                trace_fn!(App::<S, B, I>::with_http_client);
+                Self::with_http_client_(client, manifest, |_| Ok(None)).await
+            }
+        }
+    }
 
+    async fn with_http_client_<F>(
+        client: S,
+        manifest: Manifest,
+        make_unix_incoming: F,
+    ) -> anyhow::Result<Self>
+    where
+        F: FnOnce(&mut ListenFd) -> anyhow::Result<Option<I>>,
+    {
         let core = Core::new(manifest, client)?;
 
         let websub = if let Some(ref websub) = core.credentials().websub {
-            let incoming = I::bind(&websub.bind)?;
+            let incoming = if let Some(ref bind) = websub.bind {
+                I::bind(bind)?
+            } else {
+                let mut fds = ListenFd::from_env();
+                if let Some(i) = fds.take_tcp_listener(0).ok().flatten() {
+                    i.try_into()?
+                } else if let Some(i) = make_unix_incoming(&mut fds)? {
+                    i
+                } else {
+                    anyhow::bail!("Either `websub.bind` in `credentials.toml` or `LISTEN_FD` must be provided for WebSub subscriber");
+                }
+            };
             let host = websub.host.clone();
             Some(websub::Subscriber::new(
                 incoming,

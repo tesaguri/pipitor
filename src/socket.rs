@@ -1,5 +1,6 @@
 pub mod unix;
 
+use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Formatter};
 use std::io;
 use std::mem::MaybeUninit;
@@ -75,6 +76,28 @@ where
                 .try_poll_next(cx)
                 .map(|result| result.map(|opt| opt.map(Stream::Unix))),
         }
+    }
+}
+
+impl<T, U> TryFrom<std::net::TcpListener> for Listener<T, U>
+where
+    std::net::TcpListener: TryInto<T>,
+{
+    type Error = <std::net::TcpListener as TryInto<T>>::Error;
+
+    fn try_from(listener: std::net::TcpListener) -> Result<Self, Self::Error> {
+        listener.try_into().map(Listener::Tcp)
+    }
+}
+
+impl<T, U> TryFrom<tokio::net::TcpListener> for Listener<T, U>
+where
+    tokio::net::TcpListener: TryInto<T>,
+{
+    type Error = <tokio::net::TcpListener as TryInto<T>>::Error;
+
+    fn try_from(listener: tokio::net::TcpListener) -> Result<Self, Self::Error> {
+        listener.try_into().map(Listener::Tcp)
     }
 }
 

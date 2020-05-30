@@ -26,7 +26,7 @@ pub struct Twitter {
 pub struct WebSub {
     #[serde(deserialize_with = "deserialize_uri")]
     pub host: Uri,
-    pub bind: socket::Addr,
+    pub bind: Option<socket::Addr>,
 }
 
 #[derive(Deserialize)]

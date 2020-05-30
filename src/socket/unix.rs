@@ -11,9 +11,12 @@ use super::Bind;
 
 cfg_if::cfg_if! {
     if #[cfg(unix)] {
+        use std::convert::{TryFrom, TryInto};
         use std::fs;
 
         use futures::StreamExt;
+
+        use super::Listener;
 
         pub struct MaybeUnixListener {
             inner: tokio::net::UnixListener,
@@ -43,6 +46,42 @@ cfg_if::cfg_if! {
                 self.inner.poll_next_unpin(cx).map(|option| {
                     option.map(|result| result.map(|inner| MaybeUnixStream { inner }))
                 })
+            }
+        }
+
+        impl TryFrom<std::os::unix::net::UnixListener> for MaybeUnixListener {
+            type Error = io::Error;
+
+            fn try_from(listener: std::os::unix::net::UnixListener) -> io::Result<Self> {
+                listener.try_into().map(|inner| MaybeUnixListener { inner })
+            }
+        }
+
+        impl From<tokio::net::UnixListener> for MaybeUnixListener {
+            fn from(listener: tokio::net::UnixListener) -> Self {
+                MaybeUnixListener { inner: listener }
+            }
+        }
+
+        impl<T, U> TryFrom<std::os::unix::net::UnixListener> for Listener<T, U>
+        where
+            std::os::unix::net::UnixListener: TryInto<U>,
+        {
+            type Error = <std::os::unix::net::UnixListener as TryInto<U>>::Error;
+
+            fn try_from(listener: std::os::unix::net::UnixListener) -> Result<Self, Self::Error> {
+                listener.try_into().map(Listener::Unix)
+            }
+        }
+
+        impl<T, U> TryFrom<tokio::net::UnixListener> for Listener<T, U>
+        where
+            tokio::net::UnixListener: TryInto<U>,
+        {
+            type Error = <tokio::net::UnixListener as TryInto<U>>::Error;
+
+            fn try_from(listener: tokio::net::UnixListener) -> Result<Self, Self::Error> {
+                listener.try_into().map(Listener::Unix)
             }
         }
 
