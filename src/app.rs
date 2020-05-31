@@ -149,12 +149,14 @@ where
                 }
             };
             let host = websub.host.clone();
-            Some(websub::Subscriber::new(
+            let websub = websub::Subscriber::new(
                 incoming,
                 host,
                 core.http_client().clone(),
                 core.database_pool().clone(),
-            ))
+            );
+            websub.service().remove_dangling_subscriptions();
+            Some(websub)
         } else {
             None
         };

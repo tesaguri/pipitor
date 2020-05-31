@@ -70,6 +70,15 @@ where
     S::ResponseBody: Send,
     B: From<Vec<u8>> + Send + 'static,
 {
+    pub fn remove_dangling_subscriptions(&self) {
+        let active = websub_active_subscriptions::table.select(websub_active_subscriptions::id);
+        let dangling =
+            websub_subscriptions::table.filter(not(websub_subscriptions::id.eq_any(active)));
+        diesel::delete(dangling)
+            .execute(&*self.pool.get().unwrap())
+            .unwrap();
+    }
+
     #[auto_enum]
     pub fn discover_and_subscribe(&self, topic: String) -> impl Future<Output = anyhow::Result<()>>
     where
