@@ -15,6 +15,7 @@ use oauth1::Credentials;
 use pin_project::{pin_project, project};
 use tokio::time::Delay;
 
+use crate::manifest;
 use crate::util::{instant_from_epoch, snowflake_to_system_time, HttpService};
 
 use super::{Request, Tweet};
@@ -44,6 +45,7 @@ where
 
 struct RequestSender<S, B> {
     list_id: NonZeroU64,
+    delay: u64,
     since_id: AtomicI64,
     tx: mpsc::Sender<Vec<Tweet>>,
     delay_until: AtomicI64,
@@ -78,23 +80,25 @@ where
     B: Default + From<Vec<u8>> + Send + 'static,
 {
     pub fn new(
-        list_id: NonZeroU64,
+        list: manifest::TwitterList,
         since_id: Option<i64>,
         client: Credentials<Box<str>>,
         token: Credentials<Box<str>>,
         http: S,
     ) -> Self {
         let backfill = since_id.map(|since_id| {
-            let response = super::lists::Statuses::new(list_id)
+            let response = super::lists::Statuses::new(list.id)
                 .since_id(Some(since_id))
                 .send(&client, &token, http.clone());
             Backfill { since_id, response }
         });
 
+        let manifest::TwitterList { id: list_id, delay } = list;
         let (tx, rx) = mpsc::channel(0);
 
         let sender = Arc::new(RequestSender {
             list_id,
+            delay,
             since_id: AtomicI64::new(0),
             tx,
             delay_until: AtomicI64::new(0),
@@ -239,7 +243,12 @@ where
         trace_fn!(RequestSender::<S, B>::send);
 
         let since_id = self.since_id.load(Ordering::SeqCst);
-        let since_id = if since_id == 0 { None } else { Some(since_id) };
+        let since_id = if since_id == 0 {
+            None
+        } else {
+            // Subtract `delay` milliseconds from the "time part" of Snowflake ID.
+            Some(since_id - (self.delay << 22) as i64)
+        };
         let count = if since_id.is_some() { 200 } else { 1 };
 
         let task = super::lists::Statuses::new(self.list_id)

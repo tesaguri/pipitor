@@ -18,8 +18,8 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     use pipitor::schema::twitter_tokens::dsl::*;
 
     let manifest = open_manifest(opt)?;
-    let list_id = if let Some(list) = manifest.twitter.list {
-        list
+    let list_id = if let Some(ref list) = manifest.twitter.list {
+        list.id
     } else {
         println!("`twitter.list` is not set in the manifest");
         return Ok(());

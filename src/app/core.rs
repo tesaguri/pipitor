@@ -118,7 +118,7 @@ impl<S> Core<S> {
     {
         use crate::schema::last_tweet::dsl::*;
 
-        let list = if let Some(list) = self.manifest.twitter.list {
+        let list = if let Some(list) = self.manifest.twitter.list.clone() {
             list
         } else {
             return Ok(twitter::ListTimeline::empty());

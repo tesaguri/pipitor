@@ -72,9 +72,16 @@ pub enum TopicId<'a> {
 pub struct Twitter {
     pub user: i64,
     #[serde(default)]
-    pub list: Option<NonZeroU64>,
+    pub list: Option<TwitterList>,
     #[serde(skip)]
     _non_exhaustive: (),
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct TwitterList {
+    pub id: NonZeroU64,
+    #[serde(default)]
+    pub delay: u64,
 }
 
 impl Manifest {

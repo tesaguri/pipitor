@@ -3,7 +3,7 @@
 user = 0
 # `list_id` of the list used to backfill timeline (optional)
 # Running `pipitor twitter-list-sync` will overwrite members in the list.
-list = 0
+list.id = 12345
 
 [twitter.client]
 key = "Your application's API key"
