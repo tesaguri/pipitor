@@ -1,3 +1,4 @@
+use std::cmp;
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::pin::Pin;
@@ -325,12 +326,14 @@ where
 
         ready!(self.timer.poll_unpin(cx));
 
+        let now = Instant::now();
+
         sender.send();
 
         // Make the task sleep for 1 sec because the rate limit of GET lists/statuses is
         // 900 reqs/15-min window (about 1 req/sec).
-        let next = self.timer.deadline() + Duration::from_secs(1);
-        self.timer.reset(next);
+        let next_tick = self.timer.deadline() + Duration::from_secs(1);
+        self.timer.reset(cmp::max(next_tick, now.into()));
 
         Poll::Pending
     }
