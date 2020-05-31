@@ -19,6 +19,7 @@ path = "src/bin/pipitor/main.rs"
 anyhow = "1"
 atoi = "0.3"
 atom = { version = "0.9", package = "atom_syndication" }
+auto_enums = "0.7"
 base64 = "0.12"
 cfg-if = "0.1"
 bytes = "0.5"

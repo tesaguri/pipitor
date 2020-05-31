@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::task::{Context, Poll};
 use std::time::Instant;
 
+use auto_enums::auto_enum;
 use bytes::Buf;
 use diesel::dsl::*;
 use diesel::prelude::*;
@@ -69,6 +70,7 @@ where
     S::ResponseBody: Send,
     B: From<Vec<u8>> + Send + 'static,
 {
+    #[auto_enum]
     pub fn discover_and_subscribe(&self, topic: String) -> impl Future<Output = anyhow::Result<()>>
     where
         <S::ResponseBody as http_body::Body>::Error: Error + Send + Sync + 'static,
@@ -111,27 +113,27 @@ where
                     })
                     .await?;
 
-                match RawFeed::parse(kind, &body) {
-                    Some(RawFeed::Atom(feed)) => {
-                        let hubs = feed
+                if let Some(feed) = RawFeed::parse(kind, &body) {
+                    #[auto_enum(Iterator)]
+                    let hubs = match feed {
+                        RawFeed::Atom(feed) => feed
                             .links
                             .into_iter()
                             .filter(|link| link.rel == "hub")
-                            .map(|link| link.href);
-                        for hub in hubs {
-                            tokio::spawn(hub::subscribe(
-                                &host,
-                                hub,
-                                topic.clone(),
-                                client.clone(),
-                                &*pool.get()?,
-                            ));
-                        }
+                            .map(|link| link.href),
+                        RawFeed::Rss(ref channel) => rss_hub_links(channel).map(ToOwned::to_owned),
+                    };
+                    for hub in hubs {
+                        tokio::spawn(hub::subscribe(
+                            &host,
+                            hub,
+                            topic.clone(),
+                            client.clone(),
+                            &*pool.get()?,
+                        ));
                     }
-                    Some(RawFeed::Rss(_)) => {
-                        log::warn!("Discovery of WebSub hubs for RSS feeds is not supported yet")
-                    }
-                    None => log::warn!("Topic {}: failed to parse the content", topic),
+                } else {
+                    log::warn!("Topic {}: failed to parse the content", topic);
                 }
 
                 Ok(())
@@ -456,6 +458,32 @@ fn fetch_min(atomic: &AtomicI64, val: i64) -> i64 {
         }
     }
     prev
+}
+
+fn rss_hub_links(channel: &rss::Channel) -> impl Iterator<Item = &str> {
+    const NS_ATOM: &str = "http://www.w3.org/2005/Atom";
+
+    channel
+        .extensions()
+        .iter()
+        .flat_map(|(prefix, map)| map.iter().map(move |(name, elms)| (prefix, name, elms)))
+        .filter(|(_, name, _)| *name == "link")
+        .flat_map(|(prefix, _, elms)| elms.iter().map(move |elm| (prefix, elm)))
+        .filter(move |(prefix, elm)| {
+            if let Some((_, ns)) = elm
+                .attrs()
+                .iter()
+                .find(|(k, _)| k.starts_with("xmlns:") && k[6..] == **prefix)
+            {
+                ns == NS_ATOM
+            } else {
+                channel.namespaces().get(*prefix).map(|s| &**s) == Some(NS_ATOM)
+            }
+        })
+        .map(|(_, elm)| elm)
+        .filter(|elm| elm.attrs().get("rel").map(|s| &**s) == Some("hub"))
+        .flat_map(|elm| elm.attrs().get("href"))
+        .map(|href| &**href)
 }
 
 fn log_and_discard_error<T, E>(result: Result<T, E>)
