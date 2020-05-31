@@ -29,3 +29,4 @@ topics = [
 ]
 filter = "(?i)Another filter|This regex is case insensitive"
 exclude = "excluding Tweets that match this regex"
+outbox = 0
