@@ -305,8 +305,10 @@ where
             let (topic, secret) = if let Some(cols) = cols {
                 cols
             } else {
+                // Return HTTP 410 code to let the hub end the subscription if the ID is of
+                // a previously removed subscription.
                 return Response::builder()
-                    .status(StatusCode::NOT_FOUND)
+                    .status(StatusCode::GONE)
                     .body(Default::default())
                     .unwrap();
             };
