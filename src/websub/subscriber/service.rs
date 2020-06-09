@@ -15,7 +15,7 @@ use futures::task::AtomicWaker;
 use futures::{future, pin_mut, stream, Future, FutureExt, TryFutureExt, TryStreamExt};
 use hmac::digest::generic_array::typenum::Unsigned;
 use hmac::digest::FixedOutput;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, Mac, NewMac};
 use http::header::CONTENT_TYPE;
 use http::{Request, Response, StatusCode, Uri};
 use http_body::Body as _;
@@ -321,11 +321,11 @@ where
             .into_body()
             .try_fold((Vec::new(), mac), move |(mut vec, mut mac), chunk| {
                 vec.extend(&*chunk);
-                mac.input(&chunk);
+                mac.update(&chunk);
                 future::ok((vec, mac))
             })
             .map_ok(move |(content, mac)| {
-                let code = mac.result().code();
+                let code = mac.finalize().into_bytes();
                 if *code == signature {
                     if let Err(e) = tx.start_send((topic, Content { kind, content })) {
                         // A `Sender` has a guaranteed slot in the channel capacity ([1])
