@@ -11,7 +11,7 @@ use std::task::{Context, Poll};
 
 use bytes::BufMut;
 use futures::TryStream;
-use pin_project::{pin_project, project};
+use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use serde::de;
@@ -22,13 +22,13 @@ pub enum Addr {
     Unix(PathBuf),
 }
 
-#[pin_project]
+#[pin_project(project = ListenerProj)]
 pub enum Listener<T = tokio::net::TcpListener, U = unix::MaybeUnixListener> {
     Tcp(#[pin] T),
     Unix(#[pin] U),
 }
 
-#[pin_project]
+#[pin_project(project = StreamProj)]
 pub enum Stream<T, U> {
     Tcp(#[pin] T),
     Unix(#[pin] U),
@@ -65,14 +65,12 @@ where
 {
     type Item = Result<Stream<T::Ok, U::Ok>, T::Error>;
 
-    #[project]
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        #[project]
         match self.project() {
-            Listener::Tcp(l) => l
+            ListenerProj::Tcp(l) => l
                 .try_poll_next(cx)
                 .map(|result| result.map(|opt| opt.map(Stream::Tcp))),
-            Listener::Unix(l) => l
+            ListenerProj::Unix(l) => l
                 .try_poll_next(cx)
                 .map(|result| result.map(|opt| opt.map(Stream::Unix))),
         }
@@ -106,16 +104,14 @@ where
     T: AsyncRead,
     U: AsyncRead,
 {
-    #[project]
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        #[project]
         match self.project() {
-            Stream::Tcp(s) => s.poll_read(cx, buf),
-            Stream::Unix(s) => s.poll_read(cx, buf),
+            StreamProj::Tcp(s) => s.poll_read(cx, buf),
+            StreamProj::Unix(s) => s.poll_read(cx, buf),
         }
     }
 
@@ -126,16 +122,14 @@ where
         }
     }
 
-    #[project]
     fn poll_read_buf<B: BufMut>(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut B,
     ) -> Poll<io::Result<usize>> {
-        #[project]
         match self.project() {
-            Stream::Tcp(s) => s.poll_read_buf(cx, buf),
-            Stream::Unix(s) => s.poll_read_buf(cx, buf),
+            StreamProj::Tcp(s) => s.poll_read_buf(cx, buf),
+            StreamProj::Unix(s) => s.poll_read_buf(cx, buf),
         }
     }
 }
@@ -145,47 +139,39 @@ where
     T: AsyncWrite,
     U: AsyncWrite,
 {
-    #[project]
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        #[project]
         match self.project() {
-            Stream::Tcp(s) => s.poll_write(cx, buf),
-            Stream::Unix(s) => s.poll_write(cx, buf),
+            StreamProj::Tcp(s) => s.poll_write(cx, buf),
+            StreamProj::Unix(s) => s.poll_write(cx, buf),
         }
     }
 
-    #[project]
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        #[project]
         match self.project() {
-            Stream::Tcp(s) => s.poll_flush(cx),
-            Stream::Unix(s) => s.poll_flush(cx),
+            StreamProj::Tcp(s) => s.poll_flush(cx),
+            StreamProj::Unix(s) => s.poll_flush(cx),
         }
     }
 
-    #[project]
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        #[project]
         match self.project() {
-            Stream::Tcp(s) => s.poll_shutdown(cx),
-            Stream::Unix(s) => s.poll_shutdown(cx),
+            StreamProj::Tcp(s) => s.poll_shutdown(cx),
+            StreamProj::Unix(s) => s.poll_shutdown(cx),
         }
     }
 
-    #[project]
     fn poll_write_buf<B: bytes::Buf>(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut B,
     ) -> Poll<io::Result<usize>> {
-        #[project]
         match self.project() {
-            Stream::Tcp(s) => s.poll_write_buf(cx, buf),
-            Stream::Unix(s) => s.poll_write_buf(cx, buf),
+            StreamProj::Tcp(s) => s.poll_write_buf(cx, buf),
+            StreamProj::Unix(s) => s.poll_write_buf(cx, buf),
         }
     }
 }

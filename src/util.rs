@@ -18,7 +18,7 @@ use anyhow::Context as _;
 use bytes::Buf;
 use futures::{ready, Future};
 use http_body::Body;
-use pin_project::{pin_project, project};
+use pin_project::pin_project;
 use serde::{de, Deserialize};
 use tower_service::Service;
 
@@ -46,7 +46,7 @@ pub enum Maybe<T> {
 pub enum Never {}
 
 /// A future that resolves to `(F::Output, T).
-#[pin_project]
+#[pin_project(project = ResolveWithProj)]
 pub struct ResolveWith<F, T> {
     #[pin]
     future: F,
@@ -170,10 +170,8 @@ where
 {
     type Output = (F::Output, T);
 
-    #[project]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        #[project]
-        let ResolveWith { future, value } = self.project();
+        let ResolveWithProj { future, value } = self.project();
 
         future.poll(cx).map(|x| {
             let y = value.take().expect("polled `ResolveWith` after completion");

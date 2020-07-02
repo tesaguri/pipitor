@@ -69,7 +69,7 @@ use http::header::{HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING
 use http::{Method, StatusCode, Uri};
 use http_body::Body;
 use oauth1::Credentials;
-use pin_project::{pin_project, project};
+use pin_project::pin_project;
 use serde::{de, Deserialize};
 use tower_util::{Oneshot, ServiceExt};
 
@@ -88,7 +88,7 @@ pub struct ResponseFuture<T, S: HttpService<B>, B> {
     marker: PhantomData<fn() -> T>,
 }
 
-#[pin_project]
+#[pin_project(project = ResponseFutureInnerProj)]
 enum ResponseFutureInner<S: HttpService<B>, B> {
     Resp(#[pin] Oneshot<IntoService<S>, http::Request<B>>),
     Body {
@@ -186,55 +186,49 @@ where
 {
     type Output = Result<Response<T>, Error<S::Error, <S::ResponseBody as Body>::Error>>;
 
-    #[project]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         trace_fn!(ResponseFuture::<T, S, B>::poll);
 
-        #[project]
-        match self.as_mut().project().inner.project() {
-            ResponseFutureInner::Resp(res) => {
-                let res = ready!(res.poll(cx).map_err(Error::Service))?;
+        if let ResponseFutureInnerProj::Resp(res) = self.as_mut().project().inner.project() {
+            let res = ready!(res.poll(cx).map_err(Error::Service))?;
 
-                let gzip = res
-                    .headers()
-                    .get_all(CONTENT_ENCODING)
-                    .iter()
-                    .any(|e| e == "gzip");
+            let gzip = res
+                .headers()
+                .get_all(CONTENT_ENCODING)
+                .iter()
+                .any(|e| e == "gzip");
 
-                self.as_mut()
-                    .project()
-                    .inner
-                    .set(ResponseFutureInner::Body {
-                        status: res.status(),
-                        rate_limit: rate_limit(&res),
-                        body: ConcatBody::new(res.into_body()),
-                        gzip,
-                    });
-            }
-            _ => {}
+            self.as_mut()
+                .project()
+                .inner
+                .set(ResponseFutureInner::Body {
+                    status: res.status(),
+                    rate_limit: rate_limit(&res),
+                    body: ConcatBody::new(res.into_body()),
+                    gzip,
+                });
         }
 
-        #[project]
-        match self.project().inner.project() {
-            ResponseFutureInner::Body {
-                status,
-                rate_limit,
-                body,
-                gzip,
-            } => {
-                let body = ready!(body.poll(cx).map_err(Error::Body))?;
+        if let ResponseFutureInnerProj::Body {
+            status,
+            rate_limit,
+            body,
+            gzip,
+        } = self.project().inner.project()
+        {
+            let body = ready!(body.poll(cx).map_err(Error::Body))?;
 
-                trace!("done reading response body");
+            trace!("done reading response body");
 
-                Poll::Ready(make_response(*status, *rate_limit, &body, |body| {
-                    if *gzip {
-                        json::from_reader(GzDecoder::new(body)).map_err(Error::Deserializing)
-                    } else {
-                        json::from_slice(body).map_err(Error::Deserializing)
-                    }
-                }))
-            }
-            _ => unreachable!(),
+            Poll::Ready(make_response(*status, *rate_limit, &body, |body| {
+                if *gzip {
+                    json::from_reader(GzDecoder::new(body)).map_err(Error::Deserializing)
+                } else {
+                    json::from_slice(body).map_err(Error::Deserializing)
+                }
+            }))
+        } else {
+            unreachable!();
         }
     }
 }

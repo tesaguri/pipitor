@@ -12,7 +12,7 @@ use futures::task::AtomicWaker;
 use futures::{ready, Future, FutureExt, Stream, StreamExt};
 use http_body::Body;
 use oauth1::Credentials;
-use pin_project::{pin_project, project};
+use pin_project::pin_project;
 use tokio::time::Delay;
 
 use crate::manifest;
@@ -32,7 +32,7 @@ where
     inner: Option<Inner<S, B>>,
 }
 
-#[pin_project]
+#[pin_project(project = InnerProj)]
 struct Inner<S, B>
 where
     S: HttpService<B>,
@@ -61,7 +61,7 @@ struct SenderTask<S, B> {
     timer: Delay,
 }
 
-#[pin_project]
+#[pin_project(project = BackfillProj)]
 struct Backfill<S, B>
 where
     S: HttpService<B>,
@@ -183,17 +183,14 @@ where
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>>,
 {
-    #[project]
     fn poll_next_backfill(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Vec<Tweet>>> {
-        #[project]
-        let Inner {
+        let InnerProj {
             sender,
             backfill: mut backfill_opt,
             ..
         } = self.project();
 
-        #[project]
-        let Backfill {
+        let BackfillProj {
             since_id: backfill_since_id,
             mut response,
         } = if let Some(bf) = backfill_opt.as_mut().as_pin_mut() {
