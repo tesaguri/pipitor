@@ -2,7 +2,7 @@ macro_rules! api_requests {
     (
         $method:ident $uri:expr => $Data:ty;
         $(#[$attr:meta])*
-        pub struct $Name:ident $(<$($lt:lifetime),*>)? {
+        $vis:vis struct $Name:ident $(<$($lt:lifetime),*>)? {
             $($(#[$req_attr:meta])* $required:ident: $req_ty:ty),*;
             $($(#[$opt_attr:meta])* $optional:ident: $opt_ty:ty $(= $default:expr)?),* $(,)?
         }
@@ -10,7 +10,7 @@ macro_rules! api_requests {
     ) => {
         $(#[$attr])*
         #[derive(oauth1::Authorize)]
-        pub struct $Name $(<$($lt),*>)? {
+        $vis struct $Name $(<$($lt),*>)? {
             $($(#[$req_attr])* $required: $req_ty,)*
             $($(#[$opt_attr])* $optional: $opt_ty,)*
         }
@@ -76,6 +76,7 @@ use tower_util::{Oneshot, ServiceExt};
 use crate::util::http_service::{HttpService, IntoService};
 use crate::util::ConcatBody;
 
+#[derive(Debug)]
 pub struct Response<T> {
     pub data: T,
     pub rate_limit: Option<RateLimit>,
@@ -164,10 +165,7 @@ pub trait Request: oauth1::Authorize {
             token.as_ref(),
         );
 
-        ResponseFuture {
-            inner: ResponseFutureInner::Resp(http.into_service().oneshot(req.map(Into::into))),
-            marker: PhantomData,
-        }
+        ResponseFuture::new(req.map(Into::into), http)
     }
 }
 
@@ -176,6 +174,18 @@ impl<T> Deref for Response<T> {
 
     fn deref(&self) -> &T {
         &self.data
+    }
+}
+
+impl<T: de::DeserializeOwned, S, B> ResponseFuture<T, S, B>
+where
+    S: HttpService<B>,
+{
+    fn new(req: http::Request<B>, http: S) -> Self {
+        ResponseFuture {
+            inner: ResponseFutureInner::Resp(http.into_service().oneshot(req)),
+            marker: PhantomData,
+        }
     }
 }
 
@@ -356,4 +366,109 @@ fn header<T>(res: &http::Response<T>, name: &str) -> Option<u64> {
     res.headers()
         .get(name)
         .and_then(|value| atoi::atoi(value.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::TryFutureExt;
+    use std::convert::Infallible;
+    use tower_service::Service;
+
+    use super::*;
+
+    struct MapErr<S, F> {
+        service: S,
+        f: F,
+    }
+
+    struct MockBody<'a>(Option<&'a [u8]>);
+
+    impl<S, F> MapErr<S, F> {
+        fn new<T, E>(service: S, f: F) -> Self
+        where
+            S: Service<T>,
+            F: FnOnce(S::Error) -> E + Clone,
+        {
+            MapErr { service, f }
+        }
+    }
+
+    impl<S, F, T, E> Service<T> for MapErr<S, F>
+    where
+        S: Service<T>,
+        F: FnOnce(S::Error) -> E + Clone,
+    {
+        type Response = S::Response;
+        type Error = E;
+        type Future = futures::future::MapErr<S::Future, F>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.service.poll_ready(cx).map_err(self.f.clone())
+        }
+
+        fn call(&mut self, req: T) -> Self::Future {
+            self.service.call(req).map_err(self.f.clone())
+        }
+    }
+
+    impl<'a> Body for MockBody<'a> {
+        type Data = &'a [u8];
+        type Error = Infallible;
+
+        fn poll_data(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+            Poll::Ready(self.0.take().map(Ok))
+        }
+
+        fn poll_trailers(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
+            Poll::Ready(Ok(None))
+        }
+    }
+
+    #[tokio::test]
+    async fn parse_errors() {
+        api_requests! {
+            GET "https://api.twitter.com/1.1/test/foo.json" => de::IgnoredAny;
+            struct Foo {
+                param: u32;
+            }
+        }
+
+        let client = &Credentials::new("", "");
+        let token = &Credentials::new("", "");
+
+        let (http, mut handle) = tower_test::mock::pair::<http::Request<Vec<u8>>, _>();
+        let http = MapErr::new(http, |e| -> Infallible { panic!("{:?}", e) });
+
+        let res_fut = tokio::spawn(Foo::new(42).send(client, token, http));
+
+        let (_req, tx) = handle.next_request().await.unwrap();
+        let payload = br#"{"errors":[{"code":104,"message":"You aren't allowed to add members to this list."}]}"#;
+        let res = http::Response::builder()
+            .status(http::StatusCode::FORBIDDEN)
+            .body(MockBody(Some(payload)))
+            .unwrap();
+        tx.send_response(res);
+
+        match res_fut.await.unwrap().unwrap_err() {
+            Error::Twitter(TwitterErrors {
+                status: http::StatusCode::FORBIDDEN,
+                errors,
+                rate_limit: None,
+            }) => {
+                assert_eq!(errors.len(), 1);
+                assert_eq!(errors[0].code, 104);
+                assert_eq!(
+                    errors[0].message,
+                    "You aren't allowed to add members to this list.",
+                );
+            }
+            e => panic!("{:?}", e),
+        };
+    }
 }

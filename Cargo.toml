@@ -74,3 +74,7 @@ native-tls = ["hyper-tls"]
 openssl-vendored = ["hyper-tls/vendored"]
 rustls = ["ct-logs", "hyper-rustls", "rustls-pkg", "webpki-roots"]
 sqlite-bundled = ["libsqlite3-sys/bundled"]
+
+[dev-dependencies]
+tokio = { version = "0.2", features = ["macros"] }
+tower-test = "0.3"
