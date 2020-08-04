@@ -88,6 +88,6 @@ where
             self.timer = None;
         }
 
-        Poll::Pending
+        self.poll(cx)
     }
 }

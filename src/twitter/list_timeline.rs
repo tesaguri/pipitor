@@ -341,7 +341,8 @@ where
         let next_tick = self.timer.deadline() + Duration::from_secs(1);
         self.timer.reset(cmp::max(next_tick, now.into()));
 
-        Poll::Pending
+        // `poll` `self.timer` again because it forgets the current task upon `reset`.
+        self.poll(cx)
     }
 }
 
