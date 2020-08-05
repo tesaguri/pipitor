@@ -36,14 +36,3 @@ pipitor run
 ## License
 
 This project is licensed under the GNU Affero General Public License, Version 3 ([LICENSE](LICENSE) or https://www.gnu.org/licenses/agpl-3.0.html).
-
-The CI configuration (`.travis.yml` and `scripts/*`) was generated with [crossgen](https://github.com/yoshuawuyts/crossgen),
-based on [trust](https://github.com/japaric/trust) template written by Jorge Aparicio ([@japaric](https://github.com/japaric)).
-The trust template is licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](https://github.com/japaric/trust/blob/v0.1.2/LICENSE-APACHE) or
-  https://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](https://github.com/japaric/trust/blob/v0.1.2/LICENSE-MIT) or
-  https://opensource.org/licenses/MIT)
-
-at your option.
