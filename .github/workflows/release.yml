@@ -9,29 +9,29 @@ on:
       - release-test
 
 jobs:
-  prepare:
-    name: Prepare a release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.release.outputs.upload_url }}
-    steps:
-      - uses: actions/checkout@v2
-      - name: Get tag message
-        id: tag
-        run: echo "::set-output name=message::$(git tag -l --format='%(contents)' '${{ github.ref }}' | tail -n +3 | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')"
-      - name: Create a GitHub release
-        id: release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Version ${{ github.ref }}
-          body: ${{ steps.tag.outputs.message }}
-          draft: true
+  # prepare:
+  #   name: Prepare a release
+  #   runs-on: ubuntu-latest
+  #   outputs:
+  #     upload_url: ${{ steps.release.outputs.upload_url }}
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - name: Get tag message
+  #       id: tag
+  #       run: echo "::set-output name=message::$(git tag -l --format='%(contents)' '${{ github.ref }}' | tail -n +3 | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')"
+  #     - name: Create a GitHub release
+  #       id: release
+  #       uses: actions/create-release@v1
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       with:
+  #         tag_name: ${{ github.ref }}
+  #         release_name: Version ${{ github.ref }}
+  #         body: ${{ steps.tag.outputs.message }}
+  #         draft: true
 
   build:
-    needs: prepare
+    # needs: prepare
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -91,32 +91,32 @@ jobs:
         # env:
         #   CC_x86_64_unknown_linux_musl: x86_64-linux-musl-gcc
         #   RUSTFLAGS: -C codegen-units=1 -C linker-plugin-lto
-      - name: Archive the binary
-        run: |
-          TAG=$(echo '${{ github.ref }}' | sed 's/^refs\/tags\///')
-          NAME="pipitor-$TAG-${{ matrix.target }}"
-          if [ '${{ runner.os }}' = Windows ]; then
-            ASSET_NAME=$NAME.zip
-            MIME=application/zip
-            # ln 'target/${{ matrix.target }}/release/pipitor.exe' .
-            cp 'target/${{ matrix.target }}/debug/pipitor.exe' .
-            7z a $ASSET_NAME pipitor.exe
-          else
-            ASSET_NAME=$NAME.gz
-            MIME=application/gzip
-            # ln 'target/${{ matrix.target }}/release/pipitor' .
-            cp 'target/${{ matrix.target }}/debug/pipitor' .
-            tar -czf $ASSET_NAME pipitor
-          fi
-          echo "::set-env name=ASSET_NAME::$ASSET_NAME"
-          echo "::set-env name=MIME::$MIME"
-        shell: bash
-      - name: Upload the archive
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.prepare.outputs.upload_url }}
-          asset_path: ${{ env.ASSET_NAME }}
-          asset_name: ${{ env.ASSET_NAME }}
-          asset_content_type: ${{ env.MIME }}
+      # - name: Archive the binary
+      #   run: |
+      #     TAG=$(echo '${{ github.ref }}' | sed 's/^refs\/tags\///')
+      #     NAME="pipitor-$TAG-${{ matrix.target }}"
+      #     if [ '${{ runner.os }}' = Windows ]; then
+      #       ASSET_NAME=$NAME.zip
+      #       MIME=application/zip
+      #       # ln 'target/${{ matrix.target }}/release/pipitor.exe' .
+      #       cp 'target/${{ matrix.target }}/debug/pipitor.exe' .
+      #       7z a $ASSET_NAME pipitor.exe
+      #     else
+      #       ASSET_NAME=$NAME.gz
+      #       MIME=application/gzip
+      #       # ln 'target/${{ matrix.target }}/release/pipitor' .
+      #       cp 'target/${{ matrix.target }}/debug/pipitor' .
+      #       tar -czf $ASSET_NAME pipitor
+      #     fi
+      #     echo "::set-env name=ASSET_NAME::$ASSET_NAME"
+      #     echo "::set-env name=MIME::$MIME"
+      #   shell: bash
+      # - name: Upload the archive
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ needs.prepare.outputs.upload_url }}
+      #     asset_path: ${{ env.ASSET_NAME }}
+      #     asset_name: ${{ env.ASSET_NAME }}
+      #     asset_content_type: ${{ env.MIME }}
