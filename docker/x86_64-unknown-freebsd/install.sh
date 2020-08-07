@@ -4,6 +4,7 @@ set -ex
 
 main() {
     local arch="$1"
+    local target="${arch}-unknown-freebsd10"
 
     local dependencies=(
         ca-certificates
@@ -28,7 +29,7 @@ main() {
     curl -sSfLO 'https://sqlite.org/2020/sqlite-autoconf-3320300.tar.gz'
     tar -xzf 'sqlite-autoconf-3320300.tar.gz'
     cd 'sqlite-autoconf-3320300'
-    ./configure --prefix="/usr/local/$arch-unknown-freebsd10"
+    ./configure --target="${target}" --prefix="/usr/local/$target"
     make install "-j$(nproc)"
 
     popd
