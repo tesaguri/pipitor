@@ -86,8 +86,8 @@ jobs:
           command: test
           args: --lib --no-default-features --features=${{ matrix.features }}
 
-  prepare-release:
-    name: Prepare a release
+  build:
+    name: Build release artifacts
     # XXX: Yes, I doubt if this is the best way of doing it...
     # Ideally, we want it to match SemVer tag names.
     if: |
@@ -104,28 +104,6 @@ jobs:
       || startsWith(github.event.ref, 'refs/tags/v9')
       || github.event.ref == 'refs/heads/release-test'
     needs: test
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.release.outputs.upload_url }}
-    steps:
-      - uses: actions/checkout@v2
-      - name: Get tag message
-        id: tag
-        run: echo "::set-output name=message::$(git tag -l --format='%(contents)' '${{ github.ref }}' | tail -n +3 | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')"
-      - name: Create a GitHub release
-        id: release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Version ${{ github.ref }}
-          body: ${{ steps.tag.outputs.message }}
-          draft: true
-
-  build:
-    name: Build release artifacts
-    needs: prepare-release
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -189,24 +167,38 @@ jobs:
           NAME="pipitor-$TAG-${{ matrix.target }}"
           if [ '${{ runner.os }}' = Windows ]; then
             ASSET_NAME=$NAME.zip
-            MIME=application/zip
             ln 'target/${{ matrix.target }}/release/pipitor.exe' .
             7z a $ASSET_NAME pipitor.exe
           else
             ASSET_NAME=$NAME.gz
-            MIME=application/gzip
             ln 'target/${{ matrix.target }}/release/pipitor' .
             tar -czf $ASSET_NAME pipitor
           fi
           echo "::set-output name=asset::$ASSET_NAME"
-          echo "::set-output name=mime::$MIME"
         shell: bash
-      - name: Upload the archive
-        uses: actions/upload-release-asset@v1
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          path: ${{ steps.archive.outputs.asset }}
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Get tag message
+        run: echo "::set-env name=MESSAGE::$(git tag -l --format='%(contents)' "${GITHUB_REF##*/}" | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')"
+      - uses: actions/download-artifact@v2
+      - name: Create release and upload assets
+        # Reference: <https://github.com/actions/upload-release-asset/issues/28#issuecomment-617208601>
+        run: |
+          set -x
+          assets=()
+          for asset in *.{gz,zip}; do
+            assets+=('--attach' "$asset")
+          done
+          hub release create --draft "${assets[@]}" --message "${MESSAGE:-Test release}" "${GITHUB_REF##*/}"
+        working-directory: artifact
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.prepare-release.outputs.upload_url }}
-          asset_path: ${{ steps.archive.outputs.asset }}
-          asset_name: ${{ steps.archive.outputs.asset }}
-          asset_content_type: ${{ steps.archive.outputs.mime }}
