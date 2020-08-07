@@ -183,6 +183,7 @@ jobs:
           CARGO_INCREMENTAL: 0
           RUSTFLAGS: -C codegen-units=1 -C embed-bitcode
       - name: Archive the binary
+        id: archive
         run: |
           TAG=$(echo '${{ github.ref }}' | sed -E 's/^refs\/[^\/]+\///')
           NAME="pipitor-$TAG-${{ matrix.target }}"
@@ -197,8 +198,8 @@ jobs:
             ln 'target/${{ matrix.target }}/debug/pipitor' .
             tar -czf $ASSET_NAME pipitor
           fi
-          echo "::set-env name=ASSET_NAME::$ASSET_NAME"
-          echo "::set-env name=MIME::$MIME"
+          echo "::set-output name=asset::$ASSET_NAME"
+          echo "::set-output name=mime::$MIME"
         shell: bash
       - name: Upload the archive
         uses: actions/upload-release-asset@v1
@@ -206,6 +207,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.prepare.outputs.upload_url }}
-          asset_path: ${{ env.ASSET_NAME }}
-          asset_name: ${{ env.ASSET_NAME }}
-          asset_content_type: ${{ env.MIME }}
+          asset_path: ${{ steps.archive.outputs.asset }}
+          asset_name: ${{ steps.archive.outputs.asset }}
+          asset_content_type: ${{ steps.archive.outputs.mime }}
