@@ -187,8 +187,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Get tag message
-        run: echo "::set-env name=MESSAGE::$(git tag -l --format='%(contents)' "${GITHUB_REF##*/}" | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')"
       - uses: actions/download-artifact@v2
       - name: Create release and upload assets
         # Reference: <https://github.com/actions/upload-release-asset/issues/28#issuecomment-617208601>
@@ -198,7 +196,8 @@ jobs:
           for asset in *.{gz,zip}; do
             assets+=('--attach' "$asset")
           done
-          hub release create --draft "${assets[@]}" --message "${MESSAGE:-Test release}" "${GITHUB_REF##*/}"
+          message=$(git tag -l --format='%(contents)' "${GITHUB_REF##*/}" | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')
+          hub release create --draft "${assets[@]}" --message "${message:-Test release}" "${GITHUB_REF##*/}"
         working-directory: artifact
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
