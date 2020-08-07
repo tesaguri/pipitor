@@ -15,12 +15,12 @@ jobs:
           - windows-latest
         toolchain:
           - stable
-          # - beta
-          # - nightly
+          - beta
+          - nightly
         features:
           -
-          # - native-tls
-          # - rustls
+          - native-tls
+          - rustls
         include:
           - os: ubuntu-latest
             toolchain: stable
