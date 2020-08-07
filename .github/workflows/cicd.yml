@@ -190,12 +190,12 @@ jobs:
           if [ '${{ runner.os }}' = Windows ]; then
             ASSET_NAME=$NAME.zip
             MIME=application/zip
-            ln 'target/${{ matrix.target }}/debug/pipitor.exe' .
+            ln 'target/${{ matrix.target }}/release/pipitor.exe' .
             7z a $ASSET_NAME pipitor.exe
           else
             ASSET_NAME=$NAME.gz
             MIME=application/gzip
-            ln 'target/${{ matrix.target }}/debug/pipitor' .
+            ln 'target/${{ matrix.target }}/release/pipitor' .
             tar -czf $ASSET_NAME pipitor
           fi
           echo "::set-output name=asset::$ASSET_NAME"
