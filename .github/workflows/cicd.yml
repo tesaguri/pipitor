@@ -206,7 +206,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.prepare.outputs.upload_url }}
+          upload_url: ${{ needs.prepare-release.outputs.upload_url }}
           asset_path: ${{ steps.archive.outputs.asset }}
           asset_name: ${{ steps.archive.outputs.asset }}
           asset_content_type: ${{ steps.archive.outputs.mime }}
