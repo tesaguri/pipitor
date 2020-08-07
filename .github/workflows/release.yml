@@ -78,6 +78,8 @@ jobs:
           use-tool-cache: true
       - run: echo "::set-env name=SQLITE3_LIB_DIR::${Env:VCPKG_INSTALLATION_ROOT}\installed\x64-windows\lib"
         if: runner.os == 'Windows'
+      - run: echo "::set-env name=SQLITE3_LIB_DIR::/usr/local/x86_64-unknown-freebsd10/lib"
+        if: matrix.target == 'x86_64-unknown-freebsd'
       - name: Build
         uses: actions-rs/cargo@v1
         with:
