@@ -14,6 +14,7 @@ main() {
     local purge_list=()
 
     apt-get update
+    apt-get install --no-install-recommends --assume-yes libsqlite3-dev
     for dep in "${dependencies[@]}"; do
         if ! dpkg -L "$dep"; then
             apt-get install --no-install-recommends --assume-yes "$dep"
