@@ -31,10 +31,10 @@ jobs:
           draft: true
 
   build:
+    name: Build release artifacts
     needs: prepare
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         target:
           - x86_64-unknown-linux-musl
@@ -83,12 +83,12 @@ jobs:
       - name: Build
         uses: actions-rs/cargo@v1
         with:
-          command: build
-          # args: --verbose --bin pipitor --release --target '${{ matrix.target }}' --no-default-features --features=rustls
-          args: --verbose --bin pipitor --target '${{ matrix.target }}' --no-default-features --features=rustls
+          command: rustc
+          args: --verbose --bin pipitor --release --target '${{ matrix.target }}' --no-default-features --features=rustls -- -C lto
           use-cross: ${{ matrix.use_cross }}
-        # env:
-        #   RUSTFLAGS: -C codegen-units=1 -C linker-plugin-lto
+        env:
+          CARGO_INCREMENTAL: 0
+          RUSTFLAGS: -C codegen-units=1 -C embed-bitcode
       - name: Archive the binary
         run: |
           TAG=$(echo '${{ github.ref }}' | sed -E 's/^refs\/[^\/]+\///')
@@ -97,13 +97,11 @@ jobs:
             ASSET_NAME=$NAME.zip
             MIME=application/zip
             ln 'target/${{ matrix.target }}/debug/pipitor.exe' .
-            # cp 'target/${{ matrix.target }}/debug/pipitor.exe' .
             7z a $ASSET_NAME pipitor.exe
           else
             ASSET_NAME=$NAME.gz
             MIME=application/gzip
             ln 'target/${{ matrix.target }}/debug/pipitor' .
-            # cp 'target/${{ matrix.target }}/debug/pipitor' .
             tar -czf $ASSET_NAME pipitor
           fi
           echo "::set-env name=ASSET_NAME::$ASSET_NAME"
