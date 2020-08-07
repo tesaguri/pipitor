@@ -29,7 +29,7 @@ main() {
     curl -sSfLO 'https://sqlite.org/2020/sqlite-autoconf-3320300.tar.gz'
     tar -xzf 'sqlite-autoconf-3320300.tar.gz'
     cd 'sqlite-autoconf-3320300'
-    ./configure --target="${target}" --prefix="/usr/local/$target"
+    ./configure --host="${target}" --prefix="/usr/local/$target"
     make install "-j$(nproc)"
 
     popd
