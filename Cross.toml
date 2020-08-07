@@ -1,3 +1,9 @@
+[build.env]
+passthrough = [
+    "CARGO_INCREMENTAL",
+    "RUSTFLAGS",
+]
+
 [target.armv7-unknown-linux-gnueabihf]
 image = "tesaguri/pipitor:armv7-unknown-linux-gnueabihf-0.1.0"
 
