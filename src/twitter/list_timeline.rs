@@ -132,7 +132,7 @@ where
     ) -> Poll<Option<Vec<Tweet>>> {
         match self.project().inner.as_pin_mut() {
             Some(inner) => inner.poll_next_backfill(cx),
-            None => return Poll::Ready(None),
+            None => Poll::Ready(None),
         }
     }
 }

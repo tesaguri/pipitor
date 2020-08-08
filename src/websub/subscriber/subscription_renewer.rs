@@ -58,13 +58,11 @@ where
                 }
             }
             timer
+        } else if let Some(expires_at) = service.decode_expires_at() {
+            self.timer = Some(tokio::time::delay_until(refresh_time(expires_at).into()));
+            self.timer.as_mut().unwrap()
         } else {
-            if let Some(expires_at) = service.decode_expires_at() {
-                self.timer = Some(tokio::time::delay_until(refresh_time(expires_at).into()));
-                self.timer.as_mut().unwrap()
-            } else {
-                return Poll::Pending;
-            }
+            return Poll::Pending;
         };
 
         ready!(timer.poll_unpin(cx));

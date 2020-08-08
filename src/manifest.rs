@@ -11,6 +11,7 @@ use smallvec::{smallvec, SmallVec};
 use crate::feed::Entry;
 use crate::twitter::Tweet;
 
+#[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Manifest {
     #[serde(default)]
@@ -21,17 +22,14 @@ pub struct Manifest {
     pub twitter: Twitter,
     #[serde(default)]
     pub skip_duplicate: bool,
-    #[serde(skip)]
-    _non_exhaustive: (),
 }
 
+#[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Rule {
     #[serde(flatten)]
     pub route: Arc<Route>,
     pub topics: Box<[TopicId<'static>]>,
-    #[serde(skip)]
-    _non_exhaustive: (),
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -44,19 +42,18 @@ pub struct Route {
     outbox: SmallVec<[Outbox; 1]>,
 }
 
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Outbox {
     Twitter(i64),
     None,
-    #[doc(hidden)]
-    _NonExhaustive(crate::util::Never),
 }
 
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct Filter {
     pub title: Regex,
     pub text: Option<Regex>,
-    _non_exhaustive: (),
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash)]
@@ -68,13 +65,12 @@ pub enum TopicId<'a> {
     _NonExhaustive(crate::util::Never),
 }
 
+#[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Twitter {
     pub user: i64,
     #[serde(default)]
     pub list: Option<TwitterList>,
-    #[serde(skip)]
-    _non_exhaustive: (),
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -163,11 +159,7 @@ impl Route {
 
 impl Filter {
     pub fn from_title(title: Regex) -> Self {
-        Filter {
-            title,
-            text: None,
-            _non_exhaustive: (),
-        }
+        Filter { title, text: None }
     }
 
     pub fn matches_entry(&self, entry: &Entry) -> bool {
@@ -211,11 +203,7 @@ impl<'de> Deserialize<'de> for Filter {
 
         Prototype::deserialize(d).map(|p| match p {
             Prototype::Title(title) => Filter::from_title(title),
-            Prototype::Composite { title, text } => Filter {
-                title,
-                text,
-                _non_exhaustive: (),
-            },
+            Prototype::Composite { title, text } => Filter { title, text },
         })
     }
 }

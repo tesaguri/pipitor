@@ -134,7 +134,6 @@ where
                     tokio::spawn(fut);
                 }
                 Outbox::None => {}
-                _ => unimplemented!(),
             }
         }
 
@@ -266,7 +265,6 @@ where
                     retweets.push(twitter::statuses::Retweet::new(tweet.id).send(core, user));
                 }
                 Outbox::None => {}
-                _ => unimplemented!(),
             }
         }
 

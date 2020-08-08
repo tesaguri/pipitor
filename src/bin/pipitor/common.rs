@@ -25,7 +25,7 @@ impl Opt {
         self.manifest_path
             .as_ref()
             .map(AsRef::as_ref)
-            .unwrap_or("Pipitor.toml".as_ref())
+            .unwrap_or_else(|| "Pipitor.toml".as_ref())
     }
 }
 

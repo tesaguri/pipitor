@@ -17,6 +17,7 @@ pub struct Entry {
     pub updated: Option<i64>,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum RawFeed {
     Atom(atom::Feed),
     Rss(rss::Channel),
@@ -71,7 +72,7 @@ impl From<atom::Entry> for Entry {
         let link = links
             .iter()
             .find(|l| l.rel() == "alternate")
-            .or(links.first())
+            .or_else(|| links.first())
             .map(|l| l.href().to_owned());
         Entry {
             title: Some(entry.title),

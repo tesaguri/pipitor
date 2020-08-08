@@ -194,6 +194,7 @@ where
     S: HttpService<B>,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
+    #[allow(clippy::type_complexity)]
     type Output = Result<Response<T>, Error<S::Error, <S::ResponseBody as Body>::Error>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -347,7 +348,7 @@ where
                 CONTENT_TYPE,
                 HeaderValue::from_static("application/x-www-form-urlencoded"),
             )
-            .body(data.into_bytes().into())
+            .body(data.into_bytes())
             .unwrap()
     } else {
         req.uri(data).body(Vec::default()).unwrap()
