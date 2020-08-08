@@ -1,0 +1,209 @@
+name: CI/CD
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        toolchain:
+          - stable
+          - beta
+          - nightly
+        features:
+          -
+          - native-tls
+          - rustls
+        include:
+          - os: ubuntu-latest
+            toolchain: stable
+            features:
+            components: rustfmt
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install extern libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install libsqlite3-dev
+      - name: Install extern libraries (Windows)
+        if: runner.os == 'Windows'
+        run: vcpkg install sqlite3:x64-windows
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          override: true
+          profile: minimal
+          components: rustfmt
+        id: toolchain
+      - name: Cache Cargo registry
+        uses: actions/cache@v2
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ runner.os }}-${{ matrix.features }}-${{ hashFiles('Cargo.*') }}
+          restore-keys: |
+            cargo-registry-${{ runner.os }}-${{ matrix.features }}-${{ hashFiles('Cargo.*') }}
+            cargo-registry-${{ runner.os }}-${{ matrix.features }}-
+            cargo-registry-${{ runner.os }}-
+            cargo-registry-
+      - name: Cache Cargo build
+        uses: actions/cache@v2
+        with:
+          path: target
+          key: cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.*') }}
+          restore-keys: |
+            cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.*') }}
+            cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ matrix.features }}-
+            cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-
+      - name: Check format
+        if: ${{ contains(matrix.components, 'rustfmt') }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: -- --check
+      - run: echo "::set-env name=SQLITE3_LIB_DIR::${Env:VCPKG_INSTALLATION_ROOT}\installed\x64-windows\lib"
+        if: ${{ runner.os == 'Windows' }}
+      - name: Build library
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --lib --verbose --no-default-features --features=${{ matrix.features }}
+      - name: Build all
+        if: ${{ matrix.features != '' }}
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose --no-default-features --features=${{ matrix.features }}
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --lib --no-default-features --features=${{ matrix.features }}
+
+  build:
+    name: Build release artifacts
+    # XXX: Yes, I doubt if this is the best way of doing it...
+    # Ideally, we want it to match SemVer tag names.
+    if: |
+      github.event_name == 'push'
+      && startsWith(github.event.ref, 'refs/tags/v0.')
+      || startsWith(github.event.ref, 'refs/tags/v1')
+      || startsWith(github.event.ref, 'refs/tags/v2')
+      || startsWith(github.event.ref, 'refs/tags/v3')
+      || startsWith(github.event.ref, 'refs/tags/v4')
+      || startsWith(github.event.ref, 'refs/tags/v5')
+      || startsWith(github.event.ref, 'refs/tags/v6')
+      || startsWith(github.event.ref, 'refs/tags/v7')
+      || startsWith(github.event.ref, 'refs/tags/v8')
+      || startsWith(github.event.ref, 'refs/tags/v9')
+      || github.event.ref == 'refs/heads/release-test'
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - armv7-unknown-linux-gnueabihf
+          - x86_64-apple-darwin
+          - x86_64-pc-windows-msvc
+          - x86_64-unknown-freebsd
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: armv7-unknown-linux-gnueabihf
+            os: ubuntu-latest
+            use_cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-freebsd
+            os: ubuntu-latest
+            use_cross: true
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install packages (x86_64-unknown-linux-musl)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get install libsqlite3-dev musl-tools
+      - name: Install packages (Windows)
+        if: runner.os == 'Windows'
+        run: vcpkg install sqlite3:x64-windows
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          profile: minimal
+        id: toolchain
+      - name: Install `cross`
+        if: matrix.use_cross
+        uses: actions-rs/install@v0.1
+        with:
+          crate: cross
+          use-tool-cache: true
+      - run: echo "::set-env name=SQLITE3_LIB_DIR::${Env:VCPKG_INSTALLATION_ROOT}\installed\x64-windows\lib"
+        if: runner.os == 'Windows'
+      - run: echo "::set-env name=SQLITE3_LIB_DIR::/usr/local/x86_64-unknown-freebsd10/lib"
+        if: matrix.target == 'x86_64-unknown-freebsd'
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: rustc
+          args: --verbose --bin pipitor --release --target '${{ matrix.target }}' --no-default-features --features=rustls -- -C lto
+          use-cross: ${{ matrix.use_cross }}
+        env:
+          CARGO_INCREMENTAL: 0
+          RUSTFLAGS: -C codegen-units=1 -C embed-bitcode
+      - name: Archive the binary
+        id: archive
+        run: |
+          TAG=$(echo '${{ github.ref }}' | sed -E 's/^refs\/[^\/]+\///')
+          NAME="pipitor-$TAG-${{ matrix.target }}"
+          if [ '${{ runner.os }}' = Windows ]; then
+            ASSET_NAME=$NAME.zip
+            ln 'target/${{ matrix.target }}/release/pipitor.exe' .
+            7z a $ASSET_NAME pipitor.exe
+          else
+            ASSET_NAME=$NAME.gz
+            ln 'target/${{ matrix.target }}/release/pipitor' .
+            tar -czf $ASSET_NAME pipitor
+          fi
+          echo "::set-output name=asset::$ASSET_NAME"
+        shell: bash
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          path: ${{ steps.archive.outputs.asset }}
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/download-artifact@v2
+      - name: Create release and upload assets
+        # Reference: <https://github.com/actions/upload-release-asset/issues/28#issuecomment-617208601>
+        run: |
+          set -x
+          assets=()
+          for asset in *.{gz,zip}; do
+            assets+=('--attach' "$asset")
+          done
+          tag_name="${GITHUB_REF##*/}"
+          if [[ "$GITHUB_REF" == 'refs/tags/'* ]]; then
+            # Fetch the tagging message
+            git tag -d "$tag_name"
+            git fetch --no-tags origin "$tag_name:$GITHUB_REF"
+            message=$(git tag -l --format='%(contents)' "$tag_name" | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')
+          fi
+          hub release create --draft "${assets[@]}" --message "${message:-Test release}" "$tag_name"
+        working-directory: artifact
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
