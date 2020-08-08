@@ -4,7 +4,7 @@ use std::io;
 use std::path::Path;
 
 use futures::channel::mpsc;
-use futures::{FutureExt, Stream, StreamExt};
+use futures::{FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display, Formatter};
 use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -12,16 +12,13 @@ use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 #[cfg(unix)]
 mod imp {
     use std::io;
-    use std::marker::Unpin;
     use std::path::Path;
 
-    use futures::Stream;
-    use tokio::io::{AsyncRead, AsyncWrite};
     use tokio::net::UnixListener;
 
-    pub fn bind(
-        path: &Path,
-    ) -> io::Result<impl Stream<Item = io::Result<impl AsyncRead + AsyncWrite + Unpin>>> {
+    pub type Stream = tokio::net::UnixStream;
+
+    pub fn bind(path: &Path) -> io::Result<impl futures::Stream<Item = io::Result<Stream>>> {
         UnixListener::bind(path)
     }
 }
@@ -34,20 +31,20 @@ mod imp {
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
-    use futures::stream::{self, Stream};
     use tokio::io::{AsyncRead, AsyncWrite};
+
+    pub enum Stream {}
 
     pub fn bind(
         _: &Path,
-    ) -> io::Result<impl Stream<Item = io::Result<impl AsyncRead + AsyncWrite + Unpin>>> {
+    ) -> io::Result<impl futures::Stream<Item = io::Result<impl AsyncRead + AsyncWrite + Unpin>>>
+    {
         // TODO: replace this dummy impl. For Windows, named pipes or Unix sockets might be useful.
         // https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/
-        Ok(stream::pending::<Result<Dummy, _>>())
+        Ok(futures::stream::pending::<Result<Stream, _>>())
     }
 
-    enum Dummy {}
-
-    impl AsyncRead for Dummy {
+    impl AsyncRead for Stream {
         fn poll_read(
             self: Pin<&mut Self>,
             _: &mut Context,
@@ -57,7 +54,7 @@ mod imp {
         }
     }
 
-    impl AsyncWrite for Dummy {
+    impl AsyncWrite for Stream {
         fn poll_write(self: Pin<&mut Self>, _: &mut Context, _: &[u8]) -> Poll<io::Result<usize>> {
             match *self {}
         }
@@ -150,14 +147,14 @@ pub async fn respond<W: AsyncWrite + Unpin>(res: Response, mut w: W) {
     }
 }
 
-pub fn server<P>(path: &P) -> io::Result<impl Stream<Item = (Request, impl AsyncWrite)>>
+pub fn server<P>(path: &P) -> io::Result<impl futures::Stream<Item = (Request, impl AsyncWrite)>>
 where
     P: AsRef<Path>,
 {
     server_(path.as_ref())
 }
 
-fn server_(path: &Path) -> io::Result<impl Stream<Item = (Request, impl AsyncWrite)>> {
+fn server_(path: &Path) -> io::Result<impl futures::Stream<Item = (Request, impl AsyncWrite)>> {
     let mut listener = imp::bind(path)?;
     let (tx, rx) = mpsc::unbounded();
 
