@@ -196,8 +196,14 @@ jobs:
           for asset in *.{gz,zip}; do
             assets+=('--attach' "$asset")
           done
-          message=$(git tag -l --format='%(contents)' "${GITHUB_REF##*/}" | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')
-          hub release create --draft "${assets[@]}" --message "${message:-Test release}" "${GITHUB_REF##*/}"
+          tag_name="${GITHUB_REF##*/}"
+          if [[ "$GITHUB_REF" == 'refs/tags/'* ]]; then
+            # Fetch the tagging message
+            git tag -d "$tag_name"
+            git fetch --no-tags origin "$tag_name:$GITHUB_REF"
+            message=$(git tag -l --format='%(contents)' "$tag_name" | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')
+          fi
+          hub release create --draft "${assets[@]}" --message "${message:-Test release}" "$tag_name"
         working-directory: artifact
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
