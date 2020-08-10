@@ -82,16 +82,20 @@ pub struct TwitterList {
 
 impl Manifest {
     pub fn resolve_paths(&mut self, base: &str) {
-        let resolve = |path: &mut Box<str>| {
-            *path = Path::new(base)
-                .join(&**path)
-                .into_os_string()
-                .into_string()
-                .unwrap()
-                .into();
-        };
-        self.credentials.as_mut().map(resolve);
-        self.database_url.as_mut().map(resolve);
+        if let Some(new) = self
+            .credentials
+            .as_ref()
+            .and_then(|path| resolve_path(path, base))
+        {
+            self.credentials = Some(new);
+        }
+        if let Some(new) = self
+            .database_url
+            .as_ref()
+            .and_then(|path| resolve_database_uri(path, base))
+        {
+            self.database_url = Some(new);
+        }
     }
 
     pub fn credentials_path(&self) -> &str {
@@ -232,4 +236,75 @@ fn de_outbox<'de, D: de::Deserializer<'de>>(d: D) -> Result<SmallVec<[Outbox; 1]
         Prototype::One(o) => smallvec![o],
         Prototype::Seq(v) => v,
     })
+}
+
+fn resolve_path(path: &str, base: &str) -> Option<Box<str>> {
+    if Path::new(path).is_absolute() {
+        None
+    } else {
+        let new = Path::new(base)
+            .join(&path)
+            .into_os_string()
+            .into_string()
+            .unwrap()
+            .into();
+        Some(new)
+    }
+}
+
+fn resolve_database_uri(uri: &str, base: &str) -> Option<Box<str>> {
+    // <https://sqlite.org/c3ref/open.html>.
+    if uri.starts_with("file:///")
+        || uri.starts_with("file://localhost/")
+        || (uri.starts_with("file:/") && !uri[6..].starts_with('/'))
+        || uri == ":memory:"
+    {
+        // Absolute URI filename or in-memory database.
+        None
+    } else if uri.starts_with("file:") && !uri[5..].starts_with("//") {
+        // Relative URI filename
+        let path = &uri[5..];
+        let i = path
+            .find('?')
+            .or_else(|| path.find('#'))
+            .unwrap_or_else(|| path.len());
+        let (path, query_and_fragment) = path.split_at(i);
+        resolve_path(path, base).map(|new| {
+            ["file:", &new, query_and_fragment]
+                .iter()
+                .copied()
+                .collect::<String>()
+                .into()
+        })
+    } else {
+        // Ordinary filename
+        resolve_path(uri, base)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_uri() {
+        assert_eq!(resolve_database_uri("file:///absolute", "/base"), None);
+        assert_eq!(
+            resolve_database_uri("file://localhost/absolute", "/base"),
+            None,
+        );
+        assert_eq!(resolve_database_uri("file:/absolute", "/base"), None);
+        assert_eq!(
+            resolve_database_uri("file:relative", "/base").as_deref(),
+            Some("file:/base/relative"),
+        );
+        assert_eq!(
+            resolve_database_uri("file:relative?k=v", "base").as_deref(),
+            Some("file:base/relative?k=v"),
+        );
+        assert_eq!(
+            resolve_database_uri("file:relative#f", "/base").as_deref(),
+            Some("file:/base/relative#f"),
+        );
+    }
 }
