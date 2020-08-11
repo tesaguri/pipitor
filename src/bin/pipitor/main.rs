@@ -1,4 +1,6 @@
 #![recursion_limit = "512"]
+// <https://github.com/rust-lang/rust-clippy/issues/5594>
+#![allow(clippy::redundant_closure)]
 
 #[macro_use]
 extern crate diesel_migrations;

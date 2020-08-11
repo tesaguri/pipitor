@@ -52,6 +52,8 @@ fn deserialize_uri<'de, D: de::Deserializer<'de>>(d: D) -> Result<Uri, D::Error>
         fn visit_string<E: de::Error>(self, v: String) -> Result<Uri, E> {
             Uri::try_from(v).map_err(E::custom)
         }
+
+        serde_delegate!(visit_bytes visit_byte_buf);
     }
 
     d.deserialize_string(Visitor)

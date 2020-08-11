@@ -1,4 +1,33 @@
+macro_rules! serde_delegate {
+    (visit_str $($rest:tt)*) => {
+        fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+            self.visit_bytes(s.as_bytes())
+        }
+    };
+    (visit_bytes $($rest:tt)*) => {
+        fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+            std::str::from_utf8(v).map_err(E::custom).and_then(|s| self.visit_str(s))
+        }
+        serde_delegate!($($rest)*);
+    };
+    (visit_borrowed_bytes $($rest:tt)*) => {
+        fn visit_borrowed_bytes<E: de::Error>(self, v: &'de [u8]) -> Result<Self::Value, E> {
+            std::str::from_utf8(v).map_err(E::custom).and_then(|s| self.visit_borrowed_str(s))
+        }
+        serde_delegate!($($rest)*);
+    };
+    (visit_byte_buf $($rest:tt)*) => {
+        fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+            String::from_utf8(v).map_err(E::custom).and_then(|s| self.visit_string(s))
+        }
+        serde_delegate!($($rest)*);
+    };
+    () => {};
+}
+
 pub mod http_service;
+
+mod serde_wrapper;
 
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
@@ -9,6 +38,7 @@ use std::marker::{PhantomData, Unpin};
 use std::mem;
 use std::ops::Range;
 use std::pin::Pin;
+use std::str;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -25,6 +55,7 @@ use tower_service::Service;
 use crate::Credentials;
 
 pub use self::http_service::HttpService;
+pub use self::serde_wrapper::Serde;
 
 pub struct ArcService<S>(pub Arc<S>);
 
@@ -222,11 +253,11 @@ pub fn char_index_to_byte_index(s: &str, char_index: usize) -> Option<usize> {
 pub fn deserialize_from_str<'de, T, D>(d: D) -> Result<T, D::Error>
 where
     T: FromStr,
-    D: serde::Deserializer<'de>,
+    D: de::Deserializer<'de>,
 {
     struct Visitor<T>(PhantomData<T>);
 
-    impl<'de, T> serde::de::Visitor<'de> for Visitor<T>
+    impl<'de, T> de::Visitor<'de> for Visitor<T>
     where
         T: FromStr,
     {
@@ -236,10 +267,12 @@ where
             f.write_str(std::any::type_name::<T>())
         }
 
-        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
             v.parse()
-                .map_err(|_| E::invalid_value(serde::de::Unexpected::Str(v), &self))
+                .map_err(|_| E::invalid_value(de::Unexpected::Str(v), &self))
         }
+
+        serde_delegate!(visit_bytes);
     }
 
     d.deserialize_str(Visitor::<T>(PhantomData))

@@ -14,18 +14,51 @@ use pipitor::{Credentials, Manifest};
 
 #[derive(Clone, structopt::StructOpt)]
 pub struct Opt {
-    #[structopt(long = "manifest-path", help = "Path to Pipitor.toml")]
+    #[structopt(long = "manifest-path", help = "Path to the manifest file")]
     manifest_path: Option<String>,
 }
 
 pub struct RmGuard<P: AsRef<Path>>(pub P);
 
+const TOML: &str = "Pipitor.toml";
+const DHALL: &str = "Pipitor.dhall";
+
 impl Opt {
-    pub fn manifest_path(&self) -> &Path {
-        self.manifest_path
-            .as_ref()
-            .map(AsRef::as_ref)
-            .unwrap_or_else(|| "Pipitor.toml".as_ref())
+    pub fn search_manifest<F, T>(&self, f: F) -> io::Result<(T, &str)>
+    where
+        F: Fn(&Path) -> io::Result<T>,
+    {
+        if let Some(ref path) = self.manifest_path {
+            f(path.as_ref()).map(|t| (t, &**path))
+        } else {
+            match f(TOML.as_ref()) {
+                Ok(t) => Ok((t, TOML)),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    f(DHALL.as_ref()).map(|t| (t, DHALL))
+                }
+                Err(e) => Err(e),
+            }
+        }
+    }
+
+    pub fn open_manifest(&self) -> anyhow::Result<Manifest> {
+        // TODO: Open the file in `search_manifest` to avoid TOCTOU race condition
+        // if and when `serde_dhall` exposes the underlying `io::Error`
+        // or allows specifying the base directory of imports.
+        let path = self
+            .search_manifest(|path| fs::metadata(path))
+            .context("unable to access the manifest")?
+            .1;
+        let mut manifest: Manifest = if Path::new(path).extension() == Some("dhall".as_ref()) {
+            serde_dhall::from_file(path)
+                .parse()
+                .context("failed to parse the manifest")?
+        } else {
+            let buf = fs::read(path).context("could not open the manifest")?;
+            toml::from_slice(&buf).context("failed to parse the manifest")?
+        };
+        manifest.resolve_paths(path);
+        Ok(manifest)
     }
 }
 
@@ -50,22 +83,6 @@ fn ipc_path_(manifest_path: &Path) -> PathBuf {
     sock.push(name);
     sock.push(".sock");
     manifest_path.with_file_name(sock)
-}
-
-pub fn open_manifest(opt: &Opt) -> anyhow::Result<Manifest> {
-    let path: &str;
-    let mut manifest: Manifest = if let Some(ref p) = opt.manifest_path {
-        path = p;
-        let buf =
-            fs::read(path).with_context(|| format!("could not open the manifest at `{}`", path))?;
-        toml::from_slice(&buf).context("failed to parse the manifest file")?
-    } else {
-        path = "Pipitor.toml";
-        let buf = fs::read(path).context("could not open `Pipitor.toml`")?;
-        toml::from_slice(&buf).context("failed to parse `Pipitor.toml`")?
-    };
-    manifest.resolve_paths(path);
-    Ok(manifest)
 }
 
 pub fn open_credentials(opt: &Opt, manifest: &Manifest) -> anyhow::Result<Credentials> {

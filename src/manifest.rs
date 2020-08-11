@@ -1,15 +1,19 @@
 use std::borrow::Cow;
+use std::convert::TryFrom;
+use std::fmt;
 use std::num::NonZeroU64;
 use std::ops::DerefMut;
 use std::path::Path;
+use std::str;
 use std::sync::Arc;
 
 use regex::Regex;
-use serde::{de, Deserialize};
-use smallvec::{smallvec, SmallVec};
+use serde::{de, de::Error, Deserialize};
+use smallvec::SmallVec;
 
 use crate::feed::Entry;
 use crate::twitter::Tweet;
+use crate::util::Serde;
 
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
@@ -56,8 +60,7 @@ pub struct Filter {
     pub text: Option<Regex>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash)]
-#[serde(untagged)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TopicId<'a> {
     Feed(Cow<'a, str>),
     Twitter(i64),
@@ -78,6 +81,47 @@ pub struct TwitterList {
     pub id: NonZeroU64,
     #[serde(default)]
     pub delay: u64,
+}
+
+/// Implements `serde::de::Visitor` methods for "union" types,
+/// which ignores enum variants and forwards to `deserialize_any`.
+macro_rules! union_visitor {
+    ($(
+        fn $method:ident$(<$($T:ident $(: $Bound:path)?),*>)?($self:ident $(, $arg:ident: $t:ty)*)
+            -> $Ret:ty
+        {
+            $($body:tt)*
+        }
+    )*) => {
+        $(
+            fn $method$(<$($T $(: $Bound)?),*>)?($self $(, $arg: $t)*) -> $Ret {
+                $($body)*
+            }
+        )*
+        fn visit_enum<A: de::EnumAccess<'de>>(self, a: A) -> Result<Self::Value, A::Error> {
+            /// Provides a custom `Deserialize` impl which disables `visit_enum`.
+            struct Wrap(<Visitor as de::Visitor<'static>>::Value);
+            impl<'de> de::Deserialize<'de> for Wrap {
+                fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                    struct WrapVisitor;
+                    impl<'de> de::Visitor<'de> for WrapVisitor {
+                        type Value = <Visitor as de::Visitor<'de>>::Value;
+                        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                            Visitor.expecting(f)
+                        }
+                        $(
+                            fn $method$(<$($T $(: $Bound)?),*>)?($self $(, $arg: $t)*) -> $Ret {
+                                Visitor.$method($($arg),*)
+                            }
+                        )*
+                    }
+                    d.deserialize_any(WrapVisitor).map(Wrap)
+                }
+            }
+            de::VariantAccess::newtype_variant::<Wrap>(a.variant::<de::IgnoredAny>()?.1)
+                .map(|w| w.0)
+        }
+    };
 }
 
 impl Manifest {
@@ -192,50 +236,171 @@ impl Filter {
 
 impl<'de> Deserialize<'de> for Filter {
     fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Prototype {
-            Title(#[serde(with = "serde_regex")] Regex),
-            Composite {
-                #[serde(with = "serde_regex")]
-                title: Regex,
-                #[serde(default)]
-                #[serde(with = "serde_regex")]
-                text: Option<Regex>,
-            },
+        struct Visitor;
+
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = Filter;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a string or map")
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(self, mut a: A) -> Result<Filter, A::Error> {
+                enum Key {
+                    Title,
+                    Text,
+                    Unknown,
+                }
+
+                impl<'de> Deserialize<'de> for Key {
+                    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                        struct Visitor;
+                        impl<'de> de::Visitor<'de> for Visitor {
+                            type Value = Key;
+                            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                                f.write_str("a string")
+                            }
+                            fn visit_bytes<E>(self, v: &[u8]) -> Result<Key, E> {
+                                match v {
+                                    b"title" => Ok(Key::Title),
+                                    b"text" => Ok(Key::Text),
+                                    _ => Ok(Key::Unknown),
+                                }
+                            }
+                            serde_delegate!(visit_str);
+                        }
+                        d.deserialize_str(Visitor)
+                    }
+                }
+
+                let mut title = None;
+                let mut text = None;
+
+                while let Some(key) = a.next_key::<Key>()? {
+                    match key {
+                        Key::Title => title = Some(a.next_value::<Serde<Regex>>()?.0),
+                        Key::Text => text = a.next_value::<Option<Serde<Regex>>>()?.map(|s| s.0),
+                        Key::Unknown => {
+                            a.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                let title = if let Some(title) = title {
+                    title
+                } else {
+                    return Err(A::Error::missing_field("title"));
+                };
+
+                Ok(Filter { title, text })
+            }
+
+            fn visit_str<E: de::Error>(self, s: &str) -> Result<Filter, E> {
+                s.parse()
+                    .map(|title| Filter { title, text: None })
+                    .map_err(E::custom)
+            }
+
+            serde_delegate!(visit_bytes);
         }
 
-        Prototype::deserialize(d).map(|p| match p {
-            Prototype::Title(title) => Filter::from_title(title),
-            Prototype::Composite { title, text } => Filter { title, text },
-        })
+        d.deserialize_any(Visitor)
+    }
+}
+
+impl<'a, 'de> Deserialize<'de> for TopicId<'a> {
+    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visitor;
+
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = TopicId<'static>;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a string or integer")
+            }
+
+            union_visitor! {
+                fn visit_i64<E: de::Error>(self, id: i64) -> Result<Self::Value, E> {
+                    Ok(TopicId::Twitter(id))
+                }
+
+                fn visit_u64<E: de::Error>(self, id: u64) -> Result<Self::Value, E> {
+                    i64::try_from(id)
+                        .map_err(|_| E::invalid_value(de::Unexpected::Unsigned(id), &self))
+                        .and_then(|id| self.visit_i64(id))
+                }
+
+                fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                    Ok(TopicId::Feed(Cow::Owned(s.to_owned())))
+                }
+
+                fn visit_string<E: de::Error>(self, s: String) -> Result<Self::Value, E> {
+                    Ok(TopicId::Feed(Cow::Owned(s)))
+                }
+
+                fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                    str::from_utf8(v).map_err(E::custom).and_then(|s| self.visit_str(s))
+                }
+
+                fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+                    String::from_utf8(v).map_err(E::custom).and_then(|s| self.visit_string(s))
+                }
+            }
+        }
+
+        d.deserialize_any(Visitor)
+    }
+}
+
+impl Outbox {
+    fn from_twitter_id(id: i64) -> Self {
+        if id == 0 {
+            Outbox::None
+        } else {
+            Outbox::Twitter(id)
+        }
     }
 }
 
 impl<'de> Deserialize<'de> for Outbox {
     fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        i64::deserialize(d).map(|id| {
-            if id == 0 {
-                Outbox::None
-            } else {
-                Outbox::Twitter(id)
-            }
-        })
+        i64::deserialize(d).map(Outbox::from_twitter_id)
     }
 }
 
 fn de_outbox<'de, D: de::Deserializer<'de>>(d: D) -> Result<SmallVec<[Outbox; 1]>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Prototype {
-        One(Outbox),
-        Seq(SmallVec<[Outbox; 1]>),
+    struct Visitor;
+
+    impl<'de> de::Visitor<'de> for Visitor {
+        type Value = SmallVec<[Outbox; 1]>;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("an integer or array of integers")
+        }
+
+        union_visitor! {
+            fn visit_i64<E: de::Error>(self, id: i64) -> Result<Self::Value, E> {
+                Ok(SmallVec::from_buf([Outbox::Twitter(id)]))
+            }
+
+            fn visit_u64<E: de::Error>(self, id: u64) -> Result<Self::Value, E> {
+                i64::try_from(id)
+                    .map_err(|_| E::invalid_value(de::Unexpected::Unsigned(id), &self))
+                    .and_then(|id| self.visit_i64(id))
+            }
+
+            fn visit_seq<A: de::SeqAccess<'de>>(self, a: A) -> Result<Self::Value, A::Error> {
+                let mut a = a;
+                let mut ret = SmallVec::with_capacity(a.size_hint().unwrap_or(0));
+                while let Some(id) = a.next_element()? {
+                    ret.push(Outbox::from_twitter_id(id));
+                }
+                Ok(ret)
+            }
+        }
     }
 
-    Prototype::deserialize(d).map(|p| match p {
-        Prototype::One(o) => smallvec![o],
-        Prototype::Seq(v) => v,
-    })
+    d.deserialize_any(Visitor)
 }
 
 fn resolve_path(path: &str, base: &str) -> Option<Box<str>> {

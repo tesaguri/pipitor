@@ -12,7 +12,7 @@ use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
 use tokio::io::AsyncBufReadExt;
 
-use crate::common::{client, open_credentials, open_manifest};
+use crate::common::{client, open_credentials};
 
 #[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
@@ -20,7 +20,7 @@ pub struct Opt {}
 pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     use pipitor::schema::twitter_tokens::dsl::*;
 
-    let manifest = open_manifest(opt)?;
+    let manifest = opt.open_manifest()?;
     let credentials = open_credentials(opt, &manifest)?;
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = Pool::new(manager).context("failed to initialize the connection pool")?;

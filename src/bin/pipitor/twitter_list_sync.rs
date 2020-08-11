@@ -9,7 +9,7 @@ use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
 
-use crate::common::{client, open_credentials, open_manifest};
+use crate::common::{client, open_credentials};
 
 #[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
@@ -17,7 +17,7 @@ pub struct Opt {}
 pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     use pipitor::schema::twitter_tokens::dsl::*;
 
-    let manifest = open_manifest(opt)?;
+    let manifest = opt.open_manifest()?;
     let list_id = if let Some(ref list) = manifest.twitter.list {
         list.id
     } else {

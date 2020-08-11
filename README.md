@@ -18,8 +18,8 @@ Or alternatively, you can manually build the project from the source (requires N
 cargo install pipitor
 ```
 
-After the installation, create a manifest file named `Pipitor.toml` in the working directory.
-Manifest format is shown in [`Pipitor.example.toml`](Pipitor.example.toml).
+After the installation, create a manifest file named `Pipitor.toml` or `Pipitor.dhall` in the working directory.
+Manifest format is shown in [`Pipitor.example.toml`](Pipitor.example.toml) and [`Pipitor.example.dhall`](Pipitor.example.dhall).
 
 Then, run the following, and follow the instructions on the command line:
 
@@ -35,4 +35,5 @@ pipitor run
 
 ## License
 
-This project is licensed under the GNU Affero General Public License, Version 3 ([LICENSE](LICENSE) or https://www.gnu.org/licenses/agpl-3.0.html).
+This project is licensed under the GNU Affero General Public License, Version 3
+([LICENSE](LICENSE) or https://www.gnu.org/licenses/agpl-3.0.html) unless explicitly stated otherwise.

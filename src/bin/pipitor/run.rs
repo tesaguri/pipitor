@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::path::Path;
 
 use anyhow::Context;
 use fs2::FileExt;
@@ -13,10 +12,11 @@ use crate::common::*;
 pub struct Opt {}
 
 pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
-    let manifest = open_manifest(opt)?;
+    let manifest = opt.open_manifest()?;
 
-    let manifest_path: &Path = opt.manifest_path();
-    let lock = File::open(manifest_path)?;
+    let (lock, manifest_path) = opt
+        .search_manifest(|path| File::open(path))
+        .context("unable to access the manifest")?;
     lock.try_lock_exclusive()
         .context("failed to acquire a file lock")?;
 
@@ -73,7 +73,7 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
                         ipc::Request::Reload {} => {
                             info!("reloading the manifest");
 
-                            let result = future::ready(open_manifest(&opt))
+                            let result = future::ready(opt.open_manifest())
                                 .and_then(|manifest| {
                                     app.replace_manifest(manifest).map_err(|(e, _)| e)
                                 })

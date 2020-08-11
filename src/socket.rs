@@ -221,6 +221,8 @@ impl<'de> de::Deserialize<'de> for Addr {
                     self.visit_str(&v)
                 }
             }
+
+            serde_delegate!(visit_bytes visit_byte_buf);
         }
 
         d.deserialize_string(Visitor)
