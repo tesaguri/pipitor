@@ -1,24 +1,26 @@
-use std::cmp;
+mod interval;
+
+use std::borrow::Borrow;
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::SystemTime;
 
 use futures::channel::mpsc;
-use futures::task::AtomicWaker;
 use futures::{ready, Future, FutureExt, Stream, StreamExt};
 use http_body::Body;
 use oauth1::Credentials;
 use pin_project::pin_project;
-use tokio::time::Delay;
 
 use crate::manifest;
-use crate::util::{instant_from_unix, snowflake_to_system_time, HttpService};
+use crate::util::{snowflake_to_system_time, HttpService};
 
 use super::{Request, Tweet};
+
+use self::interval::Interval;
 
 /// A stream that continuously yields Tweets from a list timeline.
 ///
@@ -48,17 +50,11 @@ struct RequestSender<S, B> {
     delay: u64,
     since_id: AtomicI64,
     tx: mpsc::Sender<Vec<Tweet>>,
-    delay_until: AtomicU64,
-    task: AtomicWaker,
+    handle: interval::Handle,
     client: Credentials<Box<str>>,
     token: Credentials<Box<str>>,
     http: S,
     marker: PhantomData<fn() -> B>,
-}
-
-struct SenderTask<S, B> {
-    sender: Weak<RequestSender<S, B>>,
-    timer: Delay,
 }
 
 #[pin_project(project = BackfillProj)]
@@ -101,18 +97,18 @@ where
             delay,
             since_id: AtomicI64::new(0),
             tx,
-            delay_until: AtomicU64::new(0),
-            task: AtomicWaker::new(),
+            handle: interval::Handle::new(),
             client,
             token,
             http,
             marker: PhantomData,
         });
 
-        tokio::spawn(SenderTask {
-            sender: Arc::downgrade(&sender),
-            timer: tokio::time::delay_until(Instant::now().into()),
-        });
+        // Periodically send API requests in the background.
+        tokio::spawn(Interval::new(Arc::downgrade(&sender)).for_each(|sender| {
+            sender.send();
+            futures::future::ready(())
+        }));
 
         let inner = Inner {
             sender,
@@ -245,7 +241,7 @@ where
     fn send(self: Arc<Self>) {
         trace_fn!(RequestSender::<S, B>::send);
 
-        let since_id = self.since_id.load(Ordering::SeqCst);
+        let since_id = self.since_id.load(Ordering::Relaxed);
         let since_id = if since_id == 0 {
             None
         } else {
@@ -283,7 +279,7 @@ where
 
                 if let Some(limit) = rate_limit {
                     if limit.remaining == 0 {
-                        self.delay_until.fetch_max(limit.reset, Ordering::Relaxed);
+                        self.handle.delay(limit.reset);
                     }
                 }
             });
@@ -292,62 +288,8 @@ where
     }
 }
 
-impl<S, B> RequestSender<S, B> {
-    fn decode_delay_until(&self) -> Option<Instant> {
-        let delay_until = self.delay_until.load(Ordering::SeqCst);
-        if delay_until == 0 {
-            None
-        } else {
-            Some(instant_from_unix(Duration::from_secs(delay_until)))
-        }
-    }
-}
-
-impl<S, B> Drop for RequestSender<S, B> {
-    fn drop(&mut self) {
-        self.task.wake();
-    }
-}
-
-impl<S, B> Future for SenderTask<S, B>
-where
-    S: HttpService<B> + Clone + Send + Sync + 'static,
-    S::Future: Send + 'static,
-    S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-    B: Default + From<Vec<u8>> + Send + 'static,
-{
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        trace_fn!(SenderTask::<S, B>::poll);
-
-        let sender = if let Some(sender) = self.sender.upgrade() {
-            sender
-        } else {
-            return Poll::Ready(());
-        };
-
-        sender.task.register(cx.waker());
-
-        if let Some(delay_until) = sender.decode_delay_until() {
-            if self.timer.deadline().into_std() < delay_until {
-                self.timer.reset(delay_until.into());
-            }
-        }
-
-        ready!(self.timer.poll_unpin(cx));
-
-        let now = Instant::now();
-
-        sender.send();
-
-        // Make the task sleep for 1 sec because the rate limit of GET lists/statuses is
-        // 900 reqs/15-min window (about 1 req/sec).
-        let next_tick = self.timer.deadline() + Duration::from_secs(1);
-        self.timer.reset(cmp::max(next_tick, now.into()));
-
-        // `poll` `self.timer` again because it forgets the current task upon `reset`.
-        self.poll(cx)
+impl<S, B> Borrow<interval::Handle> for RequestSender<S, B> {
+    fn borrow(&self) -> &interval::Handle {
+        &self.handle
     }
 }

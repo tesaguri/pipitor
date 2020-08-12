@@ -1,18 +1,17 @@
+mod scheduler;
 mod service;
-mod subscription_renewer;
 
 use std::convert::TryInto;
 use std::marker::{PhantomData, Unpin};
 use std::pin::Pin;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use diesel::dsl::*;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use futures::channel::mpsc;
-use futures::task::AtomicWaker;
 use futures::{Stream, StreamExt, TryStream};
 use http::Uri;
 use hyper::server::conn::Http;
@@ -21,9 +20,11 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::feed::{self, Feed};
 use crate::query;
+use crate::schema::*;
 use crate::util::{ArcService, HttpService};
 
-use service::Service;
+use self::scheduler::Scheduler;
+use self::service::Service;
 
 /// A WebSub subscriber server.
 #[pin_project]
@@ -58,15 +59,11 @@ where
         client: S,
         pool: Pool<ConnectionManager<SqliteConnection>>,
     ) -> Self {
-        let expires_at = if let Some(expires_at) = query::expires_at()
+        let first_tick = query::expires_at()
             .first::<i64>(&pool.get().unwrap())
             .optional()
             .unwrap()
-        {
-            expires_at.try_into().unwrap_or(0u64)
-        } else {
-            u64::MAX
-        };
+            .map(|expires_at| expires_at.try_into().unwrap_or(0u64));
 
         let (tx, rx) = mpsc::channel(0);
 
@@ -75,12 +72,26 @@ where
             client,
             pool,
             tx,
-            expires_at: AtomicU64::new(expires_at),
-            renewer_task: AtomicWaker::new(),
+            handle: scheduler::Handle::new(first_tick),
             _marker: PhantomData,
         });
 
-        tokio::spawn(subscription_renewer::Renewer::new(&service));
+        tokio::spawn(Scheduler::new(&service, |service| {
+            let conn = &*service.pool.get().unwrap();
+            service.renew_subscriptions(conn);
+            if let Some(next_tick) = query::expires_at()
+                .filter(not(
+                    websub_active_subscriptions::id.eq_any(query::renewing_subs())
+                ))
+                .first::<i64>(conn)
+                .optional()
+                .unwrap()
+            {
+                Some(next_tick.try_into().unwrap_or(0u64))
+            } else {
+                None
+            }
+        }));
 
         Subscriber {
             incoming,

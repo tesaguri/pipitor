@@ -1,9 +1,8 @@
+use std::borrow::Borrow;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
 use bytes::Buf;
@@ -11,7 +10,6 @@ use diesel::dsl::*;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use futures::channel::mpsc;
-use futures::task::AtomicWaker;
 use futures::{future, pin_mut, stream, Future, FutureExt, TryFutureExt, TryStreamExt};
 use hmac::digest::generic_array::typenum::Unsigned;
 use hmac::digest::FixedOutput;
@@ -26,18 +24,17 @@ use tower_util::ServiceExt;
 use crate::feed::{self, RawFeed};
 use crate::query;
 use crate::schema::*;
-use crate::util::{instant_from_unix, now_unix, HttpService, Never};
+use crate::util::{now_unix, HttpService, Never};
 use crate::websub::{hub, X_HUB_SIGNATURE};
 
-use super::Content;
+use super::{scheduler, Content};
 
 pub struct Service<S, B> {
     pub(super) host: Uri,
     pub(super) client: S,
     pub(super) pool: Pool<ConnectionManager<SqliteConnection>>,
     pub(super) tx: mpsc::Sender<(String, Content)>,
-    pub(super) renewer_task: AtomicWaker,
-    pub(super) expires_at: AtomicU64,
+    pub(super) handle: scheduler::Handle,
     pub(super) _marker: PhantomData<fn() -> B>,
 }
 
@@ -371,7 +368,7 @@ where
                     .try_into()
                     .unwrap_or(i64::max_value());
 
-                self.reset_renewer(expires_at as u64);
+                self.handle.hasten(expires_at as u64);
 
                 // Remove the old subscription if the subscription was created by a renewal.
                 let old_id = websub_renewing_subscriptions::table
@@ -418,23 +415,11 @@ where
                 .unwrap(),
         }
     }
-
-    fn reset_renewer(&self, expires_at: u64) {
-        let prev = self.expires_at.fetch_min(expires_at, Ordering::Relaxed);
-        if expires_at < prev {
-            self.renewer_task.wake();
-        }
-    }
 }
 
-impl<S, B> Service<S, B> {
-    pub fn decode_expires_at(&self) -> Option<Instant> {
-        let expires_at = self.expires_at.load(Ordering::SeqCst);
-        if expires_at == u64::MAX {
-            None
-        } else {
-            Some(instant_from_unix(Duration::from_secs(expires_at)))
-        }
+impl<S, B> Borrow<scheduler::Handle> for Service<S, B> {
+    fn borrow(&self) -> &scheduler::Handle {
+        &self.handle
     }
 }
 
