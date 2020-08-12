@@ -29,7 +29,7 @@ pub mod http_service;
 
 mod serde_wrapper;
 
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::fs;
@@ -278,18 +278,23 @@ where
     d.deserialize_str(Visitor::<T>(PhantomData))
 }
 
-pub fn instant_from_epoch(epoch: i64) -> Instant {
+/// Converts a `Duration` representing a Unix time to an `Instant`.
+pub fn instant_from_unix(unix: Duration) -> Instant {
     let now_i = Instant::now();
-    let now_epoch = now_epoch();
-    let eta = u64::try_from(epoch).unwrap().saturating_sub(now_epoch);
-    now_i + Duration::from_secs(eta)
+    let now_unix = now_unix();
+    // Do not add the `Duration`s directly to the `Instant` to mitigate the risk of overflowing.
+    if now_unix < unix {
+        now_i + (unix - now_unix)
+    } else {
+        now_i - (now_unix - unix)
+    }
 }
 
-pub fn now_epoch() -> u64 {
+/// Returns the Unix time representation of "now" as a `Duration`.
+pub fn now_unix() -> Duration {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
-        .as_secs()
 }
 
 pub fn open_credentials(path: &str) -> anyhow::Result<Credentials> {

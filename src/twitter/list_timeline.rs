@@ -2,7 +2,7 @@ use std::cmp;
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
@@ -16,7 +16,7 @@ use pin_project::pin_project;
 use tokio::time::Delay;
 
 use crate::manifest;
-use crate::util::{instant_from_epoch, snowflake_to_system_time, HttpService};
+use crate::util::{instant_from_unix, snowflake_to_system_time, HttpService};
 
 use super::{Request, Tweet};
 
@@ -48,7 +48,7 @@ struct RequestSender<S, B> {
     delay: u64,
     since_id: AtomicI64,
     tx: mpsc::Sender<Vec<Tweet>>,
-    delay_until: AtomicI64,
+    delay_until: AtomicU64,
     task: AtomicWaker,
     client: Credentials<Box<str>>,
     token: Credentials<Box<str>>,
@@ -101,7 +101,7 @@ where
             delay,
             since_id: AtomicI64::new(0),
             tx,
-            delay_until: AtomicI64::new(0),
+            delay_until: AtomicU64::new(0),
             task: AtomicWaker::new(),
             client,
             token,
@@ -162,7 +162,11 @@ where
         let tweets = ready!(inner.as_mut().project().rx.poll_next_unpin(cx)).unwrap();
 
         if let Some(t) = tweets.last() {
-            store_max(&inner.project().sender.since_id, t.id);
+            inner
+                .project()
+                .sender
+                .since_id
+                .fetch_max(t.id, Ordering::Relaxed);
 
             if log_enabled!(log::Level::Trace) {
                 let created_at = snowflake_to_system_time(t.id as u64);
@@ -215,7 +219,9 @@ where
             return Poll::Ready(None);
         }
 
-        store_max(&sender.since_id, tweets.first().unwrap().id);
+        sender
+            .since_id
+            .fetch_max(tweets.first().unwrap().id, Ordering::Relaxed);
 
         let max_id = tweets.last().map(|t| t.id - 1);
         let res = super::lists::Statuses::new(sender.list_id)
@@ -277,7 +283,7 @@ where
 
                 if let Some(limit) = rate_limit {
                     if limit.remaining == 0 {
-                        store_max(&self.delay_until, limit.reset as i64);
+                        self.delay_until.fetch_max(limit.reset, Ordering::Relaxed);
                     }
                 }
             });
@@ -292,7 +298,7 @@ impl<S, B> RequestSender<S, B> {
         if delay_until == 0 {
             None
         } else {
-            Some(instant_from_epoch(delay_until))
+            Some(instant_from_unix(Duration::from_secs(delay_until)))
         }
     }
 }
@@ -343,15 +349,5 @@ where
 
         // `poll` `self.timer` again because it forgets the current task upon `reset`.
         self.poll(cx)
-    }
-}
-
-fn store_max(atomic: &AtomicI64, val: i64) {
-    let mut prev = atomic.load(Ordering::SeqCst);
-    while prev < val {
-        match atomic.compare_exchange_weak(prev, val, Ordering::SeqCst, Ordering::SeqCst) {
-            Ok(_) => return,
-            Err(p) => prev = p,
-        }
     }
 }

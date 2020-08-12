@@ -1,8 +1,10 @@
+use std::convert::TryInto;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use diesel::dsl::*;
 use diesel::prelude::*;
@@ -10,7 +12,7 @@ use futures::{ready, FutureExt};
 
 use crate::query;
 use crate::schema::*;
-use crate::util::{instant_from_epoch, HttpService};
+use crate::util::{instant_from_unix, HttpService};
 
 use super::{refresh_time, Service};
 
@@ -78,11 +80,12 @@ where
             .optional()
             .unwrap()
         {
+            let expires_at = expires_at.try_into().unwrap_or(0u64);
             service.expires_at.store(expires_at, Ordering::SeqCst);
-            let refresh_time = refresh_time(instant_from_epoch(expires_at));
+            let refresh_time = refresh_time(instant_from_unix(Duration::from_secs(expires_at)));
             timer.reset(refresh_time.into());
         } else {
-            service.expires_at.store(i64::MAX, Ordering::SeqCst);
+            service.expires_at.store(u64::MAX, Ordering::SeqCst);
             self.timer = None;
         }
 

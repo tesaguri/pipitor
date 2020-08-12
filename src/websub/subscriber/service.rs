@@ -1,9 +1,9 @@
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
 use bytes::Buf;
@@ -26,7 +26,7 @@ use tower_util::ServiceExt;
 use crate::feed::{self, RawFeed};
 use crate::query;
 use crate::schema::*;
-use crate::util::{instant_from_epoch, now_epoch, HttpService, Never};
+use crate::util::{instant_from_unix, now_unix, HttpService, Never};
 use crate::websub::{hub, X_HUB_SIGNATURE};
 
 use super::Content;
@@ -37,7 +37,7 @@ pub struct Service<S, B> {
     pub(super) pool: Pool<ConnectionManager<SqliteConnection>>,
     pub(super) tx: mpsc::Sender<(String, Content)>,
     pub(super) renewer_task: AtomicWaker,
-    pub(super) expires_at: AtomicI64,
+    pub(super) expires_at: AtomicU64,
     pub(super) _marker: PhantomData<fn() -> B>,
 }
 
@@ -159,8 +159,8 @@ where
     }
 
     pub fn renew_subscriptions(&self, conn: &SqliteConnection) {
-        let now_epoch = now_epoch();
-        let threshold: i64 = (now_epoch + super::RENEW).try_into().unwrap();
+        let now_unix = now_unix();
+        let threshold: i64 = (now_unix + super::RENEW).as_secs().try_into().unwrap();
 
         let expiring = websub_subscriptions::table
             .inner_join(websub_active_subscriptions::table)
@@ -364,13 +364,14 @@ where
             {
                 log::info!("Verifying subscription {}", id);
 
-                let now_epoch = now_epoch();
-                let expires_at = now_epoch
+                let now_unix = now_unix();
+                let expires_at = now_unix
+                    .as_secs()
                     .saturating_add(lease_seconds)
                     .try_into()
                     .unwrap_or(i64::max_value());
 
-                self.reset_renewer(expires_at);
+                self.reset_renewer(expires_at as u64);
 
                 // Remove the old subscription if the subscription was created by a renewal.
                 let old_id = websub_renewing_subscriptions::table
@@ -418,8 +419,8 @@ where
         }
     }
 
-    fn reset_renewer(&self, expires_at: i64) {
-        let prev = fetch_min(&self.expires_at, expires_at);
+    fn reset_renewer(&self, expires_at: u64) {
+        let prev = self.expires_at.fetch_min(expires_at, Ordering::Relaxed);
         if expires_at < prev {
             self.renewer_task.wake();
         }
@@ -428,11 +429,11 @@ where
 
 impl<S, B> Service<S, B> {
     pub fn decode_expires_at(&self) -> Option<Instant> {
-        let val = self.expires_at.load(Ordering::SeqCst);
-        if val == i64::MAX {
+        let expires_at = self.expires_at.load(Ordering::SeqCst);
+        if expires_at == u64::MAX {
             None
         } else {
-            Some(instant_from_epoch(val))
+            Some(instant_from_unix(Duration::from_secs(expires_at)))
         }
     }
 }
@@ -456,19 +457,6 @@ where
         log::trace!("Service::call; req.uri()={:?}", req.uri());
         future::ok((*self).call(req))
     }
-}
-
-// TODO: Use `AtomicI64::fetch_min` once it hits stable.
-// https://github.com/rust-lang/rust/issues/48655
-fn fetch_min(atomic: &AtomicI64, val: i64) -> i64 {
-    let mut prev = atomic.load(Ordering::SeqCst);
-    while prev > val {
-        match atomic.compare_exchange_weak(prev, val, Ordering::SeqCst, Ordering::SeqCst) {
-            Ok(_) => return prev,
-            Err(p) => prev = p,
-        }
-    }
-    prev
 }
 
 fn rss_hub_links(channel: &rss::Channel) -> impl Iterator<Item = &str> {

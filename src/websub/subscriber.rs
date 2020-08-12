@@ -1,9 +1,10 @@
 mod service;
 mod subscription_renewer;
 
+use std::convert::TryInto;
 use std::marker::{PhantomData, Unpin};
 use std::pin::Pin;
-use std::sync::atomic::AtomicI64;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -40,7 +41,7 @@ pub struct Content {
 }
 
 // XXX: mediocre naming
-const RENEW: u64 = 10;
+const RENEW: Duration = Duration::from_secs(10);
 
 impl<S, B, I> Subscriber<S, B, I>
 where
@@ -62,9 +63,9 @@ where
             .optional()
             .unwrap()
         {
-            expires_at
+            expires_at.try_into().unwrap_or(0u64)
         } else {
-            i64::MAX
+            u64::MAX
         };
 
         let (tx, rx) = mpsc::channel(0);
@@ -74,7 +75,7 @@ where
             client,
             pool,
             tx,
-            expires_at: AtomicI64::new(expires_at),
+            expires_at: AtomicU64::new(expires_at),
             renewer_task: AtomicWaker::new(),
             _marker: PhantomData,
         });
@@ -151,5 +152,5 @@ impl Content {
 }
 
 fn refresh_time(expires_at: Instant) -> Instant {
-    expires_at - Duration::from_secs(RENEW)
+    expires_at - RENEW
 }
