@@ -21,6 +21,7 @@ pub struct Opt {
 pub struct RmGuard<P: AsRef<Path>>(pub P);
 
 const TOML: &str = "Pipitor.toml";
+#[cfg(feature = "dhall")]
 const DHALL: &str = "Pipitor.dhall";
 
 impl Opt {
@@ -33,6 +34,7 @@ impl Opt {
         } else {
             match f(TOML.as_ref()) {
                 Ok(t) => Ok((t, TOML)),
+                #[cfg(feature = "dhall")]
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {
                     f(DHALL.as_ref()).map(|t| (t, DHALL))
                 }
@@ -49,13 +51,16 @@ impl Opt {
             .search_manifest(|path| fs::metadata(path))
             .context("unable to access the manifest")?
             .1;
-        let mut manifest: Manifest = if Path::new(path).extension() == Some("dhall".as_ref()) {
-            serde_dhall::from_file(path)
+        #[cfg_attr(not(feature = "dhall"), allow(clippy::match_single_binding))]
+        let mut manifest: Manifest = match Path::new(path).extension() == Some("dhall".as_ref()) {
+            #[cfg(feature = "dhall")]
+            true => serde_dhall::from_file(path)
                 .parse()
-                .context("failed to parse the manifest")?
-        } else {
-            let buf = fs::read(path).context("could not open the manifest")?;
-            toml::from_slice(&buf).context("failed to parse the manifest")?
+                .context("failed to parse the manifest")?,
+            _ => {
+                let buf = fs::read(path).context("could not open the manifest")?;
+                toml::from_slice(&buf).context("failed to parse the manifest")?
+            }
         };
         manifest.resolve_paths(path);
         Ok(manifest)
