@@ -61,6 +61,7 @@ jobs:
             cargo-registry-${{ runner.os }}-
             cargo-registry-
       - name: Cache Cargo build
+        if: runner.os != 'macOS'
         uses: actions/cache@v2
         with:
           path: target
