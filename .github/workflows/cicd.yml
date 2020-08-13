@@ -212,7 +212,7 @@ jobs:
             git fetch --no-tags origin "$tag_name:$GITHUB_REF"
             message=$(git tag -l --format='%(contents)' "$tag_name" | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')
           fi
-          hub release create --draft "${assets[@]}" --message "${message:-Test release}" "$tag_name"
+          hub release create "${assets[@]}" --message "${message:-Test release}" "$tag_name"
         working-directory: artifact
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
