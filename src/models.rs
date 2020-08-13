@@ -77,30 +77,16 @@ impl<'a> NewEntry<'a> {
     }
 }
 
-impl From<TwitterToken> for oauth1::Credentials<Box<str>> {
+impl From<TwitterToken> for oauth_credentials::Credentials<Box<str>> {
     fn from(token: TwitterToken) -> Self {
-        Self {
-            identifier: token.access_token.into(),
-            secret: token.access_token_secret.into(),
-        }
+        oauth_credentials::Credentials::new(token.access_token, token.access_token_secret)
+            .map(Into::into)
     }
 }
 
-impl From<TwitterToken> for oauth1::Credentials {
-    fn from(token: TwitterToken) -> Self {
-        Self {
-            identifier: token.access_token,
-            secret: token.access_token_secret,
-        }
-    }
-}
-
-impl<'a> From<&'a TwitterToken> for oauth1::Credentials<&'a str> {
+impl<'a> From<&'a TwitterToken> for oauth_credentials::Credentials<&'a str> {
     fn from(token: &'a TwitterToken) -> Self {
-        Self {
-            identifier: &token.access_token,
-            secret: &token.access_token_secret,
-        }
+        Self::new(&token.access_token, &token.access_token_secret)
     }
 }
 

@@ -20,18 +20,18 @@ anyhow = "1"
 atoi = "0.3"
 atom = { version = "0.9", package = "atom_syndication" }
 auto_enums = "0.7"
-base64 = "0.12"
-cfg-if = "0.1"
+base64 = "0.13"
 bytes = "0.5"
+cfg-if = "1"
 diesel = { version = "1.4.5", default-features = false, features = ["r2d2", "sqlite"] }
 diesel_migrations = { version = "1", default-features = false, features = ["sqlite"] }
 dotenv = "0.15"
-env_logger = "0.7"
+env_logger = "0.8"
 flate2 = "1"
 fs2 = "0.4"
-futures = "0.3"
+futures = { version = "0.3", default-features = false, features = ["async-await", "std"] }
 hex = "0.4"
-hmac = "0.8"
+hmac = "0.10"
 http = "0.2"
 http-body = "0.3"
 hyper = { version = "0.13", default-features = false, features = ["stream"] }
@@ -39,15 +39,16 @@ json = { version = "1", package = "serde_json" }
 listenfd = "0.3"
 log = "0.4.6"
 mime = "0.3"
-oauth1 = { version = "0.3", package = "oauth1-request" }
-pin-project = "0.4"
+oauth1 = { version = "0.4", package = "oauth1-request" }
+oauth-credentials = { version = "0.2", features = ["serde"] }
+pin-project = "1"
 rand = "0.7"
 regex = "1.0.3"
 rss = "1"
 serde = { version = "1.0.34", features = ["derive", "rc"] }
-serde_dhall = "0.6"
+serde_dhall = "0.8"
 serde_derive = "1.0.34"
-serde_urlencoded = "0.6"
+serde_urlencoded = "0.7"
 sha-1 = "0.9"
 smallvec = { version = "1", features = ["serde"] }
 string = { version = "0.2", default-features = false }
@@ -57,7 +58,7 @@ tokio = { version = "0.2", features = ["io-std", "io-util", "signal", "stream", 
 tower-service = "0.3"
 tower-util = "0.3"
 toml = "0.5"
-twitter-stream = { version = "0.10", default-features = false, features = ["gzip"] }
+twitter-stream = { version = "0.11", default-features = false, features = ["gzip"] }
 
 ct-logs = { version = "0.7", optional = true }
 hyper-rustls = { version = "0.21", optional = true }

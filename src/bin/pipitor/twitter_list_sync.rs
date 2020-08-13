@@ -32,7 +32,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
     let mut client = client();
 
-    let token: oauth1::Credentials = twitter_tokens
+    let token: oauth_credentials::Credentials<_> = twitter_tokens
         .find(&manifest.twitter.user)
         .get_result::<models::TwitterToken>(&*pool.get()?)
         .optional()

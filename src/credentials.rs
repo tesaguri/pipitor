@@ -17,7 +17,7 @@ pub struct Credentials {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Twitter {
     #[serde(with = "CredentialsDef")]
-    pub client: oauth1::Credentials<Box<str>>,
+    pub client: oauth_credentials::Credentials<Box<str>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

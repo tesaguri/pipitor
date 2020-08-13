@@ -255,8 +255,7 @@ fn gen_secret<R: RngCore>(mut rng: R) -> Secret {
     let mut rand = [0u8; SECRET_LEN * 6 / 8];
     rng.fill_bytes(&mut rand);
 
-    let config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-    base64::encode_config_slice(&rand, config, &mut ret);
+    base64::encode_config_slice(&rand, base64::URL_SAFE_NO_PAD, &mut ret);
 
     unsafe { string::String::from_utf8_unchecked(ret) }
 }

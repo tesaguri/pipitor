@@ -12,7 +12,7 @@ use std::time::SystemTime;
 use futures::channel::mpsc;
 use futures::{ready, Future, FutureExt, Stream, StreamExt};
 use http_body::Body;
-use oauth1::Credentials;
+use oauth_credentials::Credentials;
 use pin_project::pin_project;
 
 use crate::manifest;

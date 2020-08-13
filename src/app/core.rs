@@ -25,7 +25,7 @@ pub struct Core<S> {
     pool: Pool<ConnectionManager<SqliteConnection>>,
     #[pin]
     client: S,
-    pub(super) twitter_tokens: HashMap<i64, oauth1::Credentials<Box<str>>>,
+    pub(super) twitter_tokens: HashMap<i64, oauth_credentials::Credentials<Box<str>>>,
 }
 
 impl<S> Core<S> {
@@ -83,10 +83,8 @@ impl<S> Core<S> {
 
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
 
-        let stream_token = twitter_stream::Token::from_credentials(
-            self.credentials().twitter.client.as_ref(),
-            token,
-        );
+        let stream_token =
+            oauth_credentials::Token::new(self.credentials().twitter.client.as_ref(), token);
 
         let mut twitter_topics: Vec<_> =
             self.manifest.twitter_topics().map(|id| id as u64).collect();
@@ -218,9 +216,9 @@ impl<S> Core<S> {
             .map_err(Into::into)
     }
 
-    pub fn twitter_token(&self, user: i64) -> Option<oauth1::Credentials<&str>> {
+    pub fn twitter_token(&self, user: i64) -> Option<oauth_credentials::Credentials<&str>> {
         self.twitter_tokens
             .get(&user)
-            .map(oauth1::Credentials::as_ref)
+            .map(oauth_credentials::Credentials::as_ref)
     }
 }

@@ -9,7 +9,7 @@ macro_rules! api_requests {
         $($rest:tt)*
     ) => {
         $(#[$attr])*
-        #[derive(oauth1::Authorize)]
+        #[derive(oauth1::Request)]
         $vis struct $Name $(<$($lt),*>)? {
             $($(#[$req_attr])* $required: $req_ty,)*
             $($(#[$opt_attr])* $optional: $opt_ty,)*
@@ -68,7 +68,7 @@ use futures::{ready, Future};
 use http::header::{HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE};
 use http::{Method, StatusCode, Uri};
 use http_body::Body;
-use oauth1::Credentials;
+use oauth_credentials::Credentials;
 use pin_project::pin_project;
 use serde::{de, Deserialize};
 use tower_util::{Oneshot, ServiceExt};
@@ -139,7 +139,7 @@ pub struct ErrorCode {
     pub message: String,
 }
 
-pub trait Request: oauth1::Authorize {
+pub trait Request: oauth1::Request {
     type Data: de::DeserializeOwned;
 
     const METHOD: Method;
@@ -319,39 +319,33 @@ fn prepare_request<R>(
     token: Credentials<&str>,
 ) -> http::Request<Vec<u8>>
 where
-    R: oauth1::Authorize + ?Sized,
+    R: oauth1::Request + ?Sized,
 {
     let form = method == Method::POST;
 
-    let mut builder = oauth1::Builder::new(client, oauth1::HmacSha1);
-    builder.token(token);
-    let oauth1::Request {
-        authorization,
-        data,
-    } = if form {
-        builder.build_form(method.as_str(), uri, req)
-    } else {
-        builder.build(method.as_str(), uri, req)
-    };
+    let mut oauth = oauth1::Builder::new(client, oauth1::HmacSha1);
+    oauth.token(token);
+    let authorization = oauth.build(method.as_str(), uri, req);
 
     trace!("{} {}", method, uri);
-    trace!("data: {}", data);
 
-    let req = http::Request::builder()
+    let http = http::Request::builder()
         .method(method)
         .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
         .header(AUTHORIZATION, authorization);
 
     if form {
-        req.uri(Uri::from_static(uri))
+        let data = oauth1::to_form_urlencoded(req).into_bytes();
+        http.uri(Uri::from_static(uri))
             .header(
                 CONTENT_TYPE,
                 HeaderValue::from_static("application/x-www-form-urlencoded"),
             )
-            .body(data.into_bytes())
+            .body(data)
             .unwrap()
     } else {
-        req.uri(data).body(Vec::default()).unwrap()
+        let uri = oauth1::to_uri_query(uri.to_owned(), req);
+        http.uri(uri).body(Vec::default()).unwrap()
     }
 }
 

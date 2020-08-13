@@ -1,7 +1,7 @@
 use http::header::AUTHORIZATION;
 use http::Uri;
 use http_body::Body;
-use oauth1::Credentials;
+use oauth_credentials::Credentials;
 use tower_util::ServiceExt;
 
 use crate::util::{ConcatBody, HttpService};
@@ -11,7 +11,7 @@ use super::{Error, Response};
 pub async fn request_token<'a, S, B>(
     client_credentials: Credentials<&'a str>,
     client: S,
-) -> Result<Response<Credentials>, Error<S::Error, <S::ResponseBody as Body>::Error>>
+) -> Result<Response<Credentials<Box<str>>>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
     S: HttpService<B>,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
@@ -19,10 +19,9 @@ where
 {
     const URI: &str = "https://api.twitter.com/oauth/request_token";
 
-    let oauth1::Request { authorization, .. } =
-        oauth1::Builder::new(client_credentials, oauth1::HmacSha1)
-            .callback("oob")
-            .post_form(URI, ());
+    let authorization = oauth1::Builder::<_, _>::new(client_credentials, oauth1::HmacSha1)
+        .callback("oob")
+        .post(URI, &());
 
     let req = http::Request::post(Uri::from_static(URI))
         .header(AUTHORIZATION, authorization)
@@ -41,19 +40,8 @@ where
         .await
         .map_err(Error::Body)?;
 
-    #[derive(serde::Deserialize)]
-    struct Token {
-        oauth_token: String,
-        oauth_token_secret: String,
-    }
-
     super::make_response(status, rate_limit, &body, |body| {
-        let Token {
-            oauth_token: identifier,
-            oauth_token_secret: secret,
-        } = serde_urlencoded::from_bytes::<Token>(body).map_err(|_| Error::Unexpected)?;
-
-        Ok(Credentials { identifier, secret })
+        serde_urlencoded::from_bytes(body).map_err(|_| Error::Unexpected)
     })
 }
 
@@ -62,7 +50,7 @@ pub async fn access_token<'a, S, B>(
     client_credentials: Credentials<&'a str>,
     temporary_credentials: Credentials<&'a str>,
     client: S,
-) -> Result<Response<(i64, Credentials)>, Error<S::Error, <S::ResponseBody as Body>::Error>>
+) -> Result<Response<(i64, Credentials<Box<str>>)>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
     S: HttpService<B>,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
@@ -70,11 +58,10 @@ where
 {
     const URI: &str = "https://api.twitter.com/oauth/access_token";
 
-    let oauth1::Request { authorization, .. } =
-        oauth1::Builder::new(client_credentials, oauth1::HmacSha1)
-            .token(temporary_credentials)
-            .verifier(oauth_verifier)
-            .post_form(URI, ());
+    let authorization = oauth1::Builder::new(client_credentials, oauth1::HmacSha1)
+        .token(temporary_credentials)
+        .verifier(oauth_verifier)
+        .post(URI, &());
 
     let req = http::Request::post(Uri::from_static(URI))
         .header(AUTHORIZATION, authorization)
@@ -95,18 +82,14 @@ where
 
     #[derive(serde::Deserialize)]
     struct Token {
-        oauth_token: String,
-        oauth_token_secret: String,
+        #[serde(flatten)]
+        token: Credentials<Box<str>>,
         user_id: i64,
     }
 
     super::make_response(status, rate_limit, &body, |body| {
-        let Token {
-            oauth_token: identifier,
-            oauth_token_secret: secret,
-            user_id,
-        } = serde_urlencoded::from_bytes::<Token>(body).map_err(|_| Error::Unexpected)?;
-
-        Ok((user_id, Credentials { identifier, secret }))
+        serde_urlencoded::from_bytes::<Token>(body)
+            .map(|token| (token.user_id, token.token))
+            .map_err(|_| Error::Unexpected)
     })
 }
