@@ -46,7 +46,6 @@ rand = "0.7"
 regex = "1.0.3"
 rss = "1"
 serde = { version = "1.0.34", features = ["derive", "rc"] }
-serde_dhall = "0.8"
 serde_derive = "1.0.34"
 serde_urlencoded = "0.7"
 sha-1 = "0.9"
@@ -60,6 +59,8 @@ tower-util = "0.3"
 toml = "0.5"
 twitter-stream = { version = "0.11", default-features = false, features = ["gzip"] }
 
+serde_dhall = { version = "0.8", optional = true }
+
 ct-logs = { version = "0.7", optional = true }
 hyper-rustls = { version = "0.21", optional = true }
 rustls-pkg = { version = "0.18", package = "rustls", optional = true }
@@ -69,8 +70,13 @@ hyper-tls = { version = "0.4", optional = true }
 
 libsqlite3-sys = { version = ">=0.8.0, <0.19.0", optional = true }
 
+[[test]]
+name = "example_manifest"
+required-features = ["dhall"]
+
 [features]
 default = ["native-tls"]
+dhall = ["serde_dhall"]
 native-tls = ["hyper-tls"]
 openssl-vendored = ["hyper-tls/vendored"]
 rustls = ["ct-logs", "hyper-rustls", "rustls-pkg", "webpki-roots"]
