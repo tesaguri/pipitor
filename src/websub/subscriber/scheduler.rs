@@ -12,8 +12,6 @@ use futures::{ready, FutureExt};
 
 use crate::util::instant_from_unix;
 
-use super::refresh_time;
-
 /// A `Future` that executes the specified function in a scheduled manner.
 //
 // This employs a similar idea as `crate::twitter::list_timeline::interval::Interval`
@@ -41,7 +39,7 @@ where
             delay: (**handle)
                 .borrow()
                 .decode_next_tick()
-                .map(|next_tick| tokio::time::delay_until(refresh_time(next_tick).into())),
+                .map(|next_tick| tokio::time::delay_until(next_tick.into())),
             handle: Arc::downgrade(handle),
             get_next_tick,
         }
@@ -71,14 +69,13 @@ where
 
         let delay = if let Some(ref mut delay) = this.delay {
             if let Some(next_tick) = handle.decode_next_tick() {
-                let refresh_time = refresh_time(next_tick);
-                if refresh_time < delay.deadline().into_std() {
-                    delay.reset(refresh_time.into());
+                if next_tick < delay.deadline().into_std() {
+                    delay.reset(next_tick.into());
                 }
             }
             delay
         } else if let Some(next_tick) = handle.decode_next_tick() {
-            this.delay = Some(tokio::time::delay_until(refresh_time(next_tick).into()));
+            this.delay = Some(tokio::time::delay_until(next_tick.into()));
             this.delay.as_mut().unwrap()
         } else {
             return Poll::Pending;
@@ -88,8 +85,8 @@ where
 
         if let Some(next_tick) = (this.get_next_tick)(&t) {
             handle.next_tick.store(next_tick, Ordering::Relaxed);
-            let refresh_time = refresh_time(instant_from_unix(Duration::from_secs(next_tick)));
-            delay.reset(refresh_time.into());
+            let next_tick = instant_from_unix(Duration::from_secs(next_tick));
+            delay.reset(next_tick.into());
         } else {
             handle.next_tick.store(u64::MAX, Ordering::Relaxed);
             this.delay = None;

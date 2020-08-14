@@ -6,7 +6,7 @@ use std::marker::{PhantomData, Unpin};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use diesel::dsl::*;
 use diesel::prelude::*;
@@ -63,7 +63,7 @@ where
             .first::<i64>(&pool.get().unwrap())
             .optional()
             .unwrap()
-            .map(|expires_at| expires_at.try_into().unwrap_or(0u64));
+            .map(|expires_at| expires_at.try_into().map_or(0u64, refresh_time));
 
         let (tx, rx) = mpsc::channel(0);
 
@@ -79,18 +79,14 @@ where
         tokio::spawn(Scheduler::new(&service, |service| {
             let conn = &*service.pool.get().unwrap();
             service.renew_subscriptions(conn);
-            if let Some(next_tick) = query::expires_at()
+            query::expires_at()
                 .filter(not(
                     websub_active_subscriptions::id.eq_any(query::renewing_subs())
                 ))
                 .first::<i64>(conn)
                 .optional()
                 .unwrap()
-            {
-                Some(next_tick.try_into().unwrap_or(0u64))
-            } else {
-                None
-            }
+                .map(|expires_at| expires_at.try_into().map_or(0u64, refresh_time))
         }));
 
         Subscriber {
@@ -162,6 +158,6 @@ impl Content {
     }
 }
 
-fn refresh_time(expires_at: Instant) -> Instant {
-    expires_at - RENEW
+fn refresh_time(expires_at: u64) -> u64 {
+    expires_at - RENEW.as_secs()
 }

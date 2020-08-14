@@ -368,7 +368,7 @@ where
                     .try_into()
                     .unwrap_or(i64::max_value());
 
-                self.handle.hasten(expires_at as u64);
+                self.handle.hasten(super::refresh_time(expires_at as u64));
 
                 // Remove the old subscription if the subscription was created by a renewal.
                 let old_id = websub_renewing_subscriptions::table
