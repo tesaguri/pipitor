@@ -50,7 +50,6 @@ pub struct Route {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Outbox {
     Twitter(i64),
-    None,
 }
 
 #[non_exhaustive]
@@ -186,9 +185,8 @@ impl Manifest {
     }
 
     pub fn twitter_outboxes(&self) -> impl Iterator<Item = i64> + '_ {
-        self.outboxes().filter_map(|outbox| match *outbox {
-            Outbox::Twitter(user) => Some(user),
-            _ => None,
+        self.outboxes().map(|outbox| match *outbox {
+            Outbox::Twitter(user) => user,
         })
     }
 }
@@ -352,19 +350,9 @@ impl<'a, 'de> Deserialize<'de> for TopicId<'a> {
     }
 }
 
-impl Outbox {
-    fn from_twitter_id(id: i64) -> Self {
-        if id == 0 {
-            Outbox::None
-        } else {
-            Outbox::Twitter(id)
-        }
-    }
-}
-
 impl<'de> Deserialize<'de> for Outbox {
     fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        i64::deserialize(d).map(Outbox::from_twitter_id)
+        i64::deserialize(d).map(Outbox::Twitter)
     }
 }
 
@@ -393,7 +381,7 @@ fn de_outbox<'de, D: de::Deserializer<'de>>(d: D) -> Result<SmallVec<[Outbox; 1]
                 let mut a = a;
                 let mut ret = SmallVec::with_capacity(a.size_hint().unwrap_or(0));
                 while let Some(id) = a.next_element()? {
-                    ret.push(Outbox::from_twitter_id(id));
+                    ret.push(Outbox::Twitter(id));
                 }
                 Ok(ret)
             }

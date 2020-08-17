@@ -36,11 +36,13 @@ let Filter =
       , default.text = None Text
       }
 
+let Outbox = < Twitter : Natural >
+
 let Rule =
       { Type =
           { filter : Optional Filter.Type
           , exclude : Optional Filter.Type
-          , outbox : List Natural
+          , outbox : List Outbox
           , topics : List Topic
           }
       , default = { filter = None Filter.Type, exclude = None Filter.Type }
@@ -69,4 +71,4 @@ let Manifest =
         }
       }
 
-in  { Topic, Filter, Rule, TwitterList, Twitter, Manifest }
+in  { Topic, Filter, Outbox, Rule, TwitterList, Twitter, Manifest }
