@@ -133,7 +133,6 @@ where
                         });
                     tokio::spawn(fut);
                 }
-                Outbox::None => {}
             }
         }
 
@@ -264,7 +263,6 @@ where
                 Outbox::Twitter(user) => {
                     retweets.push(twitter::statuses::Retweet::new(tweet.id).send(core, user));
                 }
-                Outbox::None => {}
             }
         }
 

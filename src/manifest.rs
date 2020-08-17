@@ -29,9 +29,8 @@ pub struct Manifest {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Rule {
-    #[serde(flatten)]
     pub route: Arc<Route>,
     pub topics: Box<[TopicId<'static>]>,
 }
@@ -50,7 +49,6 @@ pub struct Route {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Outbox {
     Twitter(i64),
-    None,
 }
 
 #[non_exhaustive]
@@ -186,9 +184,46 @@ impl Manifest {
     }
 
     pub fn twitter_outboxes(&self) -> impl Iterator<Item = i64> + '_ {
-        self.outboxes().filter_map(|outbox| match *outbox {
-            Outbox::Twitter(user) => Some(user),
-            _ => None,
+        self.outboxes().map(|outbox| match *outbox {
+            Outbox::Twitter(user) => user,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for Rule {
+    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        // This implementation is almost the same as the following, but since `#[serde(flatten)]`
+        // cannot deserialize a map with an enum value, we have to implement it manually.
+        //
+        // ```
+        // #[derive(Deserialize)]
+        // struct Rule {
+        //     #[serde(flatten)] route: Arc<Route>,
+        //     topics: Box<[TopicId<'static>]>
+        // }
+        // ```
+
+        #[derive(Deserialize)]
+        struct Prototype {
+            #[serde(default)]
+            filter: Option<Filter>,
+            #[serde(default)]
+            exclude: Option<Filter>,
+            #[serde(deserialize_with = "de_outbox")]
+            outbox: SmallVec<[Outbox; 1]>,
+            topics: Box<[TopicId<'static>]>,
+        }
+
+        Prototype::deserialize(d).map(|p| {
+            let route = Arc::new(Route {
+                filter: p.filter,
+                exclude: p.exclude,
+                outbox: p.outbox,
+            });
+            Rule {
+                route,
+                topics: p.topics,
+            }
         })
     }
 }
@@ -352,19 +387,31 @@ impl<'a, 'de> Deserialize<'de> for TopicId<'a> {
     }
 }
 
-impl Outbox {
-    fn from_twitter_id(id: i64) -> Self {
-        if id == 0 {
-            Outbox::None
-        } else {
-            Outbox::Twitter(id)
-        }
-    }
-}
-
 impl<'de> Deserialize<'de> for Outbox {
     fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        i64::deserialize(d).map(Outbox::from_twitter_id)
+        struct Visitor;
+
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = Outbox;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("an integer")
+            }
+
+            union_visitor! {
+                fn visit_i64<E: de::Error>(self, id: i64) -> Result<Self::Value, E> {
+                    Ok(Outbox::Twitter(id))
+                }
+
+                fn visit_u64<E: de::Error>(self, id: u64) -> Result<Self::Value, E> {
+                    i64::try_from(id)
+                        .map_err(|_| E::invalid_value(de::Unexpected::Unsigned(id), &self))
+                        .and_then(|id| self.visit_i64(id))
+                }
+            }
+        }
+
+        d.deserialize_any(Visitor)
     }
 }
 
@@ -378,25 +425,23 @@ fn de_outbox<'de, D: de::Deserializer<'de>>(d: D) -> Result<SmallVec<[Outbox; 1]
             f.write_str("an integer or array of integers")
         }
 
-        union_visitor! {
-            fn visit_i64<E: de::Error>(self, id: i64) -> Result<Self::Value, E> {
-                Ok(SmallVec::from_buf([Outbox::Twitter(id)]))
-            }
+        fn visit_i64<E: de::Error>(self, id: i64) -> Result<Self::Value, E> {
+            Ok(SmallVec::from_buf([Outbox::Twitter(id)]))
+        }
 
-            fn visit_u64<E: de::Error>(self, id: u64) -> Result<Self::Value, E> {
-                i64::try_from(id)
-                    .map_err(|_| E::invalid_value(de::Unexpected::Unsigned(id), &self))
-                    .and_then(|id| self.visit_i64(id))
-            }
+        fn visit_u64<E: de::Error>(self, id: u64) -> Result<Self::Value, E> {
+            i64::try_from(id)
+                .map_err(|_| E::invalid_value(de::Unexpected::Unsigned(id), &self))
+                .and_then(|id| self.visit_i64(id))
+        }
 
-            fn visit_seq<A: de::SeqAccess<'de>>(self, a: A) -> Result<Self::Value, A::Error> {
-                let mut a = a;
-                let mut ret = SmallVec::with_capacity(a.size_hint().unwrap_or(0));
-                while let Some(id) = a.next_element()? {
-                    ret.push(Outbox::from_twitter_id(id));
-                }
-                Ok(ret)
+        fn visit_seq<A: de::SeqAccess<'de>>(self, a: A) -> Result<Self::Value, A::Error> {
+            let mut a = a;
+            let mut ret = SmallVec::with_capacity(a.size_hint().unwrap_or(0));
+            while let Some(outbox) = a.next_element()? {
+                ret.push(outbox);
             }
+            Ok(ret)
         }
     }
 
