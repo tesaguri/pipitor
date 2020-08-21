@@ -5,10 +5,6 @@ user = 12345
 # Running `pipitor twitter-list-sync` will overwrite members in the list.
 list.id = 123456
 
-[twitter.client]
-key = "Your application's API key"
-secret = "Your application's API secret"
-
 [[rule]]
 topics = [
     # `user_id`s of accounts to retrieve Tweets from
