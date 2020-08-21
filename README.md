@@ -18,7 +18,8 @@ Or alternatively, you can manually build the project from the source (requires N
 cargo install pipitor
 ```
 
-After the installation, create a manifest file named `Pipitor.toml` or `Pipitor.dhall` in the working directory.
+After the installation, create a manifest file named `Pipitor.toml` in the working directory.
+You can use JSON and Dhall formats as well (`Pipitor.json` and `Pipitor.dhall` respectively).
 Manifest format is shown in [`Pipitor.example.toml`](Pipitor.example.toml) and [`Pipitor.example.dhall`](Pipitor.example.dhall).
 
 Then, run the following, and follow the instructions on the command line:

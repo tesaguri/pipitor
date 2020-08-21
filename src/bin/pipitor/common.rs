@@ -1,7 +1,7 @@
 pub mod ipc;
 
-use std::ffi::OsString;
-use std::fs;
+use std::ffi::{OsStr, OsString};
+use std::fs::{self};
 use std::io;
 use std::marker::Unpin;
 use std::path::{Path, PathBuf};
@@ -21,6 +21,7 @@ pub struct Opt {
 pub struct RmGuard<P: AsRef<Path>>(pub P);
 
 const TOML: &str = "Pipitor.toml";
+const JSON: &str = "Pipitor.json";
 #[cfg(feature = "dhall")]
 const DHALL: &str = "Pipitor.dhall";
 
@@ -34,10 +35,14 @@ impl Opt {
         } else {
             match f(TOML.as_ref()) {
                 Ok(t) => Ok((t, TOML)),
-                #[cfg(feature = "dhall")]
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                    f(DHALL.as_ref()).map(|t| (t, DHALL))
-                }
+                Err(e) if e.kind() == io::ErrorKind::NotFound => match f(JSON.as_ref()) {
+                    Ok(t) => Ok((t, JSON)),
+                    #[cfg(feature = "dhall")]
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                        f(DHALL.as_ref()).map(|t| (t, DHALL))
+                    }
+                    Err(e) => Err(e),
+                },
                 Err(e) => Err(e),
             }
         }
@@ -51,10 +56,15 @@ impl Opt {
             .search_manifest(|path| fs::metadata(path))
             .context("unable to access the manifest")?
             .1;
-        #[cfg_attr(not(feature = "dhall"), allow(clippy::match_single_binding))]
-        let mut manifest: Manifest = match Path::new(path).extension() == Some("dhall".as_ref()) {
+        let mut manifest: Manifest = match Path::new(path).extension().and_then(OsStr::to_str) {
+            Some("json") => {
+                // `from_slice` is faster than `from_reader`.
+                // See <https://github.com/serde-rs/json/issues/160>.
+                let buf = fs::read(path).context("could not open the manifest")?;
+                json::from_slice(&buf).context("failed to parse the manifest")?
+            }
             #[cfg(feature = "dhall")]
-            true => serde_dhall::from_file(path)
+            Some("dhall") => serde_dhall::from_file(path)
                 .parse()
                 .context("failed to parse the manifest")?,
             _ => {
