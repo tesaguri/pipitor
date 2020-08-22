@@ -55,7 +55,7 @@ use tower_service::Service;
 use crate::Credentials;
 
 pub use self::http_service::HttpService;
-pub use self::serde_wrapper::Serde;
+pub use self::serde_wrapper::{MapAccessDeserializer, Serde};
 
 pub struct ArcService<S>(pub Arc<S>);
 

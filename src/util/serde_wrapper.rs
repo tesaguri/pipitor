@@ -5,8 +5,27 @@ use std::str;
 use regex::Regex;
 use serde::{de, de::Error as _, Deserialize};
 
+pub struct MapAccessDeserializer<A>(pub A);
+
 /// A wrapper struct to override `serde::Deserialize` behavior of `T`.
 pub struct Serde<T>(pub T);
+
+impl<'de, A: de::MapAccess<'de>> de::Deserializer<'de> for MapAccessDeserializer<A> {
+    type Error = A::Error;
+
+    fn deserialize_any<V>(self, v: V) -> Result<V::Value, A::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        v.visit_map(self.0)
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes
+        byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct map
+        struct enum identifier ignored_any
+    }
+}
 
 impl<'de> Deserialize<'de> for Serde<Cow<'de, str>> {
     fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
