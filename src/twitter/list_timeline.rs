@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use futures::channel::mpsc;
 use futures::{ready, Future, FutureExt, Stream, StreamExt};
@@ -47,7 +47,7 @@ where
 
 struct RequestSender<S, B> {
     list_id: NonZeroU64,
-    delay: u64,
+    delay: Duration,
     since_id: AtomicI64,
     tx: mpsc::Sender<Vec<Tweet>>,
     handle: interval::Handle,
@@ -245,8 +245,8 @@ where
         let since_id = if since_id == 0 {
             None
         } else {
-            // Subtract `delay` milliseconds from the "time part" of Snowflake ID.
-            Some(since_id - (self.delay << 22) as i64)
+            // Subtract `delay` from the "time part" of Snowflake ID.
+            Some(since_id - (self.delay.as_millis() << 22) as i64)
         };
         let count = if since_id.is_some() { 200 } else { 1 };
 

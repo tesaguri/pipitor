@@ -6,6 +6,7 @@ use std::ops::DerefMut;
 use std::path::Path;
 use std::str;
 use std::sync::Arc;
+use std::time::Duration;
 
 use regex::Regex;
 use serde::{de, de::Error, Deserialize};
@@ -78,7 +79,8 @@ pub struct Twitter {
 pub struct TwitterList {
     pub id: NonZeroU64,
     #[serde(default)]
-    pub delay: u64,
+    #[serde(deserialize_with = "de_delay")]
+    pub delay: Duration,
 }
 
 /// Implements `serde::de::Visitor` methods for "union" types,
@@ -446,6 +448,10 @@ fn de_outbox<'de, D: de::Deserializer<'de>>(d: D) -> Result<SmallVec<[Outbox; 1]
     }
 
     d.deserialize_any(Visitor)
+}
+
+fn de_delay<'de, D: de::Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+    u64::deserialize(d).map(Duration::from_millis)
 }
 
 fn resolve_path(path: &str, base: &str) -> Option<Box<str>> {
