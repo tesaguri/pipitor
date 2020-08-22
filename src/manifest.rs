@@ -9,12 +9,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use regex::Regex;
-use serde::{de, de::Error, Deserialize};
+use serde::{de, Deserialize};
 use smallvec::SmallVec;
 
 use crate::feed::Entry;
 use crate::twitter::Tweet;
-use crate::util::Serde;
+use crate::util::{MapAccessDeserializer, Serde};
 
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
@@ -282,60 +282,22 @@ impl<'de> Deserialize<'de> for Filter {
                 f.write_str("a string or map")
             }
 
-            fn visit_map<A: de::MapAccess<'de>>(self, mut a: A) -> Result<Filter, A::Error> {
-                enum Key {
-                    Title,
-                    Text,
-                    Unknown,
+            fn visit_map<A: de::MapAccess<'de>>(self, a: A) -> Result<Filter, A::Error> {
+                #[derive(Deserialize)]
+                pub struct FilterPrototype {
+                    title: Serde<Regex>,
+                    #[serde(default)]
+                    text: Option<Serde<Regex>>,
                 }
 
-                impl<'de> Deserialize<'de> for Key {
-                    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-                        struct Visitor;
-                        impl<'de> de::Visitor<'de> for Visitor {
-                            type Value = Key;
-                            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                                f.write_str("a string")
-                            }
-                            fn visit_bytes<E>(self, v: &[u8]) -> Result<Key, E> {
-                                match v {
-                                    b"title" => Ok(Key::Title),
-                                    b"text" => Ok(Key::Text),
-                                    _ => Ok(Key::Unknown),
-                                }
-                            }
-                            serde_delegate!(visit_str);
-                        }
-                        d.deserialize_str(Visitor)
-                    }
-                }
-
-                let mut title = None;
-                let mut text = None;
-
-                while let Some(key) = a.next_key::<Key>()? {
-                    match key {
-                        Key::Title => title = Some(a.next_value::<Serde<Regex>>()?.0),
-                        Key::Text => text = a.next_value::<Option<Serde<Regex>>>()?.map(|s| s.0),
-                        Key::Unknown => {
-                            a.next_value::<de::IgnoredAny>()?;
-                        }
-                    }
-                }
-
-                let title = if let Some(title) = title {
-                    title
-                } else {
-                    return Err(A::Error::missing_field("title"));
-                };
-
-                Ok(Filter { title, text })
+                FilterPrototype::deserialize(MapAccessDeserializer(a)).map(|p| Filter {
+                    title: p.title.0,
+                    text: p.text.map(|s| s.0),
+                })
             }
 
             fn visit_str<E: de::Error>(self, s: &str) -> Result<Filter, E> {
-                s.parse()
-                    .map(|title| Filter { title, text: None })
-                    .map_err(E::custom)
+                s.parse().map(Filter::from_title).map_err(E::custom)
             }
 
             serde_delegate!(visit_bytes);
