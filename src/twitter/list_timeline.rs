@@ -245,8 +245,13 @@ where
         let since_id = if since_id == 0 {
             None
         } else {
-            // Subtract `delay` from the "time part" of Snowflake ID.
-            Some(since_id - (self.delay.as_millis() << 22) as i64)
+            if self.delay == Duration::from_secs(0) {
+                Some(since_id)
+            } else {
+                // Subtract `delay` from the "time part"
+                // and round down the non-time part of Snowflake ID.
+                Some(((since_id >> 22) - self.delay.as_millis() as i64) << 22)
+            }
         };
         let count = if since_id.is_some() { 200 } else { 1 };
 
