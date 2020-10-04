@@ -167,7 +167,7 @@ where
         let app = App {
             core,
             twitter_list,
-            twitter: Some(twitter),
+            twitter,
             websub,
             sender: Sender::new(),
         };
@@ -204,7 +204,7 @@ where
     pub async fn reset(mut self: Pin<&mut Self>) -> anyhow::Result<()> {
         if self.twitter.is_none() {
             let mut this = self.as_mut().project();
-            this.twitter.set(Some(this.core.init_twitter().await?));
+            this.twitter.set(this.core.init_twitter().await?);
         }
 
         self.as_mut().shutdown().await?;
@@ -303,7 +303,7 @@ where
             {
                 let twitter = this.core.init_twitter().await?;
                 let twitter_list = this.core.init_twitter_list()?;
-                this.twitter = Some(twitter);
+                this.twitter = twitter;
                 this.twitter_list = twitter_list;
             }
 
@@ -486,8 +486,10 @@ where
             }
         }
 
-        if let Poll::Ready(result) = self.as_mut().poll_twitter(cx) {
-            return Poll::Ready(result);
+        if self.manifest().twitter.stream {
+            if let Poll::Ready(result) = self.as_mut().poll_twitter(cx) {
+                return Poll::Ready(result);
+            }
         }
 
         let this = self.project();
