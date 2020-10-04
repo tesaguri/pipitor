@@ -250,9 +250,9 @@ fn callback(host: Uri, id: i64) -> Uri {
 }
 
 fn gen_secret<R: RngCore>(mut rng: R) -> Secret {
-    let mut ret = [0u8; SECRET_LEN];
+    let mut ret = [0_u8; SECRET_LEN];
 
-    let mut rand = [0u8; SECRET_LEN * 6 / 8];
+    let mut rand = [0_u8; SECRET_LEN * 6 / 8];
     rng.fill_bytes(&mut rand);
 
     base64::encode_config_slice(&rand, base64::URL_SAFE_NO_PAD, &mut ret);

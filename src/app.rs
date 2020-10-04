@@ -9,7 +9,7 @@ use std::mem;
 use std::pin::Pin;
 use std::str;
 use std::task::{Context, Poll};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use anyhow::Context as _;
 use diesel::prelude::*;
@@ -28,7 +28,7 @@ use crate::router::Router;
 use crate::schema::*;
 use crate::socket;
 use crate::twitter;
-use crate::util::{open_credentials, HttpService, Maybe};
+use crate::util::{open_credentials, snowflake_to_system_time, HttpService, Maybe};
 use crate::websub;
 
 use self::core::Core;
@@ -233,12 +233,12 @@ where
             };
         }
 
-        let old_pool = if manifest.database_url != self.manifest().database_url {
+        let old_pool = if manifest.database_url == self.manifest().database_url {
+            None
+        } else {
             let pool = try_!(Pool::new(ConnectionManager::new(manifest.database_url()))
                 .context("failed to initialize the connection pool"));
             Some(mem::replace(self.core.database_pool_mut(), pool))
-        } else {
-            None
         };
         let credentials = try_!(open_credentials(manifest.credentials_path()));
         let old_credentials = mem::replace(self.core.credentials_mut(), credentials);
@@ -287,7 +287,7 @@ where
             old: Some((old, old_credentials)),
             old_pool,
         };
-        let this = &mut guard.this;
+        let this = &mut *guard.this;
         let (ref old, ref old_credentials) = *guard.old.as_ref().unwrap();
 
         let catch = async {
@@ -497,14 +497,4 @@ where
 
         Poll::Pending
     }
-}
-
-fn snowflake_to_system_time(id: u64) -> SystemTime {
-    // timestamp_ms = (snowflake >> 22) + 1_288_834_974_657
-    let snowflake_time_ms = id >> 22;
-    let timestamp = Duration::new(
-        snowflake_time_ms / 1_000 + 1_288_834_974,
-        (snowflake_time_ms as u32 % 1_000 + 657) * 1_000 * 1_000,
-    );
-    UNIX_EPOCH + timestamp
 }

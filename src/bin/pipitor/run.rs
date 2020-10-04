@@ -67,7 +67,7 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
                     return Ok(());
                 }
                 conn = ipc.select_next_some() => {
-                    let (req, mut write) = conn;
+                    let (req, write) = conn;
 
                     match req {
                         ipc::Request::Reload {} => {

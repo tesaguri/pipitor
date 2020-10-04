@@ -63,7 +63,7 @@ where
             .first::<i64>(&pool.get().unwrap())
             .optional()
             .unwrap()
-            .map(|expires_at| expires_at.try_into().map_or(0u64, refresh_time));
+            .map(|expires_at| expires_at.try_into().map_or(0, refresh_time));
 
         let (tx, rx) = mpsc::channel(0);
 
@@ -86,7 +86,7 @@ where
                 .first::<i64>(conn)
                 .optional()
                 .unwrap()
-                .map(|expires_at| expires_at.try_into().map_or(0u64, refresh_time))
+                .map(|expires_at| expires_at.try_into().map_or(0, refresh_time))
         }));
 
         Subscriber {

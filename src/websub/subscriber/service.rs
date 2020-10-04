@@ -226,8 +226,8 @@ where
         }
 
         let path = req.uri().path();
-        let id = if path.starts_with(crate::websub::CALLBACK_PREFIX) {
-            let id: u64 = validate!(path[crate::websub::CALLBACK_PREFIX.len()..].parse());
+        let id = if let Some(id) = path.strip_prefix(crate::websub::CALLBACK_PREFIX) {
+            let id: u64 = validate!(id.parse());
             validate!(i64::try_from(id))
         } else {
             return Response::builder()
@@ -278,7 +278,7 @@ where
         let signature = match method {
             b"sha1" => {
                 const LEN: usize = <<Sha1 as FixedOutput>::OutputSize as Unsigned>::USIZE;
-                let mut buf = [0u8; LEN];
+                let mut buf = [0_u8; LEN];
                 validate!(hex::decode_to_slice(signature_hex, &mut buf));
                 buf
             }

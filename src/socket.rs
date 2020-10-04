@@ -204,10 +204,10 @@ impl<'de> de::Deserialize<'de> for Addr {
             }
 
             fn visit_str<E: de::Error>(self, v: &str) -> Result<Addr, E> {
-                if v.starts_with("tcp://") {
-                    v[6..].parse().map(Addr::Tcp).map_err(E::custom)
-                } else if v.starts_with("unix://") {
-                    Ok(Addr::Unix(PathBuf::from(&v[7..])))
+                if let Some(addr) = v.strip_prefix("tcp://") {
+                    addr.parse().map(Addr::Tcp).map_err(E::custom)
+                } else if let Some(path) = v.strip_prefix("unix://") {
+                    Ok(Addr::Unix(PathBuf::from(path)))
                 } else {
                     Err(E::custom("unknown bind address type"))
                 }

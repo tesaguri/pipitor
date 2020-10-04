@@ -25,7 +25,7 @@ pub struct Core<S> {
     pool: Pool<ConnectionManager<SqliteConnection>>,
     #[pin]
     client: S,
-    pub(super) twitter_tokens: HashMap<i64, oauth_credentials::Credentials<Box<str>>>,
+    twitter_tokens: HashMap<i64, oauth_credentials::Credentials<Box<str>>>,
 }
 
 impl<S> Core<S> {
@@ -89,7 +89,7 @@ impl<S> Core<S> {
 
         let mut twitter_topics: Vec<_> =
             self.manifest.twitter_topics().map(|id| id as u64).collect();
-        twitter_topics.sort();
+        twitter_topics.sort_unstable();
         twitter_topics.dedup();
 
         let mut client = self.client.clone().into_service();
@@ -115,7 +115,7 @@ impl<S> Core<S> {
     {
         use crate::schema::last_tweet::dsl::*;
 
-        let list = if let Some(list) = self.manifest.twitter.list.clone() {
+        let list = if let Some(ref list) = self.manifest.twitter.list {
             list
         } else {
             return Ok(twitter::ListTimeline::empty());
