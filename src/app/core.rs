@@ -5,9 +5,9 @@ use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
-use futures::{future, Future, FutureExt, TryFutureExt};
 use http_body::Body;
 use pin_project::pin_project;
+use tower_util::ServiceExt;
 use twitter_stream::TwitterStream;
 
 use crate::models;
@@ -70,16 +70,17 @@ impl<S> Core<S> {
         Ok(ret)
     }
 
-    pub fn init_twitter<'a, B>(
-        &'a self,
-    ) -> impl Future<Output = anyhow::Result<TwitterStream<S::ResponseBody>>> + 'a
+    pub async fn init_twitter<B>(&self) -> anyhow::Result<Option<TwitterStream<S::ResponseBody>>>
     where
         S: HttpService<B> + Clone,
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-        S::Future: 'a,
         B: Default + From<Vec<u8>>,
     {
         trace_fn!(Core::<S>::init_twitter);
+
+        if !self.manifest.twitter.stream {
+            return Ok(None);
+        }
 
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
 
@@ -91,19 +92,17 @@ impl<S> Core<S> {
         twitter_topics.sort();
         twitter_topics.dedup();
 
-        let mut client = Some(self.client.clone().into_service());
-        future::poll_fn(move |cx| {
-            client.as_mut().unwrap().poll_ready(cx).map(|result| {
-                result.context("error while connecting to Twitter's Streaming API")?;
-                Ok(client.take().unwrap())
-            })
-        })
-        .and_then(move |client| {
-            twitter_stream::Builder::new(stream_token)
-                .follow(&*twitter_topics)
-                .listen_with_client(client)
-                .map(|result| result.context("error while connecting to Twitter's Streaming API"))
-        })
+        let mut client = self.client.clone().into_service();
+        client
+            .ready_and()
+            .await
+            .context("error while connecting to Twitter's Streaming API")?;
+        let twitter = twitter_stream::Builder::new(stream_token)
+            .follow(&*twitter_topics)
+            .listen_with_client(client)
+            .await
+            .context("error while connecting to Twitter's Streaming API")?;
+        Ok(Some(twitter))
     }
 
     pub(super) fn init_twitter_list<B>(&self) -> anyhow::Result<twitter::ListTimeline<S, B>>

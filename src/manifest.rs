@@ -72,6 +72,8 @@ pub enum TopicId<'a> {
 pub struct Twitter {
     pub user: i64,
     #[serde(default)]
+    pub stream: bool,
+    #[serde(default)]
     pub list: Option<TwitterList>,
 }
 

@@ -27,7 +27,7 @@ For more information, please refer to <http://unlicense.org/>
 
 -- A Dhall type definition for the Pipitor manifest file.
 -- The following is a recommended way of importing the file:
--- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/dhall-schema-v0.3.0-alpha.8/schema.dhall sha256:00a2c768b7e5a739ed17ef82c947405965f3b3010c9f408ed4e80b8744166e9b
+-- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/master/schema.dhall sha256:b5747fd58250bb92a6450310e58641fd79385095e0fc10a4686590f4cf37cf72
 
 let Topic = < Feed : Text | Twitter : Natural >
 
@@ -52,8 +52,9 @@ let TwitterList =
       { Type = { id : Natural, delay : Natural }, default.delay = 0 }
 
 let Twitter =
-      { Type = { user : Natural, list : Optional TwitterList.Type }
-      , default.list = None TwitterList.Type
+      { Type =
+          { user : Natural, stream : Bool, list : Optional TwitterList.Type }
+      , default = { stream = False, list = None TwitterList.Type }
       }
 
 let Manifest =
