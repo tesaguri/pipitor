@@ -134,33 +134,7 @@ where
         F: FnOnce(&mut ListenFd) -> anyhow::Result<Option<I>>,
     {
         let core = Core::new(manifest, client)?;
-
-        let websub = if let Some(ref websub) = core.credentials().websub {
-            let incoming = if let Some(ref bind) = websub.bind {
-                I::bind(bind)?
-            } else {
-                let mut fds = ListenFd::from_env();
-                if let Some(i) = fds.take_tcp_listener(0).ok().flatten() {
-                    i.try_into()?
-                } else if let Some(i) = make_unix_incoming(&mut fds)? {
-                    i
-                } else {
-                    anyhow::bail!("Either `websub.bind` in `credentials.toml` or `LISTEN_FD` must be provided for WebSub subscriber");
-                }
-            };
-            let host = websub.host.clone();
-            let websub = websub::Subscriber::new(
-                incoming,
-                host,
-                core.http_client().clone(),
-                core.database_pool().clone(),
-            );
-            websub.service().remove_dangling_subscriptions();
-            Some(websub)
-        } else {
-            None
-        };
-
+        let websub = Self::init_websub(&core, make_unix_incoming)?;
         let twitter = core.init_twitter().await?;
         let twitter_list = core.init_twitter_list()?;
 
@@ -175,6 +149,42 @@ where
         app.sync_websub_subscriptions()?;
 
         Ok(app)
+    }
+
+    fn init_websub<F>(
+        core: &Core<S>,
+        make_unix_incoming: F,
+    ) -> anyhow::Result<Option<websub::Subscriber<S, B, I>>>
+    where
+        F: FnOnce(&mut ListenFd) -> anyhow::Result<Option<I>>,
+    {
+        let config = if let Some(ref config) = core.credentials().websub {
+            config
+        } else {
+            return Ok(None);
+        };
+
+        let incoming = if let Some(ref bind) = config.bind {
+            I::bind(bind)?
+        } else {
+            let mut fds = ListenFd::from_env();
+            if let Some(i) = fds.take_tcp_listener(0).ok().flatten() {
+                i.try_into()?
+            } else if let Some(i) = make_unix_incoming(&mut fds)? {
+                i
+            } else {
+                anyhow::bail!("Either `websub.bind` in `credentials.toml` or `LISTEN_FD` must be provided for WebSub subscriber");
+            }
+        };
+
+        let host = config.host.clone();
+        let http = core.http_client().clone();
+        let pool = core.database_pool().clone();
+        let websub = websub::Subscriber::new(incoming, host, http, pool);
+
+        websub.service().remove_dangling_subscriptions();
+
+        Ok(Some(websub))
     }
 }
 
