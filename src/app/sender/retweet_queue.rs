@@ -10,8 +10,9 @@ use http_body::Body;
 use pin_project::pin_project;
 use serde::de;
 
-use crate::twitter;
+use crate::schema::*;
 use crate::util::HttpService;
+use crate::{models, twitter};
 
 use super::super::Core;
 
@@ -45,9 +46,6 @@ where
         core: &Core<S>,
         cx: &mut Context<'_>,
     ) -> Poll<anyhow::Result<()>> {
-        use crate::models::NewTweet;
-        use crate::schema::tweets::dsl::*;
-
         let mut conn = None;
         while let Some(retweeted_status) = ready!(self.as_mut().project().queue.poll_next(cx)?) {
             let conn = if let Some(ref c) = conn {
@@ -57,8 +55,8 @@ where
                 conn.as_ref().unwrap()
             };
 
-            diesel::replace_into(tweets)
-                .values(&NewTweet::from(&retweeted_status))
+            diesel::replace_into(tweets::table)
+                .values(&models::NewTweet::from(&retweeted_status))
                 .execute(&*conn)?;
             self.as_mut()
                 .project()

@@ -12,6 +12,7 @@ use twitter_stream::TwitterStream;
 
 use crate::models;
 use crate::router::Router;
+use crate::schema::*;
 use crate::twitter;
 use crate::util::{open_credentials, HttpService};
 use crate::{Credentials, Manifest};
@@ -40,21 +41,14 @@ impl<S> Core<S> {
             .context("failed to initialize the connection pool")?;
         let credentials: Credentials = open_credentials(manifest.credentials_path())?;
 
-        {
-            use crate::schema::last_tweet::dsl::*;
-
-            diesel::insert_into(last_tweet)
-                .values(&models::NewLastTweet {
-                    id: 0,
-                    status_id: 0,
-                })
-                .execute(&*pool.get()?)
-                .map(|_| ())
-                .or_else(|e| match e {
-                    QueryError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => Ok(()),
-                    e => Err(e),
-                })?;
-        }
+        diesel::insert_into(last_tweet::table)
+            .values((last_tweet::id.eq(0), last_tweet::status_id.eq(0)))
+            .execute(&*pool.get()?)
+            .map(|_| ())
+            .or_else(|e| match e {
+                QueryError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => Ok(()),
+                e => Err(e),
+            })?;
 
         let mut ret = Core {
             router: Router::from_manifest(&manifest),
@@ -113,17 +107,15 @@ impl<S> Core<S> {
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
         B: Default + From<Vec<u8>> + Send + 'static,
     {
-        use crate::schema::last_tweet::dsl::*;
-
         let list = if let Some(ref list) = self.manifest.twitter.list {
             list
         } else {
             return Ok(twitter::ListTimeline::empty());
         };
 
-        let since_id = last_tweet
+        let since_id = last_tweet::table
             .find(&0)
-            .select(status_id)
+            .select(last_tweet::status_id)
             .first::<i64>(&*self.conn()?)
             .optional()?
             .filter(|&n| n > 0);
@@ -151,13 +143,9 @@ impl<S> Core<S> {
             .into_iter()
             .collect::<Vec<_>>();
 
-        let tokens: Vec<models::TwitterToken> = {
-            use crate::schema::twitter_tokens::dsl::*;
-
-            twitter_tokens
-                .filter(id.eq_any(&unauthed_users))
-                .load(&*self.conn()?)?
-        };
+        let tokens: Vec<models::TwitterToken> = twitter_tokens::table
+            .filter(twitter_tokens::id.eq_any(&unauthed_users))
+            .load(&*self.conn()?)?;
 
         anyhow::ensure!(
             unauthed_users.len() == tokens.len(),

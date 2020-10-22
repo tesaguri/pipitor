@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use diesel::dsl::*;
 use diesel::prelude::*;
 use futures::stream::{FuturesUnordered, Stream};
 use futures::{ready, FutureExt};
@@ -13,11 +14,9 @@ use serde::de;
 
 use crate::feed::{Entry, Feed};
 use crate::manifest::Outbox;
-use crate::models::NewEntry;
 use crate::schema::*;
-use crate::twitter;
 use crate::util::{HttpService, ResolveWith};
-use diesel::dsl::*;
+use crate::{models, twitter};
 
 use super::{Core, TwitterRequestExt as _};
 
@@ -121,7 +120,7 @@ where
                         .map(move |result| -> anyhow::Result<()> {
                             result?;
                             diesel::replace_into(entries::table)
-                                .values(&NewEntry::new(&shared.0, &shared.1).unwrap())
+                                .values(&models::NewEntry::new(&shared.0, &shared.1).unwrap())
                                 .execute(&*conn)?;
                             Ok(())
                         })

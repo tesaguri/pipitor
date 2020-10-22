@@ -6,6 +6,7 @@ use tower_util::ServiceExt;
 
 use crate::util::{ConcatBody, HttpService};
 
+use super::super::models::AccessToken;
 use super::{Error, Response};
 
 pub async fn request_token<'a, S, B>(
@@ -50,7 +51,7 @@ pub async fn access_token<'a, S, B>(
     client_credentials: Credentials<&'a str>,
     temporary_credentials: Credentials<&'a str>,
     client: S,
-) -> Result<Response<(i64, Credentials<Box<str>>)>, Error<S::Error, <S::ResponseBody as Body>::Error>>
+) -> Result<Response<AccessToken>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
     S: HttpService<B>,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
@@ -80,16 +81,7 @@ where
         .await
         .map_err(Error::Body)?;
 
-    #[derive(serde::Deserialize)]
-    struct Token {
-        #[serde(flatten)]
-        token: Credentials<Box<str>>,
-        user_id: i64,
-    }
-
     super::make_response(status, rate_limit, &body, |body| {
-        serde_urlencoded::from_bytes::<Token>(body)
-            .map(|token| (token.user_id, token.token))
-            .map_err(|_| Error::Unexpected)
+        serde_urlencoded::from_bytes(body).map_err(|_| Error::Unexpected)
     })
 }

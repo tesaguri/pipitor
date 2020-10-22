@@ -8,6 +8,7 @@ use futures::future::{self, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
+use pipitor::schema::*;
 
 use crate::common::{client, open_credentials};
 
@@ -15,8 +16,6 @@ use crate::common::{client, open_credentials};
 pub struct Opt {}
 
 pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
-    use pipitor::schema::twitter_tokens::dsl::*;
-
     let manifest = opt.open_manifest()?;
     let list_id = if let Some(ref list) = manifest.twitter.list {
         list.id
@@ -32,7 +31,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
     let mut client = client();
 
-    let token: oauth_credentials::Credentials<_> = twitter_tokens
+    let token: oauth_credentials::Credentials<_> = twitter_tokens::table
         .find(&manifest.twitter.user)
         .get_result::<models::TwitterToken>(&*pool.get()?)
         .optional()

@@ -14,20 +14,6 @@ pub struct NewEntry<'a> {
 }
 
 #[derive(Clone, Debug, Identifiable, Queryable)]
-#[table_name = "last_tweet"]
-pub struct LastTweet {
-    pub id: i64,
-    pub status_id: i64,
-}
-
-#[derive(Clone, Debug, Insertable)]
-#[table_name = "last_tweet"]
-pub struct NewLastTweet {
-    pub id: i64,
-    pub status_id: i64,
-}
-
-#[derive(Clone, Debug, Identifiable, Queryable)]
 pub struct Tweet {
     pub id: i64,
     pub text: String,

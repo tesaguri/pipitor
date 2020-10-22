@@ -1,3 +1,4 @@
+use oauth_credentials::Credentials;
 use serde::ser::{SerializeMap, Serializer};
 use serde::{de, Deserialize, Serialize};
 
@@ -37,6 +38,12 @@ struct Entities {
 struct Url {
     expanded_url: String,
     indices: (usize, usize),
+}
+
+#[derive(serde::Deserialize)]
+pub struct AccessToken {
+    pub credentials: Credentials,
+    pub user_id: i64,
 }
 
 impl<'de> Deserialize<'de> for Tweet {
@@ -83,6 +90,16 @@ impl<'de> Deserialize<'de> for Tweet {
                 retweeted_status: p.retweeted_status,
             })
         })?
+    }
+}
+
+impl<'a> From<&'a AccessToken> for crate::models::NewTwitterTokens<'a> {
+    fn from(t: &'a AccessToken) -> Self {
+        crate::models::NewTwitterTokens {
+            id: t.user_id,
+            access_token: &t.credentials.identifier,
+            access_token_secret: &t.credentials.secret,
+        }
     }
 }
 

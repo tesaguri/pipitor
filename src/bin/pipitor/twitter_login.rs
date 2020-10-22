@@ -10,6 +10,7 @@ use futures::stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt};
 use http::StatusCode;
 use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
+use pipitor::schema::*;
 use tokio::io::AsyncBufReadExt;
 
 use crate::common::{client, open_credentials};
@@ -18,8 +19,6 @@ use crate::common::{client, open_credentials};
 pub struct Opt {}
 
 pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
-    use pipitor::schema::twitter_tokens::dsl::*;
-
     let manifest = opt.open_manifest()?;
     let credentials = open_credentials(opt, &manifest)?;
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
@@ -32,7 +31,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .collect::<HashSet<_>>()
         .iter()
         .map(|&user| {
-            let token = twitter_tokens
+            let token = twitter_tokens::table
                 .find(&user)
                 .get_result::<models::TwitterToken>(&*pool.get()?)
                 .optional()
@@ -81,7 +80,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
         let verifier = input_verifier(&mut stdin, temporary.identifier(), &unauthed_users).await?;
 
-        let (user, token) = twitter::oauth::access_token(
+        let token = twitter::oauth::access_token(
             &verifier,
             credentials.twitter.client.as_ref(),
             temporary.as_ref(),
@@ -91,15 +90,11 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .context("error while getting OAuth access token from Twitter")?
         .data;
 
-        if unauthed_users.remove(&user) {
-            diesel::replace_into(twitter_tokens)
-                .values(models::NewTwitterTokens {
-                    id: user,
-                    access_token: token.identifier(),
-                    access_token_secret: &token.secret,
-                })
+        if unauthed_users.remove(&token.user_id) {
+            diesel::replace_into(twitter_tokens::table)
+                .values(&models::NewTwitterTokens::from(&token))
                 .execute(&*pool.get()?)?;
-            println!("Successfully logged in as user_id={}", user);
+            println!("Successfully logged in as user_id={}", token.user_id);
         } else {
             println!("Invalid user, try again");
             // TODO: invalidate token
