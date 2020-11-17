@@ -18,6 +18,13 @@ table! {
 }
 
 table! {
+    ongoing_retweets (id, user) {
+        id -> BigInt,
+        user -> BigInt,
+    }
+}
+
+table! {
     tweets (id) {
         id -> BigInt,
         text -> Text,
@@ -65,6 +72,8 @@ table! {
     }
 }
 
+joinable!(ongoing_retweets -> tweets (id));
+joinable!(ongoing_retweets -> twitter_tokens (user));
 joinable!(websub_active_subscriptions -> websub_subscriptions (id));
 joinable!(websub_pending_subscriptions -> websub_subscriptions (id));
 joinable!(websub_renewing_subscriptions -> websub_active_subscriptions (old));
@@ -73,6 +82,7 @@ joinable!(websub_renewing_subscriptions -> websub_pending_subscriptions (new));
 allow_tables_to_appear_in_same_query!(
     entries,
     last_tweet,
+    ongoing_retweets,
     tweets,
     twitter_tokens,
     websub_active_subscriptions,

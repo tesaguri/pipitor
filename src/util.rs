@@ -34,7 +34,7 @@ use std::error::Error;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io;
-use std::marker::{PhantomData, Unpin};
+use std::marker::PhantomData;
 use std::mem;
 use std::ops::Range;
 use std::pin::Pin;
@@ -75,14 +75,6 @@ pub enum Maybe<T> {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash)]
 pub enum Never {}
-
-/// A future that resolves to `(F::Output, T).
-#[pin_project(project = ResolveWithProj)]
-pub struct ResolveWith<F, T> {
-    #[pin]
-    future: F,
-    value: Option<T>,
-}
 
 macro_rules! trace_fn {
     (@heading $path:path) => {
@@ -178,36 +170,6 @@ impl tokio::io::AsyncWrite for Never {
 
     fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
         match *self {}
-    }
-}
-
-impl<F, T> ResolveWith<F, T>
-where
-    F: Future,
-    T: Unpin,
-{
-    pub fn new(future: F, value: T) -> Self {
-        ResolveWith {
-            future,
-            value: Some(value),
-        }
-    }
-}
-
-impl<F, T> Future for ResolveWith<F, T>
-where
-    F: Future,
-    T: Unpin,
-{
-    type Output = (F::Output, T);
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let ResolveWithProj { future, value } = self.project();
-
-        future.poll(cx).map(|x| {
-            let y = value.take().expect("polled `ResolveWith` after completion");
-            (x, y)
-        })
     }
 }
 

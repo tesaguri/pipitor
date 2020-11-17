@@ -48,7 +48,6 @@ where
     twitter: Option<TwitterStream<S::ResponseBody>>,
     #[pin]
     websub: Option<websub::Subscriber<S, B, I>>,
-    #[pin]
     sender: Sender<S, B>,
 }
 
@@ -204,11 +203,11 @@ where
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
         let mut this = self.project();
-        let poll_sender = this.sender.as_mut().poll_done(&this.core, cx);
+        let poll_sender = this.sender.poll_done(&this.core, cx);
         while let Some(tweets) = ready!(this.twitter_list.as_mut().poll_next_backfill(cx)) {
-            this.sender.as_mut().send_tweets(tweets, &this.core)?;
+            this.sender.send_tweets(tweets, &this.core)?;
         }
-        poll_sender
+        poll_sender.map(|()| Ok(()))
     }
 
     pub async fn reset(mut self: Pin<&mut Self>) -> anyhow::Result<()> {
@@ -218,7 +217,6 @@ where
         }
 
         self.as_mut().shutdown().await?;
-        debug_assert!(!self.sender.has_pending());
 
         Ok(())
     }
@@ -385,7 +383,7 @@ where
                     .in_reply_to_user_id
                     .map_or(true, |to| core.manifest().has_topic(&TopicId::Twitter(to)));
             if will_process {
-                this.sender.as_mut().send_tweet(tweet, &core)?;
+                this.sender.send_tweet(tweet, &core)?;
             }
         }
 
@@ -483,13 +481,13 @@ where
         let mut this = self.as_mut().project();
 
         while let Poll::Ready(Some(tweets)) = this.twitter_list.as_mut().poll_next(cx)? {
-            this.sender.as_mut().send_tweets(tweets, &this.core)?;
+            this.sender.send_tweets(tweets, &this.core)?;
         }
 
         if let Some(mut websub) = this.websub.as_pin_mut() {
             while let Poll::Ready(Some((topic, content))) = websub.as_mut().poll_next(cx)? {
                 if let Some(feed) = content.parse_feed() {
-                    this.sender.as_mut().send_feed(&topic, feed, &this.core)?;
+                    this.sender.send_feed(&topic, feed, &this.core)?;
                 } else {
                     log::warn!("Failed to parse an updated content of topic {}", topic);
                 }
@@ -501,9 +499,6 @@ where
                 return Poll::Ready(result);
             }
         }
-
-        let this = self.project();
-        let _ = this.sender.poll_done(&this.core, cx)?;
 
         Poll::Pending
     }

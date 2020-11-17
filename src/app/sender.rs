@@ -1,44 +1,34 @@
-mod retweet_queue;
-
-use std::pin::Pin;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use diesel::dsl::*;
 use diesel::prelude::*;
-use futures::stream::{FuturesUnordered, Stream};
-use futures::{ready, FutureExt};
+use futures::stream::FuturesUnordered;
+use futures::{future, Future, FutureExt, StreamExt, TryFutureExt};
 use http_body::Body;
 use pin_project::pin_project;
-use serde::de;
 
 use crate::feed::{Entry, Feed};
 use crate::manifest::Outbox;
 use crate::schema::*;
-use crate::util::{HttpService, ResolveWith};
+use crate::util::HttpService;
 use crate::{models, twitter};
 
 use super::{Core, TwitterRequestExt as _};
 
-use self::retweet_queue::{PendingRetweets, RetweetQueue};
-
-/// A non-thread-safe object that sends entries to corresponding outboxes.
+/// An object used to send entries to their corresponding outboxes.
 #[pin_project]
 pub struct Sender<S, B>
 where
     S: HttpService<B>,
 {
-    #[pin]
-    find_duplicate_tweet_queue: FuturesUnordered<
-        ResolveWith<twitter::ResponseFuture<de::IgnoredAny, S, B>, twitter::Tweet>,
-    >,
-    #[pin]
-    retweet_queue: RetweetQueue<S, B>,
+    marker: PhantomData<fn() -> (S, B)>,
 }
 
 impl<S, B> Sender<S, B>
 where
-    S: HttpService<B> + Clone + Send + 'static,
+    S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
@@ -48,31 +38,17 @@ where
         Default::default()
     }
 
-    pub fn has_pending(&self) -> bool {
-        !self.retweet_queue.is_empty()
-    }
-
-    pub fn send_feed(
-        mut self: Pin<&mut Self>,
-        topic: &str,
-        feed: Feed,
-        core: &Core<S>,
-    ) -> anyhow::Result<()> {
+    pub fn send_feed(&self, topic: &str, feed: Feed, core: &Core<S>) -> anyhow::Result<()> {
         trace_fn!(Sender::<S, B>::send_feed, topic, feed.id);
 
         for e in feed.entries {
-            self.as_mut().send_entry(topic, e, core)?;
+            self.send_entry(topic, e, core)?;
         }
 
         Ok(())
     }
 
-    pub fn send_entry(
-        self: Pin<&mut Self>,
-        topic: &str,
-        entry: Entry,
-        core: &Core<S>,
-    ) -> anyhow::Result<()> {
+    pub fn send_entry(&self, topic: &str, entry: Entry, core: &Core<S>) -> anyhow::Result<()> {
         trace_fn!(Sender::<S, B>::send_entry, entry);
 
         let link = if let Some(ref link) = entry.link {
@@ -138,15 +114,11 @@ where
         Ok(())
     }
 
-    pub fn send_tweet(
-        self: Pin<&mut Self>,
-        tweet: twitter::Tweet,
-        core: &Core<S>,
-    ) -> anyhow::Result<()> {
+    pub fn send_tweet(&self, tweet: twitter::Tweet, core: &Core<S>) -> anyhow::Result<()> {
         self.send_tweet_(tweet, core, true)
     }
 
-    pub fn send_tweets<I>(mut self: Pin<&mut Self>, tweets: I, core: &Core<S>) -> anyhow::Result<()>
+    pub fn send_tweets<I>(&self, tweets: I, core: &Core<S>) -> anyhow::Result<()>
     where
         I: IntoIterator<Item = twitter::Tweet>,
         I::IntoIter: DoubleEndedIterator,
@@ -154,14 +126,13 @@ where
         // Tweets are assumed to be sorted in descending order of posted time.
         let mut tweets = tweets.into_iter().rev().peekable();
         while let Some(t) = tweets.next() {
-            self.as_mut()
-                .send_tweet_(t, core, tweets.peek().is_none())?;
+            self.send_tweet_(t, core, tweets.peek().is_none())?;
         }
         Ok(())
     }
 
     fn send_tweet_(
-        self: Pin<&mut Self>,
+        &self,
         tweet: twitter::Tweet,
         core: &Core<S>,
         update_last_tweet: bool,
@@ -170,9 +141,7 @@ where
 
         let conn = core.conn()?;
 
-        let already_processed = self.retweet_queue.contains(tweet.id)
-            || select(exists(tweets::table.find(&tweet.id))).get_result::<bool>(&*conn)?;
-        if already_processed {
+        if select(exists(tweets::table.find(&tweet.id))).get_result::<bool>(&*conn)? {
             trace!("the Tweet has already been processed");
             return Ok(());
         }
@@ -189,7 +158,7 @@ where
         }
 
         if !core.manifest().skip_duplicate {
-            self.retweet(tweet, core);
+            tokio::spawn(self.retweet(tweet, core)?);
             return Ok(());
         }
 
@@ -202,70 +171,95 @@ where
             .filter(tweets::text.eq(&*tweet.text))
             .select(max(tweets::id))
             .first::<Option<i64>>(&*conn)?;
+        let retweet = self.retweet(tweet, core)?;
         if let Some(dup) = duplicate {
             // Check whether the duplicate Tweet still exists
-            let res = twitter::statuses::Show::new(dup).send(core, None);
-            self.find_duplicate_tweet_queue
-                .push(ResolveWith::new(res, tweet));
+            let task =
+                twitter::statuses::Show::new(dup)
+                    .send(core, None)
+                    .then(|result| async move {
+                        if result.is_err() {
+                            // Either the duplicate Tweet does not exist anymore (404)
+                            // or the Tweet's existence could not be verified because of an error.
+                            retweet.await;
+                        }
+                    });
+            tokio::spawn(task);
         } else {
-            self.retweet(tweet, core);
+            tokio::spawn(retweet);
         }
 
         Ok(())
     }
 
-    pub fn poll_done(
-        mut self: Pin<&mut Self>,
-        core: &Core<S>,
-        cx: &mut Context<'_>,
-    ) -> Poll<anyhow::Result<()>> {
-        let mut ready = true;
-
-        ready &= self.as_mut().poll_find_duplicate_tweet(core, cx).is_ready();
-        ready &= self.project().retweet_queue.poll(core, cx)?.is_ready();
-
-        if ready {
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Pending
-        }
-    }
-
-    fn poll_find_duplicate_tweet(
-        mut self: Pin<&mut Self>,
-        core: &Core<S>,
-        cx: &mut Context<'_>,
-    ) -> Poll<()> {
-        while let Some((result, tweet)) = ready!(self
-            .as_mut()
-            .project()
-            .find_duplicate_tweet_queue
-            .poll_next(cx))
-        {
-            if result.is_err() {
-                // Either the duplicate Tweet does not exist anymore (404)
-                // or the Tweet's existence could not be verified because of an error.
-                self.as_mut().retweet(tweet, core);
-            }
-        }
-
+    pub fn poll_done(&self, _core: &Core<S>, _cx: &mut Context<'_>) -> Poll<()> {
+        // TODO: bring back "graceful shutdown".
         Poll::Ready(())
     }
 
-    fn retweet(self: Pin<&mut Self>, tweet: twitter::Tweet, core: &Core<S>) {
-        let mut retweets = PendingRetweets::new();
+    fn retweet(
+        &self,
+        tweet: twitter::Tweet,
+        core: &Core<S>,
+    ) -> anyhow::Result<impl Future<Output = ()>> {
+        let conn = core.conn()?;
 
-        for outbox in core.router().route_tweet(&tweet) {
-            debug!("sending a Tweet to outbox {:?}: {:?}", outbox, tweet);
+        let tasks = FuturesUnordered::new();
 
-            match *outbox {
-                Outbox::Twitter(user) => {
-                    retweets.push(twitter::statuses::Retweet::new(tweet.id).send(core, user));
+        conn.transaction(|| {
+            diesel::replace_into(tweets::table)
+                .values(&models::NewTweet::from(&tweet))
+                .execute(&*conn)?;
+
+            for outbox in core.router().route_tweet(&tweet) {
+                debug!("sending a Tweet to outbox {:?}: {:?}", outbox, tweet);
+
+                match *outbox {
+                    Outbox::Twitter(user) => {
+                        diesel::replace_into(ongoing_retweets::table)
+                            .values((
+                                ongoing_retweets::id.eq(tweet.id),
+                                ongoing_retweets::user.eq(user),
+                            ))
+                            .execute(&*conn)?;
+                        let tweet_id = tweet.id;
+                        let pool = core.database_pool().clone();
+                        let task = twitter::statuses::Retweet::new(tweet.id)
+                            .send(core, user)
+                            .map_ok(|_| {})
+                            .or_else(|e| {
+                                if let twitter::Error::Twitter(ref e) = e {
+                                    let is_negligible = |code| {
+                                        use twitter::ErrorCode;
+                                        [
+                                            ErrorCode::YOU_HAVE_ALREADY_RETWEETED_THIS_TWEET,
+                                            ErrorCode::NO_STATUS_FOUND_WITH_THAT_ID,
+                                        ]
+                                        .contains(&code)
+                                    };
+                                    if !e.codes().any(is_negligible) {
+                                        return future::ready(Ok(()));
+                                    }
+                                }
+                                future::ready(Err(e))
+                            })
+                            .map(move |result| {
+                                if let Err(e) = result {
+                                    error!("{:?}", e);
+                                    return;
+                                }
+                                if let Ok(conn) = pool.get() {
+                                    let row = ongoing_retweets::table.find((tweet_id, user));
+                                    let _ = diesel::delete(row).execute(&*conn);
+                                }
+                            });
+                        tasks.push(task);
+                    }
                 }
             }
-        }
 
-        self.project().retweet_queue.insert(tweet, retweets);
+            Ok(tasks.for_each(|()| future::ready(())))
+        })
     }
 }
 
@@ -277,8 +271,7 @@ where
 {
     fn default() -> Self {
         Sender {
-            find_duplicate_tweet_queue: Default::default(),
-            retweet_queue: Default::default(),
+            marker: PhantomData,
         }
     }
 }
