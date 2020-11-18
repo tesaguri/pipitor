@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::task::{Context, Poll};
 
-use anyhow::Context;
+use anyhow::Context as _;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::result::{DatabaseErrorKind, Error as QueryError};
@@ -17,6 +18,8 @@ use crate::twitter;
 use crate::util::{open_credentials, HttpService};
 use crate::{Credentials, Manifest};
 
+use super::shutdown::Shutdown;
+
 /// An object referenced by `poll`-like methods under `app` module.
 #[pin_project]
 pub struct Core<S> {
@@ -27,6 +30,7 @@ pub struct Core<S> {
     #[pin]
     client: S,
     twitter_tokens: HashMap<i64, oauth_credentials::Credentials<Box<str>>>,
+    shutdown: Shutdown,
 }
 
 impl<S> Core<S> {
@@ -57,6 +61,7 @@ impl<S> Core<S> {
             pool,
             client,
             twitter_tokens: HashMap::new(),
+            shutdown: Shutdown::default(),
         };
 
         ret.load_twitter_tokens()?;
@@ -156,6 +161,14 @@ impl<S> Core<S> {
             .extend(tokens.into_iter().map(|token| (token.id, token.into())));
 
         Ok(())
+    }
+
+    pub fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()> {
+        self.shutdown.poll(cx)
+    }
+
+    pub fn shutdown_handle(&self) -> super::shutdown::Handle {
+        self.shutdown.handle().clone()
     }
 }
 

@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use diesel::dsl::*;
 use diesel::prelude::*;
@@ -106,7 +105,7 @@ where
                                 error!("{:?}", e);
                             }
                         });
-                    tokio::spawn(fut);
+                    tokio::spawn(core.shutdown_handle().wrap_future(fut));
                 }
             }
         }
@@ -158,7 +157,8 @@ where
         }
 
         if !core.manifest().skip_duplicate {
-            tokio::spawn(self.retweet(tweet, core)?);
+            let task = self.retweet(tweet, core)?;
+            tokio::spawn(core.shutdown_handle().wrap_future(task));
             return Ok(());
         }
 
@@ -184,17 +184,12 @@ where
                             retweet.await;
                         }
                     });
-            tokio::spawn(task);
+            tokio::spawn(core.shutdown_handle().wrap_future(task));
         } else {
-            tokio::spawn(retweet);
+            tokio::spawn(core.shutdown_handle().wrap_future(retweet));
         }
 
         Ok(())
-    }
-
-    pub fn poll_done(&self, _core: &Core<S>, _cx: &mut Context<'_>) -> Poll<()> {
-        // TODO: bring back "graceful shutdown".
-        Poll::Ready(())
     }
 
     fn retweet(

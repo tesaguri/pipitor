@@ -1,5 +1,6 @@
 mod core;
 mod sender;
+mod shutdown;
 mod twitter_request_ext;
 
 use std::collections::HashSet;
@@ -203,11 +204,10 @@ where
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
         let mut this = self.project();
-        let poll_sender = this.sender.poll_done(&this.core, cx);
         while let Some(tweets) = ready!(this.twitter_list.as_mut().poll_next_backfill(cx)) {
             this.sender.send_tweets(tweets, &this.core)?;
         }
-        poll_sender.map(|()| Ok(()))
+        this.core.poll_shutdown(cx).map(|()| Ok(()))
     }
 
     pub async fn reset(mut self: Pin<&mut Self>) -> anyhow::Result<()> {
