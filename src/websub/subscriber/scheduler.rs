@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::future::Future;
 use std::marker::Unpin;
 use std::pin::Pin;
@@ -31,13 +30,13 @@ pub struct Handle {
 
 impl<T, F> Scheduler<T, F>
 where
-    T: Borrow<Handle>,
+    T: AsRef<Handle>,
     F: FnMut(&Arc<T>) -> Option<u64> + Unpin,
 {
     pub fn new(handle: &Arc<T>, get_next_tick: F) -> Self {
         Scheduler {
             delay: (**handle)
-                .borrow()
+                .as_ref()
                 .decode_next_tick()
                 .map(|next_tick| tokio::time::delay_until(next_tick.into())),
             handle: Arc::downgrade(handle),
@@ -48,7 +47,7 @@ where
 
 impl<T, F> Future for Scheduler<T, F>
 where
-    T: Borrow<Handle>,
+    T: AsRef<Handle>,
     F: FnMut(&Arc<T>) -> Option<u64> + Unpin,
 {
     type Output = ();
@@ -63,7 +62,7 @@ where
         } else {
             return Poll::Ready(());
         };
-        let handle = (*t).borrow();
+        let handle = (*t).as_ref();
 
         handle.task.register(cx.waker());
 

@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::marker::PhantomData;
@@ -417,8 +416,8 @@ where
     }
 }
 
-impl<S, B> Borrow<scheduler::Handle> for Service<S, B> {
-    fn borrow(&self) -> &scheduler::Handle {
+impl<S, B> AsRef<scheduler::Handle> for Service<S, B> {
+    fn as_ref(&self) -> &scheduler::Handle {
         &self.handle
     }
 }
