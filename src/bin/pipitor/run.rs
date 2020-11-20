@@ -1,9 +1,9 @@
 use std::fs::File;
+use std::future;
 
 use anyhow::Context;
 use fs2::FileExt;
-use futures::{future, stream};
-use futures::{pin_mut, FutureExt, StreamExt, TryFutureExt};
+use futures::{pin_mut, stream, FutureExt, StreamExt, TryFutureExt};
 use pipitor::App;
 
 use crate::common::*;

@@ -1,10 +1,11 @@
+use std::future::{self, Future};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use diesel::dsl::*;
 use diesel::prelude::*;
 use futures::stream::FuturesUnordered;
-use futures::{future, Future, FutureExt, StreamExt, TryFutureExt};
+use futures::{FutureExt, StreamExt, TryFutureExt};
 use http_body::Body;
 use pin_project::pin_project;
 

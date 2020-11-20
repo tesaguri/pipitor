@@ -1,6 +1,7 @@
 mod interval;
 
 use std::borrow::Borrow;
+use std::future::{self, Future};
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::pin::Pin;
@@ -10,7 +11,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime};
 
 use futures::channel::mpsc;
-use futures::{ready, Future, FutureExt, Stream, StreamExt};
+use futures::{ready, FutureExt, Stream, StreamExt};
 use http_body::Body;
 use oauth_credentials::Credentials;
 use pin_project::pin_project;
@@ -107,7 +108,7 @@ where
         // Periodically send API requests in the background.
         tokio::spawn(Interval::new(Arc::downgrade(&sender)).for_each(|sender| {
             sender.send();
-            futures::future::ready(())
+            future::ready(())
         }));
 
         let inner = Inner {
