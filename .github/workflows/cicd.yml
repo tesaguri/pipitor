@@ -18,16 +18,15 @@ jobs:
           - beta
           - nightly
         features:
-          -
-          - dhall
-          - native-tls
-          - rustls
+          - []
+          - [native-tls, dhall]
+          - [rustls]
         include:
           - toolchain: stable
             components: clippy
           - os: ubuntu-latest
             toolchain: stable
-            features:
+            features: []
             components: clippy,rustfmt
     steps:
       - uses: actions/checkout@v2
@@ -46,7 +45,7 @@ jobs:
           components: ${{ matrix.components }}
         id: toolchain
       - name: Check format
-        if: ${{ contains(matrix.components, 'rustfmt') }}
+        if: contains(matrix.components, 'rustfmt')
         uses: actions-rs/cargo@v1
         with:
           command: fmt
@@ -55,10 +54,11 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/.cargo/registry
-          key: cargo-registry-${{ runner.os }}-${{ matrix.features }}-${{ hashFiles('Cargo.*') }}
+          # Separate the features with periods because the key cannot contain commas.
+          key: cargo-registry-${{ runner.os }}-${{ join(matrix.features, '.') }}-${{ hashFiles('Cargo.*') }}
           restore-keys: |
-            cargo-registry-${{ runner.os }}-${{ matrix.features }}-${{ hashFiles('Cargo.*') }}
-            cargo-registry-${{ runner.os }}-${{ matrix.features }}-
+            cargo-registry-${{ runner.os }}-${{ join(matrix.features, '.') }}-${{ hashFiles('Cargo.*') }}
+            cargo-registry-${{ runner.os }}-${{ join(matrix.features, '.') }}-
             cargo-registry-${{ runner.os }}-
             cargo-registry-
       - name: Cache Cargo build
@@ -66,35 +66,43 @@ jobs:
         uses: actions/cache@v2
         with:
           path: target
-          key: cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.*') }}
+          key: cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ join(matrix.features, '.') }}-${{ hashFiles('**/Cargo.*') }}
           restore-keys: |
-            cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.*') }}
-            cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ matrix.features }}-
+            cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ join(matrix.features, '.') }}-${{ hashFiles('**/Cargo.*') }}
+            cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ join(matrix.features, '.') }}-
             cargo-build-target-${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-
-      - run: echo "::set-env name=SQLITE3_LIB_DIR::${Env:VCPKG_INSTALLATION_ROOT}\installed\x64-windows\lib"
-        if: ${{ runner.os == 'Windows' }}
-      - name: Clippy
+      - run: echo "SQLITE3_LIB_DIR=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
+        if: runner.os == 'Windows'
+      - name: Clippy library
         if: contains(matrix.components, 'clippy')
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- --deny warnings
+          args: --lib --no-default-features --features=${{ join(matrix.features) }} -- --deny warnings
+      - name: Clippy all
+        # XXX: GitHub Actions seem to have no ability to handle array literals in expressions
+        # like `matrix.features != []`.
+        if: contains(matrix.components, 'clippy') && join(matrix.features) != ''
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --no-default-features --features=${{ join(matrix.features) }} -- --deny warnings
       - name: Build library
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --lib --verbose --no-default-features --features=${{ matrix.features }}
+          args: --lib --verbose --no-default-features --features=${{ join(matrix.features) }}
       - name: Build all
-        if: ${{ matrix.features != '' }}
+        if: join(matrix.features) != ''
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --verbose --no-default-features --features=${{ matrix.features }}
+          args: --verbose --no-default-features --features=${{ join(matrix.features) }}
       - name: Test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --lib --no-default-features --features=${{ matrix.features }}
+          args: --lib --no-default-features --features=${{ join(matrix.features) }}
 
   build:
     name: Build release artifacts
@@ -157,9 +165,9 @@ jobs:
         with:
           crate: cross
           use-tool-cache: true
-      - run: echo "::set-env name=SQLITE3_LIB_DIR::${Env:VCPKG_INSTALLATION_ROOT}\installed\x64-windows\lib"
+      - run: echo "SQLITE3_LIB_DIR=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
         if: runner.os == 'Windows'
-      - run: echo "::set-env name=SQLITE3_LIB_DIR::/usr/local/x86_64-unknown-freebsd10/lib"
+      - run: echo "SQLITE3_LIB_DIR=/usr/local/x86_64-unknown-freebsd10/lib" >> $GITHUB_ENV
         if: matrix.target == 'x86_64-unknown-freebsd'
       - name: Build
         uses: actions-rs/cargo@v1

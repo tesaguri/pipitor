@@ -72,7 +72,9 @@ libsqlite3-sys = { version = ">=0.8.0, <0.19.0", optional = true }
 
 [[test]]
 name = "example_manifest"
-required-features = ["dhall"]
+# XXX: `native-tls` is included because Cargo automatically builds the `bin` target,
+# which requires a TLS backend.
+required-features = ["dhall", "native-tls"]
 
 [features]
 default = ["native-tls"]
