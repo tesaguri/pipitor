@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::cmp;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -27,7 +26,7 @@ pub struct Handle {
 
 impl<T> Interval<T>
 where
-    T: Borrow<Handle>,
+    T: AsRef<Handle>,
 {
     pub fn new(handle: Weak<T>) -> Self {
         Self::at(Instant::now(), handle)
@@ -43,7 +42,7 @@ where
 
 impl<T> Stream for Interval<T>
 where
-    T: Borrow<Handle>,
+    T: AsRef<Handle>,
 {
     type Item = Arc<T>;
 
@@ -53,7 +52,7 @@ where
         } else {
             return Poll::Ready(None);
         };
-        let handle = (*t).borrow();
+        let handle = (*t).as_ref();
 
         handle.waker.register(cx.waker());
 

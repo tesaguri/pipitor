@@ -1,6 +1,5 @@
 mod interval;
 
-use std::borrow::Borrow;
 use std::future::{self, Future};
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
@@ -296,8 +295,8 @@ where
     }
 }
 
-impl<S, B> Borrow<interval::Handle> for RequestSender<S, B> {
-    fn borrow(&self) -> &interval::Handle {
+impl<S, B> AsRef<interval::Handle> for RequestSender<S, B> {
+    fn as_ref(&self) -> &interval::Handle {
         &self.handle
     }
 }
