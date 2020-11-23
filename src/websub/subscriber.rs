@@ -19,6 +19,7 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::feed::{self, Feed};
+use crate::manifest::Manifest;
 use crate::query;
 use crate::schema::*;
 use crate::util::{ArcService, HttpService};
@@ -54,21 +55,29 @@ where
     I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     pub fn new(
+        manifest: &Manifest,
         incoming: I,
         host: Uri,
         client: S,
         pool: Pool<ConnectionManager<SqliteConnection>>,
     ) -> Self {
+        let renewal_margin = manifest.websub.renewal_margin.as_secs();
+
         let first_tick = query::expires_at()
             .first::<i64>(&pool.get().unwrap())
             .optional()
             .unwrap()
-            .map(|expires_at| expires_at.try_into().map_or(0, refresh_time));
+            .map(|expires_at| {
+                expires_at
+                    .try_into()
+                    .map_or(0, |expires_at: u64| expires_at - renewal_margin)
+            });
 
         let (tx, rx) = mpsc::channel(0);
 
         let service = Arc::new(service::Service {
             host,
+            renewal_margin,
             client,
             pool,
             tx,
@@ -86,7 +95,11 @@ where
                 .first::<i64>(conn)
                 .optional()
                 .unwrap()
-                .map(|expires_at| expires_at.try_into().map_or(0, refresh_time))
+                .map(|expires_at| {
+                    expires_at
+                        .try_into()
+                        .map_or(0, |expires_at| service.refresh_time(expires_at))
+                })
         }));
 
         Subscriber {
@@ -156,8 +169,4 @@ impl Content {
     pub fn parse_feed(&self) -> Option<Feed> {
         Feed::parse(self.kind, &self.content)
     }
-}
-
-fn refresh_time(expires_at: u64) -> u64 {
-    expires_at - RENEW.as_secs()
 }

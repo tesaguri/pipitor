@@ -30,6 +30,7 @@ use super::{scheduler, Content};
 
 pub struct Service<S, B> {
     pub(super) host: Uri,
+    pub(super) renewal_margin: u64,
     pub(super) client: S,
     pub(super) pool: Pool<ConnectionManager<SqliteConnection>>,
     pub(super) tx: mpsc::Sender<(String, Content)>,
@@ -367,7 +368,7 @@ where
                     .try_into()
                     .unwrap_or(i64::max_value());
 
-                self.handle.hasten(super::refresh_time(expires_at as u64));
+                self.handle.hasten(self.refresh_time(expires_at as u64));
 
                 // Remove the old subscription if the subscription was created by a renewal.
                 let old_id = websub_renewing_subscriptions::table
@@ -413,6 +414,12 @@ where
                 .body(Default::default())
                 .unwrap(),
         }
+    }
+}
+
+impl<S, B> Service<S, B> {
+    pub fn refresh_time(&self, expires_at: u64) -> u64 {
+        expires_at - self.renewal_margin
     }
 }
 

@@ -23,6 +23,8 @@ pub struct Manifest {
     #[serde(default)]
     pub database_url: Option<Box<str>>,
     pub rule: Box<[Rule]>,
+    #[serde(default)]
+    pub websub: Websub,
     pub twitter: Twitter,
     #[serde(default)]
     pub skip_duplicate: bool,
@@ -64,6 +66,14 @@ pub enum TopicId<'a> {
     Twitter(i64),
     #[doc(hidden)]
     _NonExhaustive(crate::util::Never),
+}
+
+#[non_exhaustive]
+#[derive(Clone, Debug, Deserialize)]
+pub struct Websub {
+    #[serde(default = "one_hour")]
+    #[serde(deserialize_with = "de_duration_from_secs")]
+    pub renewal_margin: Duration,
 }
 
 #[non_exhaustive]
@@ -378,6 +388,14 @@ impl<'de> Deserialize<'de> for Outbox {
     }
 }
 
+impl Default for Websub {
+    fn default() -> Self {
+        Websub {
+            renewal_margin: one_hour(),
+        }
+    }
+}
+
 fn de_outbox<'de, D: de::Deserializer<'de>>(d: D) -> Result<SmallVec<[Outbox; 1]>, D::Error> {
     struct Visitor;
 
@@ -439,6 +457,10 @@ fn de_duration_from_secs<'de, D: de::Deserializer<'de>>(d: D) -> Result<Duration
     }
 
     d.deserialize_struct("Duration", &["secs", "nanos"], Visitor)
+}
+
+fn one_hour() -> Duration {
+    Duration::from_secs(60 * 60)
 }
 
 fn resolve_path(path: &str, base: &str) -> Option<Box<str>> {

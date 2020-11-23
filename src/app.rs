@@ -180,7 +180,7 @@ where
         let host = config.host.clone();
         let http = core.http_client().clone();
         let pool = core.database_pool().clone();
-        let websub = websub::Subscriber::new(incoming, host, http, pool);
+        let websub = websub::Subscriber::new(core.manifest(), incoming, host, http, pool);
 
         websub.service().remove_dangling_subscriptions();
 
