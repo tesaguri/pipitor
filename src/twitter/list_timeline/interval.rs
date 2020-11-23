@@ -19,14 +19,11 @@ pub struct Interval<T> {
 }
 
 pub struct Handle {
+    period: Duration,
     /// The time until which the `Interval` waits.
     next_tick: AtomicU64,
     waker: AtomicWaker,
 }
-
-/// Hard-coded interval based on the rate limit of GET lists/statuses API
-/// (900 reqs/15-min window = 1 req/sec).
-const PERIOD: Duration = Duration::from_secs(1);
 
 impl<T> Interval<T>
 where
@@ -69,7 +66,7 @@ where
         ready!(self.delay.poll_unpin(cx));
 
         let now = Instant::now();
-        let next_tick = self.delay.deadline() + PERIOD;
+        let next_tick = self.delay.deadline() + handle.period;
         self.delay.reset(cmp::max(next_tick, now.into()));
 
         Poll::Ready(Some(t))
@@ -77,8 +74,9 @@ where
 }
 
 impl Handle {
-    pub fn new() -> Self {
+    pub fn new(period: Duration) -> Self {
         Handle {
+            period,
             next_tick: AtomicU64::new(0),
             waker: AtomicWaker::new(),
         }

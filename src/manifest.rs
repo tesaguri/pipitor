@@ -89,6 +89,11 @@ pub struct Twitter {
 #[derive(Clone, Debug, Deserialize)]
 pub struct TwitterList {
     pub id: NonZeroU64,
+    /// The default value is based on the rate limit of GET lists/statuses API
+    /// (900 reqs/15-min window = 1 req/sec).
+    #[serde(default = "one_sec")]
+    #[serde(deserialize_with = "de_duration_from_secs")]
+    pub interval: Duration,
     #[serde(default)]
     #[serde(deserialize_with = "de_duration_from_secs")]
     pub delay: Duration,
@@ -461,6 +466,10 @@ fn de_duration_from_secs<'de, D: de::Deserializer<'de>>(d: D) -> Result<Duration
 
 fn one_hour() -> Duration {
     Duration::from_secs(60 * 60)
+}
+
+fn one_sec() -> Duration {
+    Duration::from_secs(1)
 }
 
 fn resolve_path(path: &str, base: &str) -> Option<Box<str>> {

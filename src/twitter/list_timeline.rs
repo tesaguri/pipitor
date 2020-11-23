@@ -90,7 +90,11 @@ where
             Backfill { since_id, response }
         });
 
-        let manifest::TwitterList { id: list_id, delay } = *list;
+        let manifest::TwitterList {
+            id: list_id,
+            interval,
+            delay,
+        } = *list;
         let (tx, rx) = mpsc::channel(0);
 
         let sender = Arc::new(RequestSender {
@@ -98,7 +102,7 @@ where
             delay,
             since_id: AtomicI64::new(0),
             tx,
-            handle: interval::Handle::new(),
+            handle: interval::Handle::new(interval),
             client,
             token,
             http,
