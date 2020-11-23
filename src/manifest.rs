@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::convert::TryFrom;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::ops::DerefMut;
@@ -326,8 +325,7 @@ impl<'a, 'de> Deserialize<'de> for TopicId<'a> {
                 }
 
                 fn visit_u64<E: de::Error>(self, id: u64) -> Result<Self::Value, E> {
-                    i64::try_from(id)
-                        .map_err(|_| E::invalid_value(de::Unexpected::Unsigned(id), &self))
+                    i64::deserialize(de::IntoDeserializer::into_deserializer(id))
                         .and_then(|id| self.visit_i64(id))
                 }
 
@@ -370,8 +368,7 @@ impl<'de> Deserialize<'de> for Outbox {
                 }
 
                 fn visit_u64<E: de::Error>(self, id: u64) -> Result<Self::Value, E> {
-                    i64::try_from(id)
-                        .map_err(|_| E::invalid_value(de::Unexpected::Unsigned(id), &self))
+                    i64::deserialize(de::IntoDeserializer::into_deserializer(id))
                         .and_then(|id| self.visit_i64(id))
                 }
             }
@@ -396,8 +393,7 @@ fn de_outbox<'de, D: de::Deserializer<'de>>(d: D) -> Result<SmallVec<[Outbox; 1]
         }
 
         fn visit_u64<E: de::Error>(self, id: u64) -> Result<Self::Value, E> {
-            i64::try_from(id)
-                .map_err(|_| E::invalid_value(de::Unexpected::Unsigned(id), &self))
+            i64::deserialize(de::IntoDeserializer::into_deserializer(id))
                 .and_then(|id| self.visit_i64(id))
         }
 
