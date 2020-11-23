@@ -13,7 +13,7 @@ use smallvec::SmallVec;
 
 use crate::feed::Entry;
 use crate::twitter::Tweet;
-use crate::util::{MapAccessDeserializer, Serde};
+use crate::util::{MapAccessDeserializer, SeqAccessDeserializer, Serde};
 
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
@@ -80,7 +80,7 @@ pub struct Twitter {
 pub struct TwitterList {
     pub id: NonZeroU64,
     #[serde(default)]
-    #[serde(deserialize_with = "de_delay")]
+    #[serde(deserialize_with = "de_duration_from_secs")]
     pub delay: Duration,
 }
 
@@ -410,8 +410,35 @@ fn de_outbox<'de, D: de::Deserializer<'de>>(d: D) -> Result<SmallVec<[Outbox; 1]
     d.deserialize_any(Visitor)
 }
 
-fn de_delay<'de, D: de::Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
-    u64::deserialize(d).map(Duration::from_millis)
+fn de_duration_from_secs<'de, D: de::Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+    struct Visitor;
+
+    impl<'de> de::Visitor<'de> for Visitor {
+        type Value = Duration;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("struct Duration")
+        }
+
+        fn visit_seq<A: de::SeqAccess<'de>>(self, a: A) -> Result<Duration, A::Error> {
+            Duration::deserialize(SeqAccessDeserializer(a))
+        }
+
+        fn visit_map<A: de::MapAccess<'de>>(self, a: A) -> Result<Duration, A::Error> {
+            Duration::deserialize(MapAccessDeserializer(a))
+        }
+
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Duration, E> {
+            u64::deserialize(de::IntoDeserializer::into_deserializer(v))
+                .and_then(|v| self.visit_u64(v))
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<Duration, E> {
+            Ok(Duration::from_secs(v))
+        }
+    }
+
+    d.deserialize_struct("Duration", &["secs", "nanos"], Visitor)
 }
 
 fn resolve_path(path: &str, base: &str) -> Option<Box<str>> {

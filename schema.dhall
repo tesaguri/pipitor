@@ -27,7 +27,19 @@ For more information, please refer to <http://unlicense.org/>
 
 -- A Dhall type definition for the Pipitor manifest file.
 -- The following is a recommended way of importing the file:
--- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/master/schema.dhall sha256:b5747fd58250bb92a6450310e58641fd79385095e0fc10a4686590f4cf37cf72
+-- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/master/schema.dhall sha256:355f37133e8c50d6c3fec6981c292f4c411198c41cf204e50ee1ebf3fc700c26
+
+let Duration = { secs : Natural, nanos : Natural }
+
+let Duration/from_secs = λ(secs : Natural) → { secs, nanos = 0 } : Duration
+
+let Duration/from_mins = λ(mins : Natural) → Duration/from_secs (60 * mins)
+
+let Duration/from_hours =
+      λ(hours : Natural) → Duration/from_secs (60 * 60 * hours)
+
+let Duration/from_days =
+      λ(days : Natural) → Duration/from_secs (24 * 60 * 60 * days)
 
 let Topic = < Feed : Text | Twitter : Natural >
 
@@ -72,4 +84,16 @@ let Manifest =
         }
       }
 
-in  { Topic, Filter, Outbox, Rule, TwitterList, Twitter, Manifest }
+in  { Duration/from_secs
+    , Duration/from_mins
+    , Duration/from_hours
+    , Duration/from_days
+    , Duration
+    , Topic
+    , Filter
+    , Outbox
+    , Rule
+    , TwitterList
+    , Twitter
+    , Manifest
+    }
