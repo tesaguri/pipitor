@@ -3,11 +3,7 @@
 #![allow(clippy::redundant_closure)]
 
 #[macro_use]
-extern crate diesel_migrations;
-#[macro_use]
 extern crate log;
-
-embed_migrations!();
 
 mod common;
 mod ctl;

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+    <title>Example Feed</title>
+    <updated>2020-01-01T00:00:00Z</updated>
+    <author><name>John Doe</name></author>
+    <id>http://example.com/feed.xml</id>
+    <link rel="hub" href="http://example.com/hub"/>
+    <entry>
+    <title>Example Article</title>
+    <link rel="alternate" href="http://example.com/articles/1"/>
+    <id>http://example.com/articles/1</id>
+    <updated>2020-01-01T00:00:00Z</updated>
+    </entry>
+</feed>

@@ -14,8 +14,7 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .context("failed to connect to the database")?;
 
     let stdout = io::stdout();
-    crate::embedded_migrations::run_with_output(&conn, &mut stdout.lock())
-        .context("migration failed")?;
+    pipitor::migrations::run_with_output(&conn, &mut stdout.lock()).context("migration failed")?;
 
     Ok(())
 }

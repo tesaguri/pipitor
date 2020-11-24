@@ -13,7 +13,7 @@ use futures::{future, pin_mut, stream, Future, FutureExt, TryFutureExt, TryStrea
 use hmac::digest::generic_array::typenum::Unsigned;
 use hmac::digest::FixedOutput;
 use hmac::{Hmac, Mac, NewMac};
-use http::header::CONTENT_TYPE;
+use http::header::{HeaderName, CONTENT_TYPE};
 use http::{Request, Response, StatusCode, Uri};
 use http_body::Body as _;
 use hyper::Body;
@@ -23,8 +23,8 @@ use tower_util::ServiceExt;
 use crate::feed::{self, RawFeed};
 use crate::query;
 use crate::schema::*;
-use crate::util::{now_unix, HttpService, Never};
-use crate::websub::{hub, X_HUB_SIGNATURE};
+use crate::util::{self, consts::HUB_SIGNATURE, now_unix, HttpService, Never};
+use crate::websub::hub;
 
 use super::{scheduler, Content};
 
@@ -36,28 +36,6 @@ pub struct Service<S, B> {
     pub(super) tx: mpsc::Sender<(String, Content)>,
     pub(super) handle: scheduler::Handle,
     pub(super) _marker: PhantomData<fn() -> B>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[serde(tag = "hub.mode")]
-enum Verify {
-    #[serde(rename = "subscribe")]
-    Subscribe {
-        #[serde(rename = "hub.topic")]
-        topic: String,
-        #[serde(rename = "hub.challenge")]
-        challenge: String,
-        #[serde(rename = "hub.lease_seconds")]
-        #[serde(deserialize_with = "crate::util::deserialize_from_str")]
-        lease_seconds: u64,
-    },
-    #[serde(rename = "unsubscribe")]
-    Unsubscribe {
-        #[serde(rename = "hub.topic")]
-        topic: String,
-        #[serde(rename = "hub.challenge")]
-        challenge: String,
-    },
 }
 
 impl<S, B> Service<S, B>
@@ -76,22 +54,48 @@ where
             .unwrap();
     }
 
-    #[auto_enum]
     pub fn discover_and_subscribe(&self, topic: String) -> impl Future<Output = anyhow::Result<()>>
+    where
+        <S::ResponseBody as http_body::Body>::Error: Error + Send + Sync + 'static,
+        B: Default,
+    {
+        let host = self.host.clone();
+        let client = self.client.clone();
+        let pool = self.pool.clone();
+        self.discover(topic).map(|result| {
+            result.and_then(move |(topic, hubs)| {
+                if let Some(hubs) = hubs {
+                    let conn = pool.get()?;
+                    for hub in hubs {
+                        tokio::spawn(hub::subscribe(
+                            &host,
+                            hub,
+                            topic.clone(),
+                            client.clone(),
+                            &*conn,
+                        ));
+                    }
+                }
+                Ok(())
+            })
+        })
+    }
+
+    #[auto_enum]
+    pub fn discover(
+        &self,
+        topic: String,
+    ) -> impl Future<Output = anyhow::Result<(String, Option<impl Iterator<Item = String>>)>>
     where
         <S::ResponseBody as http_body::Body>::Error: Error + Send + Sync + 'static,
         B: Default,
     {
         log::info!("Attempting to discover WebSub hubs for topic {}", topic);
 
-        let host = self.host.clone();
-        let client = self.client.clone();
-        let pool = self.pool.clone();
-
         let req = http::Request::get(&*topic)
             .body(Default::default())
             .unwrap();
-        client
+        self.client
             .clone()
             .into_service()
             .oneshot(req)
@@ -104,7 +108,7 @@ where
                         m
                     } else {
                         log::warn!("Topic {}: unsupported media type `{:?}`", topic, v);
-                        return Ok(());
+                        return Ok((topic, None));
                     }
                 } else {
                     feed::MediaType::Xml
@@ -127,22 +131,16 @@ where
                             .into_iter()
                             .filter(|link| link.rel == "hub")
                             .map(|link| link.href),
-                        RawFeed::Rss(ref channel) => rss_hub_links(channel).map(ToOwned::to_owned),
+                        RawFeed::Rss(channel) => rss_hub_links(&channel)
+                            .map(ToOwned::to_owned)
+                            .collect::<Vec<_>>()
+                            .into_iter(),
                     };
-                    for hub in hubs {
-                        tokio::spawn(hub::subscribe(
-                            &host,
-                            hub,
-                            topic.clone(),
-                            client.clone(),
-                            &*pool.get()?,
-                        ));
-                    }
+                    Ok((topic, Some(hubs)))
                 } else {
                     log::warn!("Topic {}: failed to parse the content", topic);
+                    Ok((topic, None))
                 }
-
-                Ok(())
             })
     }
 
@@ -256,7 +254,8 @@ where
                 .unwrap();
         };
 
-        let signature_header = if let Some(v) = req.headers().get(X_HUB_SIGNATURE) {
+        let hub_signature = HeaderName::from_static(HUB_SIGNATURE);
+        let signature_header = if let Some(v) = req.headers().get(hub_signature) {
             v.as_bytes()
         } else {
             log::debug!("Callback {}: missing signature", id);
@@ -350,8 +349,8 @@ where
         let sub_is_active = websub_subscriptions::id
             .eq_any(websub_active_subscriptions::table.select(websub_active_subscriptions::id));
 
-        match serde_urlencoded::from_str::<Verify>(query) {
-            Ok(Verify::Subscribe {
+        match serde_urlencoded::from_str(query) {
+            Ok(hub::Verify::Subscribe {
                 topic,
                 challenge,
                 lease_seconds,
@@ -403,7 +402,7 @@ where
 
                 Response::new(challenge.into())
             }
-            Ok(Verify::Unsubscribe { topic, challenge })
+            Ok(hub::Verify::Unsubscribe { topic, challenge })
                 if select(not(exists(row(&topic)))).get_result(conn).unwrap() =>
             {
                 log::info!("Vefirying unsubscription of {}", id);
@@ -451,8 +450,6 @@ where
 }
 
 fn rss_hub_links(channel: &rss::Channel) -> impl Iterator<Item = &str> {
-    const NS_ATOM: &str = "http://www.w3.org/2005/Atom";
-
     channel
         .extensions()
         .iter()
@@ -465,9 +462,9 @@ fn rss_hub_links(channel: &rss::Channel) -> impl Iterator<Item = &str> {
                 .iter()
                 .find(|(k, _)| k.starts_with("xmlns:") && k[6..] == **prefix)
             {
-                ns == NS_ATOM
+                ns == util::consts::NS_ATOM
             } else {
-                channel.namespaces().get(*prefix).map(|s| &**s) == Some(NS_ATOM)
+                channel.namespaces().get(*prefix).map(|s| &**s) == Some(util::consts::NS_ATOM)
             }
         })
         .map(|(_, elm)| elm)

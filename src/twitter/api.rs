@@ -74,7 +74,7 @@ use serde::{de, Deserialize};
 use tower_util::{Oneshot, ServiceExt};
 
 use crate::util::http_service::{HttpService, IntoService};
-use crate::util::ConcatBody;
+use crate::util::{self, ConcatBody};
 
 #[derive(Debug)]
 pub struct Response<T> {
@@ -351,9 +351,9 @@ where
 
 fn rate_limit<T>(res: &http::Response<T>) -> Option<RateLimit> {
     Some(RateLimit {
-        limit: header(res, "x-rate-limit-limit")?,
-        remaining: header(res, "x-rate-limit-remaining")?,
-        reset: header(res, "x-rate-limit-reset")?,
+        limit: header(res, util::consts::RATE_LIMIT_LIMIT)?,
+        remaining: header(res, util::consts::RATE_LIMIT_REMAINING)?,
+        reset: header(res, util::consts::RATE_LIMIT_RESET)?,
     })
 }
 

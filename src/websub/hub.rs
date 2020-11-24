@@ -5,33 +5,55 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::SqliteConnection;
 use futures::{Future, TryFutureExt};
-use http::header::{CONTENT_TYPE, LOCATION};
+use http::header::{HeaderValue, CONTENT_TYPE, LOCATION};
 use http::uri::{Parts, Uri};
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 use tower_util::ServiceExt;
 
 use crate::schema::*;
-use crate::util::HttpService;
+use crate::util::{consts::APPLICATION_WWW_FORM_URLENCODED, HttpService};
 
-#[derive(serde::Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "hub.mode")]
 #[serde(rename_all = "lowercase")]
-enum Form<'a> {
+pub enum Form<S = String> {
     Subscribe {
         #[serde(rename = "hub.callback")]
-        #[serde(serialize_with = "serialize_uri")]
-        callback: &'a Uri,
+        #[serde(with = "http_serde::uri")]
+        callback: Uri,
         #[serde(rename = "hub.topic")]
-        topic: &'a str,
+        topic: S,
         #[serde(rename = "hub.secret")]
-        secret: &'a str,
+        secret: S,
     },
     Unsubscribe {
         #[serde(rename = "hub.callback")]
-        #[serde(serialize_with = "serialize_uri")]
-        callback: &'a Uri,
+        #[serde(with = "http_serde::uri")]
+        callback: Uri,
         #[serde(rename = "hub.topic")]
-        topic: &'a str,
+        topic: S,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "hub.mode")]
+#[serde(rename_all = "lowercase")]
+pub enum Verify<S = String> {
+    Subscribe {
+        #[serde(rename = "hub.topic")]
+        topic: S,
+        #[serde(rename = "hub.challenge")]
+        challenge: S,
+        #[serde(rename = "hub.lease_seconds")]
+        #[serde(deserialize_with = "crate::util::deserialize_from_str")]
+        lease_seconds: u64,
+    },
+    Unsubscribe {
+        #[serde(rename = "hub.topic")]
+        topic: S,
+        #[serde(rename = "hub.challenge")]
+        challenge: S,
     },
 }
 
@@ -54,9 +76,9 @@ where
     log::info!("Subscribing to topic {} at hub {} ({})", topic, hub, id);
 
     let body = serde_urlencoded::to_string(Form::Subscribe {
-        callback: &callback(host.clone(), id),
-        topic: &topic,
-        secret: &secret,
+        callback: callback(host.clone(), id),
+        topic: &*topic,
+        secret: &*secret,
     })
     .unwrap();
 
@@ -97,9 +119,9 @@ where
     );
 
     let body = serde_urlencoded::to_string(Form::Subscribe {
-        callback: &callback(host.clone(), new),
-        topic: &topic,
-        secret: &secret,
+        callback: callback(host.clone(), new),
+        topic: &*topic,
+        secret: &*secret,
     })
     .unwrap();
 
@@ -124,7 +146,7 @@ where
         .execute(conn)
         .unwrap();
 
-    let callback = &callback(host.clone(), id);
+    let callback = callback(host.clone(), id);
     let body = serde_urlencoded::to_string(Form::Unsubscribe {
         callback,
         topic: &topic,
@@ -155,7 +177,7 @@ where
 
     let host = host.clone();
     subscriptions.into_iter().map(move |(id, hub)| {
-        let callback = &callback(host.clone(), id);
+        let callback = callback(host.clone(), id);
         let body = serde_urlencoded::to_string(Form::Unsubscribe {
             callback,
             topic: &topic,
@@ -175,8 +197,9 @@ where
     S: HttpService<B>,
     B: From<Vec<u8>>,
 {
+    let application_www_form_urlencoded = HeaderValue::from_static(APPLICATION_WWW_FORM_URLENCODED);
     let req = http::Request::post(&hub)
-        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(CONTENT_TYPE, application_www_form_urlencoded)
         .body(B::from(body.into_bytes()))
         .unwrap();
 
@@ -258,8 +281,4 @@ fn gen_secret<R: RngCore>(mut rng: R) -> Secret {
     base64::encode_config_slice(&rand, base64::URL_SAFE_NO_PAD, &mut ret);
 
     unsafe { string::String::from_utf8_unchecked(ret) }
-}
-
-fn serialize_uri<S: serde::Serializer>(uri: &Uri, s: S) -> Result<S::Ok, S::Error> {
-    s.collect_str(uri)
 }

@@ -2,12 +2,15 @@
 extern crate diesel;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate diesel_migrations;
 
 #[macro_use]
 mod util;
 
 pub mod credentials;
 pub mod manifest;
+pub mod migrations;
 pub mod models;
 pub mod router;
 #[rustfmt::skip]

@@ -44,6 +44,14 @@ impl Shutdown {
     }
 }
 
+impl Future for Shutdown {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        (*self).poll(cx)
+    }
+}
+
 impl Handle {
     /// Associate the handle with a future so that the handle will be dropped
     /// when the future completes.
@@ -68,5 +76,26 @@ impl<F: Future> Future for HandleFuture<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
         self.project().future.poll(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test() {
+        let shutdown = Shutdown::default();
+        let handle = shutdown.handle.clone();
+        let mut task = tokio_test::task::spawn(shutdown);
+
+        task.enter(|cx, shutdown| assert!(shutdown.poll(cx).is_pending()));
+
+        let cloned = handle.clone();
+        drop(handle);
+        task.enter(|cx, shutdown| assert!(shutdown.poll(cx).is_pending()));
+
+        drop(cloned);
+        task.enter(|cx, shutdown| assert!(shutdown.poll(cx).is_ready()));
     }
 }

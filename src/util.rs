@@ -25,7 +25,21 @@ macro_rules! serde_delegate {
     () => {};
 }
 
+pub mod consts {
+    pub const APPLICATION_WWW_FORM_URLENCODED: &str = "application/x-www-form-urlencoded";
+    #[cfg(test)]
+    pub const APPLICATION_ATOM_XML: &str = "application/atom+xml";
+    pub const HUB_SIGNATURE: &str = "x-hub-signature";
+    pub const NS_ATOM: &str = "http://www.w3.org/2005/Atom";
+    pub const RATE_LIMIT_LIMIT: &str = "x-rate-limit-limit";
+    pub const RATE_LIMIT_REMAINING: &str = "x-rate-limit-remaining";
+    pub const RATE_LIMIT_RESET: &str = "x-rate-limit-reset";
+}
+
+#[cfg(test)]
+pub mod connection;
 pub mod http_service;
+pub mod time;
 
 mod serde_wrapper;
 
@@ -42,7 +56,7 @@ use std::str;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
 use bytes::Buf;
@@ -54,8 +68,13 @@ use tower_service::Service;
 
 use crate::Credentials;
 
+#[cfg(test)]
+pub use self::connection::connection;
 pub use self::http_service::HttpService;
 pub use self::serde_wrapper::{MapAccessDeserializer, SeqAccessDeserializer, Serde};
+pub use self::time::{instant_from_unix, instant_now, now_unix, system_time_now};
+#[cfg(test)]
+pub use self::time::{FutureTimeoutExt, Sleep};
 
 pub struct ArcService<S>(pub Arc<S>);
 
@@ -238,25 +257,6 @@ where
     }
 
     d.deserialize_str(Visitor::<T>(PhantomData))
-}
-
-/// Converts a `Duration` representing a Unix time to an `Instant`.
-pub fn instant_from_unix(unix: Duration) -> Instant {
-    let now_i = Instant::now();
-    let now_unix = now_unix();
-    // Do not add the `Duration`s directly to the `Instant` to mitigate the risk of overflowing.
-    if now_unix < unix {
-        now_i + (unix - now_unix)
-    } else {
-        now_i - (now_unix - unix)
-    }
-}
-
-/// Returns the Unix time representation of "now" as a `Duration`.
-pub fn now_unix() -> Duration {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
 }
 
 pub fn open_credentials(path: &str) -> anyhow::Result<Credentials> {

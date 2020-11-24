@@ -34,6 +34,7 @@ hex = "0.4"
 hmac = "0.10"
 http = "0.2"
 http-body = "0.3"
+http-serde = "1"
 hyper = { version = "0.13", default-features = false, features = ["stream"] }
 json = { version = "1", package = "serde_json" }
 listenfd = "0.3"
@@ -86,4 +87,5 @@ sqlite-bundled = ["libsqlite3-sys/bundled"]
 
 [dev-dependencies]
 tokio = { version = "0.2", features = ["macros"] }
+tokio-test = "0.2"
 tower-test = "0.3"
