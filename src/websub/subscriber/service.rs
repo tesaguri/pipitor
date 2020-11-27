@@ -1,21 +1,20 @@
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
+use std::future;
 use std::marker::PhantomData;
 use std::task::{Context, Poll};
 
 use auto_enums::auto_enum;
-use bytes::Buf;
 use diesel::dsl::*;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use futures::channel::mpsc;
-use futures::{future, pin_mut, stream, Future, FutureExt, TryFutureExt, TryStreamExt};
+use futures::{Future, FutureExt, TryFutureExt, TryStreamExt};
 use hmac::digest::generic_array::typenum::Unsigned;
 use hmac::digest::FixedOutput;
 use hmac::{Hmac, Mac, NewMac};
 use http::header::{HeaderName, CONTENT_TYPE};
 use http::{Request, Response, StatusCode, Uri};
-use http_body::Body as _;
 use hyper::Body;
 use sha1::Sha1;
 use tower_util::ServiceExt;
@@ -23,7 +22,7 @@ use tower_util::ServiceExt;
 use crate::feed::{self, RawFeed};
 use crate::query;
 use crate::schema::*;
-use crate::util::{self, consts::HUB_SIGNATURE, now_unix, HttpService, Never};
+use crate::util::{self, consts::HUB_SIGNATURE, now_unix, ConcatBody, HttpService, Never};
 use crate::websub::hub;
 
 use super::{scheduler, Content};
@@ -114,14 +113,7 @@ where
                     feed::MediaType::Xml
                 };
 
-                let body = res.into_body();
-                pin_mut!(body);
-                let body = stream::poll_fn(move |cx| body.as_mut().poll_data(cx))
-                    .try_fold(Vec::new(), |mut vec, chunk| {
-                        vec.extend(chunk.bytes());
-                        future::ok(vec)
-                    })
-                    .await?;
+                let body = ConcatBody::new(res.into_body()).await?;
 
                 if let Some(feed) = RawFeed::parse(kind, &body) {
                     #[auto_enum(Iterator)]
@@ -318,7 +310,7 @@ where
             .try_fold((Vec::new(), mac), move |(mut vec, mut mac), chunk| {
                 vec.extend(&*chunk);
                 mac.update(&chunk);
-                future::ok((vec, mac))
+                future::ready(Ok((vec, mac)))
             })
             .map_ok(move |(content, mac)| {
                 let code = mac.finalize().into_bytes();
@@ -383,10 +375,10 @@ where
                         .get_result::<String>(conn)
                         .unwrap();
                     log::info!("Removing the old subscription");
-                    tokio::spawn(
-                        self.unsubscribe(old_id, hub, topic, conn)
-                            .map(log_and_discard_error),
-                    );
+                    let task = self
+                        .unsubscribe(old_id, hub, topic, conn)
+                        .map(log_and_discard_error);
+                    tokio::spawn(task);
                 }
 
                 conn.transaction(|| {
@@ -445,7 +437,7 @@ where
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
         log::trace!("Service::call; req.uri()={:?}", req.uri());
-        future::ok((*self).call(req))
+        future::ready(Ok((*self).call(req)))
     }
 }
 

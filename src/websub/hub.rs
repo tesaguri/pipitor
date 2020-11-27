@@ -248,9 +248,7 @@ fn create_subscription(hub: &str, topic: &str, conn: &SqliteConnection) -> (i64,
                     Err(diesel::result::Error::DatabaseError(
                         DatabaseErrorKind::UniqueViolation,
                         _,
-                    )) => {
-                        // retry
-                    }
+                    )) => {} // retry
                     Err(e) => return Err(e),
                 }
             };

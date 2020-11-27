@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use futures::task::AtomicWaker;
 use futures::{ready, FutureExt};
 
-use crate::util::instant_from_unix;
+use crate::util;
 
 /// A `Future` that executes the specified function in a scheduled manner.
 //
@@ -84,7 +84,7 @@ where
 
         if let Some(next_tick) = (this.get_next_tick)(&t) {
             handle.next_tick.store(next_tick, Ordering::Relaxed);
-            let next_tick = instant_from_unix(Duration::from_secs(next_tick));
+            let next_tick = util::instant_from_unix(Duration::from_secs(next_tick));
             delay.reset(next_tick.into());
         } else {
             handle.next_tick.store(u64::MAX, Ordering::Relaxed);
@@ -119,7 +119,7 @@ impl Handle {
         if next_tick == u64::MAX {
             None
         } else {
-            Some(instant_from_unix(Duration::from_secs(next_tick)))
+            Some(util::instant_from_unix(Duration::from_secs(next_tick)))
         }
     }
 }
@@ -133,8 +133,6 @@ impl Drop for Handle {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicU32;
-
-    use crate::util;
 
     use super::*;
 
