@@ -186,7 +186,7 @@ mod tests {
     use std::convert::Infallible;
     use std::str;
 
-    use diesel::r2d2::{ConnectionManager, Pool};
+    use diesel::r2d2::ConnectionManager;
     use futures::channel::oneshot;
     use hmac::{Hmac, Mac, NewMac};
     use http::header::CONTENT_TYPE;
@@ -462,12 +462,11 @@ mod tests {
 
         let row = websub_subscriptions::table.find(id);
         assert!(!select(exists(row)).get_result::<bool>(&conn).unwrap());
-        // FIXME
-        // let row = websub_active_subscriptions::table.find(id);
-        // assert!(!select(exists(row)).get_result::<bool>(&conn).unwrap());
-        // let row =
-        //     websub_renewing_subscriptions::table.filter(websub_renewing_subscriptions::old.eq(id));
-        // assert!(!select(exists(row)).get_result::<bool>(&conn).unwrap());
+        let row = websub_active_subscriptions::table.find(id);
+        assert!(!select(exists(row)).get_result::<bool>(&conn).unwrap());
+        let row =
+            websub_renewing_subscriptions::table.filter(websub_renewing_subscriptions::old.eq(id));
+        assert!(!select(exists(row)).get_result::<bool>(&conn).unwrap());
     }
 
     fn prepare_subscriber() -> (
@@ -490,7 +489,7 @@ mod tests {
         let manifest = manifest::Websub {
             renewal_margin: MARGIN,
         };
-        let pool = Pool::new(ConnectionManager::new(":memory:")).unwrap();
+        let pool = util::r2d2::new_pool(ConnectionManager::new(":memory:")).unwrap();
         crate::migrations::run(&*pool.get().unwrap()).unwrap();
         let subscriber = Subscriber::new_(
             &manifest,

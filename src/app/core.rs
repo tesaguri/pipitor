@@ -15,7 +15,7 @@ use crate::models;
 use crate::router::Router;
 use crate::schema::*;
 use crate::twitter;
-use crate::util::{open_credentials, HttpService};
+use crate::util::{self, open_credentials, HttpService};
 use crate::{Credentials, Manifest};
 
 use super::shutdown::Shutdown;
@@ -41,8 +41,9 @@ impl<S> Core<S> {
     {
         trace_fn!(Core::<S>::new);
 
-        let pool = Pool::new(ConnectionManager::new(manifest.database_url()))
-            .context("failed to initialize the connection pool")?;
+        let manager = ConnectionManager::new(manifest.database_url());
+        let pool =
+            util::r2d2::new_pool(manager).context("failed to initialize the connection pool")?;
         let credentials: Credentials = open_credentials(manifest.credentials_path())?;
 
         diesel::insert_into(last_tweet::table)

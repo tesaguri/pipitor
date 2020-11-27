@@ -32,4 +32,8 @@ pub mod private {
     pub mod twitter {
         pub use crate::twitter::{api::*, *};
     }
+
+    pub mod util {
+        pub use crate::util::r2d2;
+    }
 }

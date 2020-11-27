@@ -3,7 +3,7 @@ use std::io::{self, Write};
 
 use anyhow::Context;
 use diesel::prelude::*;
-use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::r2d2::ConnectionManager;
 use diesel::SqliteConnection;
 use futures::future;
 use futures::stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt};
@@ -22,7 +22,8 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let manifest = opt.open_manifest()?;
     let credentials = open_credentials(opt, &manifest)?;
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
-    let pool = Pool::new(manager).context("failed to initialize the connection pool")?;
+    let pool = pipitor::private::util::r2d2::new_pool(manager)
+        .context("failed to initialize the connection pool")?;
     let mut client = client();
 
     let unauthed_users: FuturesUnordered<_> = manifest

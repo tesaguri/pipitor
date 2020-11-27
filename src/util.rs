@@ -39,6 +39,7 @@ pub mod consts {
 #[cfg(test)]
 pub mod connection;
 pub mod http_service;
+pub mod r2d2;
 pub mod time;
 
 mod serde_wrapper;

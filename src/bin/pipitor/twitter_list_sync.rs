@@ -2,7 +2,7 @@ use std::collections::hash_set::HashSet;
 
 use anyhow::Context;
 use diesel::prelude::*;
-use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::r2d2::ConnectionManager;
 use diesel::SqliteConnection;
 use futures::future::{self, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
@@ -27,7 +27,8 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let credentials = open_credentials(opt, &manifest)?;
 
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
-    let pool = Pool::new(manager).context("failed to initialize the connection pool")?;
+    let pool = pipitor::private::util::r2d2::new_pool(manager)
+        .context("failed to initialize the connection pool")?;
 
     let mut client = client();
 

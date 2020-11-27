@@ -29,7 +29,7 @@ use crate::router::Router;
 use crate::schema::*;
 use crate::socket;
 use crate::twitter;
-use crate::util::{open_credentials, snowflake_to_system_time, HttpService, Maybe};
+use crate::util::{self, open_credentials, snowflake_to_system_time, HttpService, Maybe};
 use crate::websub;
 
 use self::core::Core;
@@ -244,8 +244,10 @@ where
         let old_pool = if manifest.database_url == self.manifest().database_url {
             None
         } else {
-            let pool = try_!(Pool::new(ConnectionManager::new(manifest.database_url()))
-                .context("failed to initialize the connection pool"));
+            let manager = ConnectionManager::new(manifest.database_url());
+            let pool =
+                try_!(util::r2d2::new_pool(manager)
+                    .context("failed to initialize the connection pool"));
             Some(mem::replace(self.core.database_pool_mut(), pool))
         };
         let credentials = try_!(open_credentials(manifest.credentials_path()));
