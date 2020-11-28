@@ -206,6 +206,8 @@ mod tests {
         });
 
         tokio::time::advance(PERIOD).await;
+        // This fails on very rare occasions.
+        // You may need to run the test hundreds of times to reproduce the failure.
         assert!(!task.is_woken());
         task.enter(|cx, scheduler| {
             let _ = scheduler.poll(cx);
