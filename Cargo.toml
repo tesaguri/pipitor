@@ -17,7 +17,7 @@ path = "src/bin/pipitor/main.rs"
 
 [dependencies]
 anyhow = "1"
-atoi = "0.3"
+atoi = "0.4"
 atom = { version = "0.9", package = "atom_syndication" }
 auto_enums = "0.7"
 base64 = "0.13"
@@ -60,12 +60,12 @@ tower-util = "0.3"
 toml = "0.5"
 twitter-stream = { version = "0.11", default-features = false, features = ["gzip"] }
 
-serde_dhall = { version = "0.8", optional = true }
+serde_dhall = { version = "0.9", optional = true }
 
-ct-logs = { version = "0.7", optional = true }
+ct-logs = { version = "0.8", optional = true }
 hyper-rustls = { version = "0.21", optional = true }
 rustls-pkg = { version = "0.18", package = "rustls", optional = true }
-webpki-roots = { version = "0.20", optional = true }
+webpki-roots = { version = "0.21", optional = true }
 
 hyper-tls = { version = "0.4", optional = true }
 
