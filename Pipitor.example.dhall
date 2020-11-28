@@ -1,5 +1,4 @@
--- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/dhall-schema-v0.3.0-alpha.8/schema.dhall sha256:00a2c768b7e5a739ed17ef82c947405965f3b3010c9f408ed4e80b8744166e9b
-let Pipitor = ./schema.dhall
+let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/dhall-schema-0.3.0-alpha.9/schema.dhall sha256:08f433d482a6e6354598d74264693100b411a4873166dfe953119c97310d7a0d
 
 let botUserId = 12345
 
