@@ -28,6 +28,7 @@ jobs:
             toolchain: stable
             features: []
             components: clippy,rustfmt
+    continue-on-error: ${{ matrix.toolchain == 'nightly' }}
     steps:
       - uses: actions/checkout@v2
       - name: Install extern libraries (Linux)
