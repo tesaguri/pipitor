@@ -86,6 +86,7 @@ rustls = ["ct-logs", "hyper-rustls", "rustls-pkg", "webpki-roots"]
 sqlite-bundled = ["libsqlite3-sys/bundled"]
 
 [dev-dependencies]
+hyper = { version = "0.13", default-features = false, features = ["tcp"] }
 tokio = { version = "0.2", features = ["macros"] }
 tokio-test = "0.2"
 tower-test = "0.3"
