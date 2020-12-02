@@ -217,7 +217,7 @@ where
 
         let path = req.uri().path();
         let id = if let Some(id) = path.strip_prefix(self.host.path()) {
-            let id: u64 = validate!(id.parse());
+            let id = validate!(crate::websub::decode_callback_id(id).ok_or(()));
             validate!(i64::try_from(id))
         } else {
             return Response::builder()

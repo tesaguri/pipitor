@@ -487,7 +487,8 @@ mod tests {
 
         // Old subscription should be deleted from the database.
 
-        let id: i64 = callback.path().rsplit('/').next().unwrap().parse().unwrap();
+        let id = callback.path().rsplit('/').next().unwrap();
+        let id = crate::websub::decode_callback_id(id).unwrap() as i64;
         let conn = pool.get().unwrap();
 
         let row = websub_subscriptions::table.find(id);

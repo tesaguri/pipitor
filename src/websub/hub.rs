@@ -266,6 +266,8 @@ fn create_subscription(hub: &str, topic: &str, conn: &SqliteConnection) -> (i64,
 }
 
 fn callback(host: Uri, id: i64) -> Uri {
+    let id = id.to_le_bytes();
+    let id = super::encode_callback_id(&id);
     let mut parts = Parts::from(host);
     // `subscriber::prepare_callback_prefix` ensures that `path_and_query` is `Some`.
     let path = format!("{}{}", parts.path_and_query.unwrap(), id);
