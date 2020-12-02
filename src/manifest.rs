@@ -7,11 +7,14 @@ use std::str;
 use std::sync::Arc;
 use std::time::Duration;
 
+use http::Uri;
+use oauth_credentials::Credentials;
 use regex::Regex;
 use serde::{de, Deserialize};
 use smallvec::SmallVec;
 
 use crate::feed::Entry;
+use crate::socket;
 use crate::twitter::Tweet;
 use crate::util::{MapAccessDeserializer, SeqAccessDeserializer, Serde};
 
@@ -19,12 +22,10 @@ use crate::util::{MapAccessDeserializer, SeqAccessDeserializer, Serde};
 #[derive(Clone, Debug, Deserialize)]
 pub struct Manifest {
     #[serde(default)]
-    pub credentials: Option<Box<str>>,
-    #[serde(default)]
     pub database_url: Option<Box<str>>,
     pub rule: Box<[Rule]>,
     #[serde(default)]
-    pub websub: Websub,
+    pub websub: Option<Websub>,
     pub twitter: Twitter,
     #[serde(default)]
     pub skip_duplicate: bool,
@@ -71,6 +72,9 @@ pub enum TopicId<'a> {
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Websub {
+    #[serde(with = "http_serde::uri")]
+    pub host: Uri,
+    pub bind: Option<socket::Addr>,
     #[serde(default = "one_hour")]
     #[serde(deserialize_with = "de_duration_from_secs")]
     pub renewal_margin: Duration,
@@ -79,6 +83,8 @@ pub struct Websub {
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Twitter {
+    #[serde(with = "CredentialsDef")]
+    pub client: Credentials<Box<str>>,
     pub user: i64,
     #[serde(default)]
     pub stream: bool,
@@ -97,6 +103,13 @@ pub struct TwitterList {
     #[serde(default)]
     #[serde(deserialize_with = "de_duration_from_secs")]
     pub delay: Duration,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "Credentials")]
+struct CredentialsDef<T> {
+    identifier: T,
+    secret: T,
 }
 
 /// Implements `serde::de::Visitor` methods for "union" types,
@@ -143,26 +156,12 @@ macro_rules! union_visitor {
 impl Manifest {
     pub fn resolve_paths(&mut self, base: &str) {
         if let Some(new) = self
-            .credentials
-            .as_ref()
-            .and_then(|path| resolve_path(path, base))
-        {
-            self.credentials = Some(new);
-        }
-        if let Some(new) = self
             .database_url
             .as_ref()
             .and_then(|path| resolve_database_uri(path, base))
         {
             self.database_url = Some(new);
         }
-    }
-
-    pub fn credentials_path(&self) -> &str {
-        self.credentials
-            .as_ref()
-            .map(AsRef::as_ref)
-            .unwrap_or("credentials.toml")
     }
 
     pub fn database_url(&self) -> Cow<'_, str> {
@@ -390,14 +389,6 @@ impl<'de> Deserialize<'de> for Outbox {
         }
 
         d.deserialize_any(Visitor)
-    }
-}
-
-impl Default for Websub {
-    fn default() -> Self {
-        Websub {
-            renewal_margin: one_hour(),
-        }
     }
 }
 

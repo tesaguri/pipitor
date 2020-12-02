@@ -23,13 +23,12 @@ use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use twitter_stream::TwitterStream;
 
-use crate::credentials::Credentials;
 use crate::manifest::{Manifest, TopicId};
 use crate::router::Router;
 use crate::schema::*;
 use crate::socket;
 use crate::twitter;
-use crate::util::{self, open_credentials, snowflake_to_system_time, HttpService, Maybe};
+use crate::util::{self, snowflake_to_system_time, HttpService, Maybe};
 use crate::websub;
 
 use self::core::Core;
@@ -158,7 +157,7 @@ where
     where
         F: FnOnce(&mut ListenFd) -> anyhow::Result<Option<I>>,
     {
-        let config = if let Some(ref config) = core.credentials().websub {
+        let config = if let Some(ref config) = core.manifest().websub {
             config
         } else {
             return Ok(None);
@@ -173,14 +172,13 @@ where
             } else if let Some(i) = make_unix_incoming(&mut fds)? {
                 i
             } else {
-                anyhow::bail!("Either `websub.bind` in `credentials.toml` or `LISTEN_FD` must be provided for WebSub subscriber");
+                anyhow::bail!("Either `websub.bind` in the manifest or `LISTEN_FD` must be provided for WebSub subscriber");
             }
         };
 
-        let host = config.host.clone();
         let http = core.http_client().clone();
         let pool = core.database_pool().clone();
-        let websub = websub::Subscriber::new(core.manifest(), incoming, host, http, pool);
+        let websub = websub::Subscriber::new(config, incoming, http, pool);
 
         websub.service().remove_dangling_subscriptions();
 
@@ -250,8 +248,6 @@ where
                     .context("failed to initialize the connection pool"));
             Some(mem::replace(self.core.database_pool_mut(), pool))
         };
-        let credentials = try_!(open_credentials(manifest.credentials_path()));
-        let old_credentials = mem::replace(self.core.credentials_mut(), credentials);
         let old = mem::replace(self.manifest_mut(), manifest);
 
         // An RAII guard to rollback the `App`'s state when the future is canceled.
@@ -260,7 +256,7 @@ where
             S: HttpService<B>,
         {
             this: &'a mut App<S, B, I>,
-            old: Option<(Manifest, Credentials)>,
+            old: Option<Manifest>,
             old_pool: Option<Pool<ConnectionManager<SqliteConnection>>>,
         }
 
@@ -269,8 +265,7 @@ where
             S: HttpService<B>,
         {
             fn rollback(&mut self) -> Manifest {
-                let (old, credentials) = self.old.take().unwrap();
-                *self.this.core.credentials_mut() = credentials;
+                let old = self.old.take().unwrap();
                 if let Some(pool) = self.old_pool.take() {
                     *self.this.core.database_pool_mut() = pool;
                 }
@@ -294,18 +289,17 @@ where
 
         let mut guard = Guard {
             this: self,
-            old: Some((old, old_credentials)),
+            old: Some(old),
             old_pool,
         };
         let this = &mut *guard.this;
-        let (ref old, ref old_credentials) = *guard.old.as_ref().unwrap();
+        let old = guard.old.as_ref().unwrap();
 
         let catch = async {
             this.core.load_twitter_tokens()?;
 
             let new = this.manifest();
-            if this.credentials().twitter.client.identifier
-                != old_credentials.twitter.client.identifier
+            if this.manifest().twitter.client.identifier != old.twitter.client.identifier
                 || new.twitter.user != old.twitter.user
                 || new
                     .twitter_topics()
@@ -325,7 +319,7 @@ where
 
         match catch {
             Ok(()) => {
-                let old = guard.old.take().unwrap().0;
+                let old = guard.old.take().unwrap();
                 mem::forget(guard);
                 *self.core.router_mut() = Router::from_manifest(self.manifest());
                 Ok(old)
@@ -441,10 +435,6 @@ impl<S: HttpService<B>, B, I> App<S, B, I> {
 
     pub fn manifest_mut(&mut self) -> &mut Manifest {
         self.core.manifest_mut()
-    }
-
-    pub fn credentials(&self) -> &Credentials {
-        self.core.credentials()
     }
 
     pub fn router(&self) -> &Router {

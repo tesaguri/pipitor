@@ -27,7 +27,7 @@ For more information, please refer to <http://unlicense.org/>
 
 -- A Dhall type definition for the Pipitor manifest file.
 -- The following is a recommended way of importing the file:
--- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/dhall-schema-v0.3.0-alpha.9/schema.dhall sha256:08f433d482a6e6354598d74264693100b411a4873166dfe953119c97310d7a0d
+-- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/master/schema.dhall sha256:5ca8bb04339394253654cca0dbdda763b10d88d329646acc65b45f1135da483a
 
 let Duration = { secs : Natural, nanos : Natural }
 
@@ -40,6 +40,8 @@ let Duration/from_hours =
 
 let Duration/from_days =
       λ(days : Natural) → Duration/from_secs (24 * 60 * 60 * days)
+
+let Credentials = { identifier : Text, secret : Text }
 
 let Topic = < Feed : Text | Twitter : Natural >
 
@@ -61,8 +63,8 @@ let Rule =
       }
 
 let Websub =
-      { Type = { renewal_margin : Duration }
-      , default.renewal_margin = Duration/from_hours 1
+      { Type = { host : Text, bind : Optional Text, renewal_margin : Duration }
+      , default = { bind = None Text, renewal_margin = Duration/from_hours 1 }
       }
 
 let TwitterList =
@@ -73,23 +75,25 @@ let TwitterList =
 
 let Twitter =
       { Type =
-          { user : Natural, stream : Bool, list : Optional TwitterList.Type }
+          { client : Credentials
+          , user : Natural
+          , stream : Bool
+          , list : Optional TwitterList.Type
+          }
       , default = { stream = False, list = None TwitterList.Type }
       }
 
 let Manifest =
       { Type =
-          { credentials : Optional Text
-          , database_url : Optional Text
-          , websub : Websub.Type
+          { database_url : Optional Text
+          , websub : Optional Websub.Type
           , twitter : Twitter.Type
           , rule : List Rule.Type
           , skip_duplicate : Bool
           }
       , default =
-        { credentials = None Text
-        , database_url = None Text
-        , websub = Websub.default
+        { database_url = None Text
+        , websub = None Websub.Type
         , skip_duplicate = False
         }
       }

@@ -6,11 +6,12 @@ use diesel::r2d2::ConnectionManager;
 use diesel::SqliteConnection;
 use futures::future::{self, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
+use oauth_credentials::Credentials;
 use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
 use pipitor::schema::*;
 
-use crate::common::{client, open_credentials};
+use crate::common::client;
 
 #[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
@@ -24,15 +25,13 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let credentials = open_credentials(opt, &manifest)?;
-
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = pipitor::private::util::r2d2::new_pool(manager)
         .context("failed to initialize the connection pool")?;
 
     let mut client = client();
 
-    let token: oauth_credentials::Credentials<_> = twitter_tokens::table
+    let token: Credentials<_> = twitter_tokens::table
         .find(&manifest.twitter.user)
         .get_result::<models::TwitterToken>(&*pool.get()?)
         .optional()
@@ -42,7 +41,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
     let res_fut = twitter::lists::Members::new(list_id)
         .count(Some(5000))
-        .send(&credentials.twitter.client, &token, &mut client);
+        .send(&manifest.twitter.client, &token, &mut client);
     println!("Retrieving the list...");
 
     let users: HashSet<i64> = manifest.twitter_topics().collect();
@@ -59,7 +58,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .difference(&users)
         .map(|&user| {
             twitter::lists::members::Destroy::new(list_id, user).send(
-                &credentials.twitter.client,
+                &manifest.twitter.client,
                 &token,
                 client.clone(),
             )
@@ -79,7 +78,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .difference(&list)
         .map(|&user| {
             twitter::lists::members::Create::new(list_id, user)
-                .send(&credentials.twitter.client, &token, client.clone())
+                .send(&manifest.twitter.client, &token, client.clone())
                 .map(move |r| (r, user))
         })
         .collect();

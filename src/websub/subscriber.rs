@@ -13,13 +13,12 @@ use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use futures::channel::mpsc;
 use futures::{Stream, StreamExt, TryStream};
-use http::Uri;
 use hyper::server::conn::Http;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::feed::{self, Feed};
-use crate::manifest::{self, Manifest};
+use crate::manifest;
 use crate::query;
 use crate::schema::*;
 use crate::util::{ArcService, HttpService};
@@ -55,19 +54,8 @@ where
     I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     pub fn new(
-        manifest: &Manifest,
-        incoming: I,
-        host: Uri,
-        client: S,
-        pool: Pool<ConnectionManager<SqliteConnection>>,
-    ) -> Self {
-        Self::new_(&manifest.websub, incoming, host, client, pool)
-    }
-
-    fn new_(
         manifest: &manifest::Websub,
         incoming: I,
-        host: Uri,
         client: S,
         pool: Pool<ConnectionManager<SqliteConnection>>,
     ) -> Self {
@@ -86,7 +74,7 @@ where
         let (tx, rx) = mpsc::channel(0);
 
         let service = Arc::new(service::Service {
-            host,
+            host: manifest.host.clone(),
             renewal_margin,
             client,
             pool,
@@ -190,6 +178,7 @@ mod tests {
     use futures::channel::oneshot;
     use hmac::{Hmac, Mac, NewMac};
     use http::header::CONTENT_TYPE;
+    use http::Uri;
     use http::{Method, Request, Response, StatusCode};
     use hyper::server::conn::Http;
     use hyper::{service, Body, Client};
@@ -487,17 +476,13 @@ mod tests {
             .build::<_, Body>(hub_conn);
 
         let manifest = manifest::Websub {
+            host: Uri::from_static("http://example.com/"),
+            bind: None,
             renewal_margin: MARGIN,
         };
         let pool = util::r2d2::new_pool(ConnectionManager::new(":memory:")).unwrap();
         crate::migrations::run(&*pool.get().unwrap()).unwrap();
-        let subscriber = Subscriber::new_(
-            &manifest,
-            sub_listener,
-            Uri::from_static("http://example.com/"),
-            sub_client,
-            pool,
-        );
+        let subscriber = Subscriber::new(&manifest, sub_listener, sub_client, pool);
 
         (subscriber, hub_client, hub_listener)
     }

@@ -1,9 +1,17 @@
+[websub]
+host = "https://websub.your-domain.example"
+bind = "tcp://0.0.0.0:8080"
+
 [twitter]
 # `user_id` of the account used to retrieve Tweets
 user = 12345
 # `list_id` of the list used to backfill timeline (optional)
 # Running `pipitor twitter-list-sync` will overwrite members in the list.
 list.id = 123456
+
+[twitter.client]
+identifier = "Your application's API key"
+secret = "Your application's API secret"
 
 [[rule]]
 topics = [

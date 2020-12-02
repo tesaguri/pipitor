@@ -47,7 +47,6 @@ mod serde_wrapper;
 use std::convert::TryInto;
 use std::error::Error;
 use std::fmt::{self, Display};
-use std::fs;
 use std::io;
 use std::marker::PhantomData;
 use std::mem;
@@ -59,15 +58,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::Context as _;
 use bytes::Buf;
 use futures::{ready, Future};
 use http_body::Body;
 use pin_project::pin_project;
 use serde::{de, Deserialize};
 use tower_service::Service;
-
-use crate::Credentials;
 
 #[cfg(test)]
 pub use self::connection::connection;
@@ -258,13 +254,6 @@ where
     }
 
     d.deserialize_str(Visitor::<T>(PhantomData))
-}
-
-pub fn open_credentials(path: &str) -> anyhow::Result<Credentials> {
-    let ret = fs::read(path)
-        .context("failed to open the credentials file")
-        .and_then(|buf| toml::from_slice(&buf).context("failed to parse the credentials file"))?;
-    Ok(ret)
 }
 
 pub fn snowflake_to_system_time(id: u64) -> SystemTime {

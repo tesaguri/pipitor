@@ -1,3 +1,5 @@
+use oauth_credentials::Credentials;
+
 use crate::feed::Entry;
 use crate::schema::*;
 
@@ -63,14 +65,13 @@ impl<'a> NewEntry<'a> {
     }
 }
 
-impl From<TwitterToken> for oauth_credentials::Credentials<Box<str>> {
+impl From<TwitterToken> for Credentials<Box<str>> {
     fn from(token: TwitterToken) -> Self {
-        oauth_credentials::Credentials::new(token.access_token, token.access_token_secret)
-            .map(Into::into)
+        Credentials::new(token.access_token, token.access_token_secret).map(Into::into)
     }
 }
 
-impl<'a> From<&'a TwitterToken> for oauth_credentials::Credentials<&'a str> {
+impl<'a> From<&'a TwitterToken> for Credentials<&'a str> {
     fn from(token: &'a TwitterToken) -> Self {
         Self::new(&token.access_token, &token.access_token_secret)
     }

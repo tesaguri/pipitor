@@ -1,10 +1,19 @@
-let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/dhall-schema-v0.3.0-alpha.9/schema.dhall sha256:08f433d482a6e6354598d74264693100b411a4873166dfe953119c97310d7a0d
+-- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/dhall-schema-v0.3.0-alpha.9/schema.dhall sha256:08f433d482a6e6354598d74264693100b411a4873166dfe953119c97310d7a0d
+let Pipitor = ./schema.dhall
 
 let botUserId = 12345
 
 in
 Pipitor.Manifest::{
+    websub = Some Pipitor.Websub::{
+        host = "https://websub.your-domain.example",
+        bind = Some "tcp://0.0.0.0:8080",
+    },
     twitter = Pipitor.Twitter::{
+        client = {
+            identifier = "Your application's API key",
+            secret = "Your application's API secret",
+        },
         -- `user_id` of the account used to retrieve Tweets
         user = botUserId,
         list = Some Pipitor.TwitterList::{

@@ -13,14 +13,13 @@ use pipitor::private::twitter::{self, Request as _};
 use pipitor::schema::*;
 use tokio::io::AsyncBufReadExt;
 
-use crate::common::{client, open_credentials};
+use crate::common::client;
 
 #[derive(Default, structopt::StructOpt)]
 pub struct Opt {}
 
 pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let manifest = opt.open_manifest()?;
-    let credentials = open_credentials(opt, &manifest)?;
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = pipitor::private::util::r2d2::new_pool(manager)
         .context("failed to initialize the connection pool")?;
@@ -39,11 +38,11 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
                 .context("failed to load tokens from the database")?;
 
             // Make borrowck happy
-            let (credentials, client) = (&credentials, client.clone());
+            let (manifest, client) = (&manifest, client.clone());
             Ok(async move {
                 if let Some(token) = token {
                     match twitter::account::VerifyCredentials::new()
-                        .send(&credentials.twitter.client, &(&token).into(), client)
+                        .send(&manifest.twitter.client, &(&token).into(), client)
                         .await
                     {
                         Ok(_) => return Ok(None),
@@ -75,7 +74,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
     while !unauthed_users.is_empty() {
         let temporary =
-            twitter::oauth::request_token(credentials.twitter.client.as_ref(), &mut client)
+            twitter::oauth::request_token(manifest.twitter.client.as_ref(), &mut client)
                 .await
                 .context("error while getting OAuth request token from Twitter")?;
 
@@ -83,7 +82,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
         let token = twitter::oauth::access_token(
             &verifier,
-            credentials.twitter.client.as_ref(),
+            manifest.twitter.client.as_ref(),
             temporary.as_ref(),
             &mut client,
         )

@@ -7,6 +7,7 @@ use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::result::{DatabaseErrorKind, Error as QueryError};
 use diesel::SqliteConnection;
 use http_body::Body;
+use oauth_credentials::{Credentials, Token};
 use pin_project::pin_project;
 use tower_util::ServiceExt;
 use twitter_stream::TwitterStream;
@@ -15,8 +16,8 @@ use crate::models;
 use crate::router::Router;
 use crate::schema::*;
 use crate::twitter;
-use crate::util::{self, open_credentials, HttpService};
-use crate::{Credentials, Manifest};
+use crate::util::{self, HttpService};
+use crate::Manifest;
 
 use super::shutdown::Shutdown;
 
@@ -24,12 +25,11 @@ use super::shutdown::Shutdown;
 #[pin_project]
 pub struct Core<S> {
     manifest: Manifest,
-    credentials: Credentials,
     router: Router,
     pool: Pool<ConnectionManager<SqliteConnection>>,
     #[pin]
     client: S,
-    twitter_tokens: HashMap<i64, oauth_credentials::Credentials<Box<str>>>,
+    twitter_tokens: HashMap<i64, Credentials<Box<str>>>,
     shutdown: Shutdown,
 }
 
@@ -44,7 +44,6 @@ impl<S> Core<S> {
         let manager = ConnectionManager::new(manifest.database_url());
         let pool =
             util::r2d2::new_pool(manager).context("failed to initialize the connection pool")?;
-        let credentials: Credentials = open_credentials(manifest.credentials_path())?;
 
         diesel::insert_into(last_tweet::table)
             .values((last_tweet::id.eq(0), last_tweet::status_id.eq(0)))
@@ -58,7 +57,6 @@ impl<S> Core<S> {
         let mut ret = Core {
             router: Router::from_manifest(&manifest),
             manifest,
-            credentials,
             pool,
             client,
             twitter_tokens: HashMap::new(),
@@ -84,8 +82,7 @@ impl<S> Core<S> {
 
         let token = self.twitter_token(self.manifest.twitter.user).unwrap();
 
-        let stream_token =
-            oauth_credentials::Token::new(self.credentials().twitter.client.as_ref(), token);
+        let stream_token = Token::new(self.manifest.twitter.client.as_ref(), token);
 
         let mut twitter_topics: Vec<_> =
             self.manifest.twitter_topics().map(|id| id as u64).collect();
@@ -127,7 +124,7 @@ impl<S> Core<S> {
             .filter(|&n| n > 0);
 
         let user = self.manifest().twitter.user;
-        let client = self.credentials().twitter.client.clone();
+        let client = self.manifest().twitter.client.clone();
         let token = self.twitter_tokens.get(&user).unwrap().clone();
 
         let http = self.client.clone();
@@ -178,14 +175,6 @@ impl<S> Core<S> {
         &self.manifest
     }
 
-    pub fn credentials(&self) -> &Credentials {
-        &self.credentials
-    }
-
-    pub fn credentials_mut(&mut self) -> &mut Credentials {
-        &mut self.credentials
-    }
-
     pub fn router(&self) -> &Router {
         &self.router
     }
@@ -217,9 +206,7 @@ impl<S> Core<S> {
             .map_err(Into::into)
     }
 
-    pub fn twitter_token(&self, user: i64) -> Option<oauth_credentials::Credentials<&str>> {
-        self.twitter_tokens
-            .get(&user)
-            .map(oauth_credentials::Credentials::as_ref)
+    pub fn twitter_token(&self, user: i64) -> Option<Credentials<&str>> {
+        self.twitter_tokens.get(&user).map(Credentials::as_ref)
     }
 }
