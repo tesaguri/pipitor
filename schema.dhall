@@ -27,7 +27,7 @@ For more information, please refer to <http://unlicense.org/>
 
 -- A Dhall type definition for the Pipitor manifest file.
 -- The following is a recommended way of importing the file:
--- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/master/schema.dhall sha256:8bcf00a51907b768d9b412e10514d44fabc2074f0da27e1dde696e65c4b07add
+-- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/master/schema.dhall sha256:e34f51224142898fbd086be58ff9386ef9b779987633fe521034b5f6a5a3d8bd
 
 let Duration = { secs : Natural, nanos : Natural }
 
@@ -62,7 +62,7 @@ let Rule =
       , default = { filter = None Filter.Type, exclude = None Filter.Type }
       }
 
-let Websub =
+let WebSub =
       { Type =
           { callback : Text, bind : Optional Text, renewal_margin : Duration }
       , default = { bind = None Text, renewal_margin = Duration/from_hours 1 }
@@ -87,14 +87,14 @@ let Twitter =
 let Manifest =
       { Type =
           { database_url : Optional Text
-          , websub : Optional Websub.Type
+          , websub : Optional WebSub.Type
           , twitter : Twitter.Type
           , rule : List Rule.Type
           , skip_duplicate : Bool
           }
       , default =
         { database_url = None Text
-        , websub = None Websub.Type
+        , websub = None WebSub.Type
         , skip_duplicate = False
         }
       }
@@ -108,7 +108,7 @@ in  { Duration/from_secs
     , Filter
     , Outbox
     , Rule
-    , Websub
+    , WebSub
     , TwitterList
     , Twitter
     , Manifest

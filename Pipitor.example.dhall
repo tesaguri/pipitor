@@ -5,7 +5,7 @@ let botUserId = 12345
 
 in
 Pipitor.Manifest::{
-    websub = Some Pipitor.Websub::{
+    websub = Some Pipitor.WebSub::{
         callback = "https://your-domain.example/websub/",
         bind = Some "tcp://0.0.0.0:8080",
     },

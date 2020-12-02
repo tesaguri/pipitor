@@ -43,7 +43,7 @@ enum Cmd {
     #[structopt(name = "twitter-login")]
     TwitterLogin(twitter_login::Opt),
     #[structopt(name = "websub")]
-    Websub(websub::Opt),
+    WebSub(websub::Opt),
 }
 
 fn main() {
@@ -68,7 +68,7 @@ fn run() -> anyhow::Result<()> {
                 Cmd::Setup(subopt) => setup::main(&opt, subopt).await,
                 Cmd::TwitterListSync(subopt) => twitter_list_sync::main(&opt, subopt).await,
                 Cmd::TwitterLogin(subopt) => twitter_login::main(&opt, subopt).await,
-                Cmd::Websub(subopt) => websub::main(&opt, subopt).await,
+                Cmd::WebSub(subopt) => websub::main(&opt, subopt).await,
                 Cmd::Migration(_) | Cmd::Run(_) => unreachable!(),
             }
         }),

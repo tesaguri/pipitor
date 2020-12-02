@@ -56,7 +56,7 @@ where
     I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     pub fn new(
-        manifest: &manifest::Websub,
+        manifest: &manifest::WebSub,
         incoming: I,
         client: S,
         pool: Pool<ConnectionManager<SqliteConnection>>,
@@ -517,7 +517,7 @@ mod tests {
             .pool_max_idle_per_host(0)
             .build::<_, Body>(hub_conn);
 
-        let manifest = manifest::Websub {
+        let manifest = manifest::WebSub {
             callback: Uri::from_static("http://example.com/"),
             bind: None,
             renewal_margin: MARGIN,

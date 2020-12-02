@@ -92,7 +92,7 @@ fn list(opt: List, conn: SqliteConnection) -> anyhow::Result<()> {
 
 async fn unsubscribe(
     opt: Unsubscribe,
-    config: manifest::Websub,
+    config: manifest::WebSub,
     conn: SqliteConnection,
 ) -> anyhow::Result<()> {
     let client = common::client();

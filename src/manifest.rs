@@ -25,7 +25,7 @@ pub struct Manifest {
     pub database_url: Option<Box<str>>,
     pub rule: Box<[Rule]>,
     #[serde(default)]
-    pub websub: Option<Websub>,
+    pub websub: Option<WebSub>,
     pub twitter: Twitter,
     #[serde(default)]
     pub skip_duplicate: bool,
@@ -71,7 +71,7 @@ pub enum TopicId<'a> {
 
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
-pub struct Websub {
+pub struct WebSub {
     #[serde(deserialize_with = "de_callback")]
     pub callback: Uri,
     pub bind: Option<socket::Addr>,
