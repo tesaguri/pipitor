@@ -27,7 +27,7 @@ For more information, please refer to <http://unlicense.org/>
 
 -- A Dhall type definition for the Pipitor manifest file.
 -- The following is a recommended way of importing the file:
--- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/master/schema.dhall sha256:5ca8bb04339394253654cca0dbdda763b10d88d329646acc65b45f1135da483a
+-- let Pipitor = https://raw.githubusercontent.com/tesaguri/pipitor/master/schema.dhall sha256:8bcf00a51907b768d9b412e10514d44fabc2074f0da27e1dde696e65c4b07add
 
 let Duration = { secs : Natural, nanos : Natural }
 
@@ -63,7 +63,8 @@ let Rule =
       }
 
 let Websub =
-      { Type = { host : Text, bind : Optional Text, renewal_margin : Duration }
+      { Type =
+          { callback : Text, bind : Optional Text, renewal_margin : Duration }
       , default = { bind = None Text, renewal_margin = Duration/from_hours 1 }
       }
 

@@ -114,7 +114,7 @@ async fn unsubscribe(
                 .load(&conn)?
         };
         for (id, hub, topic) in rows {
-            let task = hub::unsubscribe(&config.host, id, hub, topic, client.clone(), &conn);
+            let task = hub::unsubscribe(&config.callback, id, hub, topic, client.clone(), &conn);
             tasks.push(task);
         }
         Ok(())

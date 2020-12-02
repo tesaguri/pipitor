@@ -71,12 +71,12 @@ where
                 u64::try_from(expires_at).map_or(0, |expires_at| expires_at - renewal_margin)
             });
 
-        let host = prepare_callback_prefix(manifest.host.clone());
+        let callback = prepare_callback_prefix(manifest.callback.clone());
 
         let (tx, rx) = mpsc::channel(0);
 
         let service = Arc::new(service::Service {
-            host,
+            callback,
             renewal_margin,
             client,
             pool,
@@ -171,13 +171,13 @@ impl Content {
     }
 }
 
-// Ensure that `host` ends with a slash.
-fn prepare_callback_prefix(host: Uri) -> Uri {
+// Ensure that `prefix` ends with a slash.
+fn prepare_callback_prefix(prefix: Uri) -> Uri {
     // Existence of `path_and_query` should have been verified upon deserialization.
-    let path = host.path_and_query().unwrap().as_str();
+    let path = prefix.path_and_query().unwrap().as_str();
 
     if path.ends_with('/') {
-        host
+        prefix
     } else {
         let path = {
             let mut buf = String::with_capacity(path.len() + 1);
@@ -185,7 +185,7 @@ fn prepare_callback_prefix(host: Uri) -> Uri {
             buf.push('/');
             PathAndQuery::from_maybe_shared(Bytes::from(buf)).unwrap()
         };
-        let mut parts = host.into_parts();
+        let mut parts = prefix.into_parts();
         parts.path_and_query = Some(path);
         Uri::from_parts(parts).unwrap()
     }
@@ -518,7 +518,7 @@ mod tests {
             .build::<_, Body>(hub_conn);
 
         let manifest = manifest::Websub {
-            host: Uri::from_static("http://example.com/"),
+            callback: Uri::from_static("http://example.com/"),
             bind: None,
             renewal_margin: MARGIN,
         };

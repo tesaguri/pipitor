@@ -28,7 +28,7 @@ use crate::websub::hub;
 use super::{scheduler, Content};
 
 pub struct Service<S, B> {
-    pub(super) host: Uri,
+    pub(super) callback: Uri,
     pub(super) renewal_margin: u64,
     pub(super) client: S,
     pub(super) pool: Pool<ConnectionManager<SqliteConnection>>,
@@ -58,7 +58,7 @@ where
         <S::ResponseBody as http_body::Body>::Error: Error + Send + Sync + 'static,
         B: Default,
     {
-        let host = self.host.clone();
+        let callback = self.callback.clone();
         let client = self.client.clone();
         let pool = self.pool.clone();
         self.discover(topic).map(|result| {
@@ -67,7 +67,7 @@ where
                     let conn = pool.get()?;
                     for hub in hubs {
                         tokio::spawn(hub::subscribe(
-                            &host,
+                            &callback,
                             hub,
                             topic.clone(),
                             client.clone(),
@@ -142,7 +142,7 @@ where
         topic: String,
         conn: &SqliteConnection,
     ) -> impl Future<Output = Result<(), S::Error>> {
-        hub::subscribe(&self.host, hub, topic, self.client.clone(), conn)
+        hub::subscribe(&self.callback, hub, topic, self.client.clone(), conn)
     }
 
     pub fn renew_subscriptions(&self, conn: &SqliteConnection) {
@@ -177,7 +177,7 @@ where
         topic: String,
         conn: &SqliteConnection,
     ) -> impl Iterator<Item = impl Future<Output = Result<(), S::Error>>> {
-        hub::unsubscribe_all(&self.host, topic, self.client.clone(), conn)
+        hub::unsubscribe_all(&self.callback, topic, self.client.clone(), conn)
     }
 
     fn renew(
@@ -187,7 +187,7 @@ where
         topic: String,
         conn: &SqliteConnection,
     ) -> impl Future<Output = Result<(), S::Error>> {
-        hub::renew(&self.host, id, hub, topic, self.client.clone(), conn)
+        hub::renew(&self.callback, id, hub, topic, self.client.clone(), conn)
     }
 
     fn unsubscribe(
@@ -197,7 +197,7 @@ where
         topic: String,
         conn: &SqliteConnection,
     ) -> impl Future<Output = Result<(), S::Error>> {
-        hub::unsubscribe(&self.host, id, hub, topic, self.client.clone(), conn)
+        hub::unsubscribe(&self.callback, id, hub, topic, self.client.clone(), conn)
     }
 
     fn call(&self, req: Request<Body>) -> Response<Body> {
@@ -216,7 +216,7 @@ where
         }
 
         let path = req.uri().path();
-        let id = if let Some(id) = path.strip_prefix(self.host.path()) {
+        let id = if let Some(id) = path.strip_prefix(self.callback.path()) {
             let id = validate!(crate::websub::decode_callback_id(id).ok_or(()));
             validate!(i64::try_from(id))
         } else {

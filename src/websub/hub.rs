@@ -62,7 +62,7 @@ const SECRET_LEN: usize = 32;
 type Secret = string::String<[u8; SECRET_LEN]>;
 
 pub fn subscribe<S, B>(
-    host: &Uri,
+    callback: &Uri,
     hub: String,
     topic: String,
     client: S,
@@ -77,7 +77,7 @@ where
     log::info!("Subscribing to topic {} at hub {} ({})", topic, hub, id);
 
     let body = serde_urlencoded::to_string(Form::Subscribe {
-        callback: callback(host.clone(), id),
+        callback: make_callback(callback.clone(), id),
         topic: &*topic,
         secret: &*secret,
     })
@@ -87,7 +87,7 @@ where
 }
 
 pub fn renew<S, B>(
-    host: &Uri,
+    callback: &Uri,
     old: i64,
     hub: String,
     topic: String,
@@ -120,7 +120,7 @@ where
     );
 
     let body = serde_urlencoded::to_string(Form::Subscribe {
-        callback: callback(host.clone(), new),
+        callback: make_callback(callback.clone(), new),
         topic: &*topic,
         secret: &*secret,
     })
@@ -130,7 +130,7 @@ where
 }
 
 pub fn unsubscribe<S, B>(
-    host: &Uri,
+    callback: &Uri,
     id: i64,
     hub: String,
     topic: String,
@@ -147,7 +147,7 @@ where
         .execute(conn)
         .unwrap();
 
-    let callback = callback(host.clone(), id);
+    let callback = make_callback(callback.clone(), id);
     let body = serde_urlencoded::to_string(Form::Unsubscribe {
         callback,
         topic: &topic,
@@ -157,7 +157,7 @@ where
 }
 
 pub fn unsubscribe_all<S, B>(
-    host: &Uri,
+    callback: &Uri,
     topic: String,
     client: S,
     conn: &SqliteConnection,
@@ -176,9 +176,9 @@ where
 
     diesel::delete(rows).execute(conn).unwrap();
 
-    let host = host.clone();
+    let callback = callback.clone();
     subscriptions.into_iter().map(move |(id, hub)| {
-        let callback = callback(host.clone(), id);
+        let callback = make_callback(callback.clone(), id);
         let body = serde_urlencoded::to_string(Form::Unsubscribe {
             callback,
             topic: &topic,
@@ -265,10 +265,10 @@ fn create_subscription(hub: &str, topic: &str, conn: &SqliteConnection) -> (i64,
     (id, secret)
 }
 
-fn callback(host: Uri, id: i64) -> Uri {
+fn make_callback(prefix: Uri, id: i64) -> Uri {
     let id = id.to_le_bytes();
     let id = super::encode_callback_id(&id);
-    let mut parts = Parts::from(host);
+    let mut parts = Parts::from(prefix);
     // `subscriber::prepare_callback_prefix` ensures that `path_and_query` is `Some`.
     let path = format!("{}{}", parts.path_and_query.unwrap(), id);
     parts.path_and_query = Some(PathAndQuery::from_maybe_shared(Bytes::from(path)).unwrap());

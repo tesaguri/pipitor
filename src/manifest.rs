@@ -10,8 +10,7 @@ use std::time::Duration;
 use http::Uri;
 use oauth_credentials::Credentials;
 use regex::Regex;
-use serde::de::{self, Error};
-use serde::Deserialize;
+use serde::{de, Deserialize};
 use smallvec::SmallVec;
 
 use crate::feed::Entry;
@@ -73,8 +72,8 @@ pub enum TopicId<'a> {
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Websub {
-    #[serde(deserialize_with = "de_host")]
-    pub host: Uri,
+    #[serde(deserialize_with = "de_callback")]
+    pub callback: Uri,
     pub bind: Option<socket::Addr>,
     #[serde(default = "one_hour")]
     #[serde(deserialize_with = "de_duration_from_secs")]
@@ -425,12 +424,14 @@ fn de_outbox<'de, D: de::Deserializer<'de>>(d: D) -> Result<SmallVec<[Outbox; 1]
     d.deserialize_any(Visitor)
 }
 
-fn de_host<'de, D: de::Deserializer<'de>>(d: D) -> Result<Uri, D::Error> {
+fn de_callback<'de, D: de::Deserializer<'de>>(d: D) -> Result<Uri, D::Error> {
     http_serde::uri::deserialize(d).and_then(|uri| {
         if uri.scheme().is_none() {
-            Err(D::Error::custom("missing URI scheme"))
+            Err(de::Error::custom("missing URI scheme"))
         } else if uri.query().is_some() {
-            Err(D::Error::custom("`websub.host` must not have a query part"))
+            Err(de::Error::custom(
+                "`websub.callback` must not have a query part",
+            ))
         } else {
             Ok(uri)
         }
