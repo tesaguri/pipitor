@@ -216,7 +216,7 @@ where
         }
 
         let path = req.uri().path();
-        let id = if let Some(id) = path.strip_prefix(crate::websub::CALLBACK_PREFIX) {
+        let id = if let Some(id) = path.strip_prefix(self.host.path()) {
             let id: u64 = validate!(id.parse());
             validate!(i64::try_from(id))
         } else {

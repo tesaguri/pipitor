@@ -10,7 +10,8 @@ use std::time::Duration;
 use http::Uri;
 use oauth_credentials::Credentials;
 use regex::Regex;
-use serde::{de, Deserialize};
+use serde::de::{self, Error};
+use serde::Deserialize;
 use smallvec::SmallVec;
 
 use crate::feed::Entry;
@@ -72,7 +73,7 @@ pub enum TopicId<'a> {
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Websub {
-    #[serde(with = "http_serde::uri")]
+    #[serde(deserialize_with = "de_host")]
     pub host: Uri,
     pub bind: Option<socket::Addr>,
     #[serde(default = "one_hour")]
@@ -422,6 +423,18 @@ fn de_outbox<'de, D: de::Deserializer<'de>>(d: D) -> Result<SmallVec<[Outbox; 1]
     }
 
     d.deserialize_any(Visitor)
+}
+
+fn de_host<'de, D: de::Deserializer<'de>>(d: D) -> Result<Uri, D::Error> {
+    http_serde::uri::deserialize(d).and_then(|uri| {
+        if uri.scheme().is_none() {
+            Err(D::Error::custom("missing URI scheme"))
+        } else if uri.query().is_some() {
+            Err(D::Error::custom("`websub.host` must not have a query part"))
+        } else {
+            Ok(uri)
+        }
+    })
 }
 
 fn de_duration_from_secs<'de, D: de::Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {

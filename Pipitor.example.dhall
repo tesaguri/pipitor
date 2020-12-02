@@ -6,7 +6,7 @@ let botUserId = 12345
 in
 Pipitor.Manifest::{
     websub = Some Pipitor.Websub::{
-        host = "https://websub.your-domain.example",
+        host = "https://your-domain.example/websub/",
         bind = Some "tcp://0.0.0.0:8080",
     },
     twitter = Pipitor.Twitter::{

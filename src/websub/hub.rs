@@ -1,12 +1,13 @@
 use std::convert::TryInto;
 use std::str;
 
+use bytes::Bytes;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::SqliteConnection;
 use futures::{Future, TryFutureExt};
 use http::header::{HeaderValue, CONTENT_TYPE, LOCATION};
-use http::uri::{Parts, Uri};
+use http::uri::{Parts, PathAndQuery, Uri};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tower_util::ServiceExt;
@@ -266,7 +267,9 @@ fn create_subscription(hub: &str, topic: &str, conn: &SqliteConnection) -> (i64,
 
 fn callback(host: Uri, id: i64) -> Uri {
     let mut parts = Parts::from(host);
-    parts.path_and_query = Some((*format!("/websub/callback/{}", id)).try_into().unwrap());
+    // `subscriber::prepare_callback_prefix` ensures that `path_and_query` is `Some`.
+    let path = format!("{}{}", parts.path_and_query.unwrap(), id);
+    parts.path_and_query = Some(PathAndQuery::from_maybe_shared(Bytes::from(path)).unwrap());
     parts.try_into().unwrap()
 }
 

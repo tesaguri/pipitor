@@ -1,18 +1,20 @@
 mod scheduler;
 mod service;
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::marker::{PhantomData, Unpin};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use bytes::Bytes;
 use diesel::dsl::*;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use futures::channel::mpsc;
 use futures::{Stream, StreamExt, TryStream};
+use http::uri::{PathAndQuery, Uri};
 use hyper::server::conn::Http;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -66,15 +68,15 @@ where
             .optional()
             .unwrap()
             .map(|expires_at| {
-                expires_at
-                    .try_into()
-                    .map_or(0, |expires_at: u64| expires_at - renewal_margin)
+                u64::try_from(expires_at).map_or(0, |expires_at| expires_at - renewal_margin)
             });
+
+        let host = prepare_callback_prefix(manifest.host.clone());
 
         let (tx, rx) = mpsc::channel(0);
 
         let service = Arc::new(service::Service {
-            host: manifest.host.clone(),
+            host,
             renewal_margin,
             client,
             pool,
@@ -169,6 +171,26 @@ impl Content {
     }
 }
 
+// Ensure that `host` ends with a slash.
+fn prepare_callback_prefix(host: Uri) -> Uri {
+    // Existence of `path_and_query` should have been verified upon deserialization.
+    let path = host.path_and_query().unwrap().as_str();
+
+    if path.ends_with('/') {
+        host
+    } else {
+        let path = {
+            let mut buf = String::with_capacity(path.len() + 1);
+            buf.push_str(path);
+            buf.push('/');
+            PathAndQuery::from_maybe_shared(Bytes::from(buf)).unwrap()
+        };
+        let mut parts = host.into_parts();
+        parts.path_and_query = Some(path);
+        Uri::from_parts(parts).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
@@ -197,6 +219,25 @@ mod tests {
     const HUB: &str = "http://example.com/hub";
     const FEED: &str = include_str!("testcases/feed.xml");
     const MARGIN: Duration = Duration::from_secs(42);
+
+    #[test]
+    fn callback_prefix() {
+        // Should remain intact (root directory).
+        let uri = prepare_callback_prefix("http://example.com/".try_into().unwrap());
+        assert_eq!(uri, "http://example.com/");
+
+        // Should remain intact (subdirectory).
+        let uri = prepare_callback_prefix("http://example.com/websub/".try_into().unwrap());
+        assert_eq!(uri, "http://example.com/websub/");
+
+        // Should append a slash (root directory).
+        let uri = prepare_callback_prefix("http://example.com".try_into().unwrap());
+        assert_eq!(uri, "http://example.com/");
+
+        // Should append a slash (subdirectory).
+        let uri = prepare_callback_prefix("http://example.com/websub".try_into().unwrap());
+        assert_eq!(uri, "http://example.com/websub/");
+    }
 
     #[tokio::test]
     async fn test() {

@@ -1,5 +1,5 @@
 [websub]
-host = "https://websub.your-domain.example"
+host = "https://your-domain.example/websub/"
 bind = "tcp://0.0.0.0:8080"
 
 [twitter]
