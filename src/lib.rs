@@ -27,11 +27,19 @@ pub use manifest::Manifest;
 
 #[doc(hidden)]
 pub mod private {
+    pub mod query {
+        pub use crate::query::pragma_foreign_keys_on;
+    }
+
     pub mod twitter {
         pub use crate::twitter::{api::*, *};
     }
 
     pub mod util {
         pub use crate::util::r2d2;
+    }
+
+    pub mod websub {
+        pub use crate::websub::hub;
     }
 }

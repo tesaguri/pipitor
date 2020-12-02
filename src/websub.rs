@@ -1,4 +1,5 @@
-mod hub;
+pub mod hub;
+
 mod subscriber;
 
 pub use subscriber::{Content, Subscriber};

@@ -12,6 +12,7 @@ mod run;
 mod setup;
 mod twitter_list_sync;
 mod twitter_login;
+mod websub;
 
 use std::process;
 
@@ -41,6 +42,8 @@ enum Cmd {
     TwitterListSync(twitter_list_sync::Opt),
     #[structopt(name = "twitter-login")]
     TwitterLogin(twitter_login::Opt),
+    #[structopt(name = "websub")]
+    Websub(websub::Opt),
 }
 
 fn main() {
@@ -65,6 +68,7 @@ fn run() -> anyhow::Result<()> {
                 Cmd::Setup(subopt) => setup::main(&opt, subopt).await,
                 Cmd::TwitterListSync(subopt) => twitter_list_sync::main(&opt, subopt).await,
                 Cmd::TwitterLogin(subopt) => twitter_login::main(&opt, subopt).await,
+                Cmd::Websub(subopt) => websub::main(&opt, subopt).await,
                 Cmd::Migration(_) | Cmd::Run(_) => unreachable!(),
             }
         }),
