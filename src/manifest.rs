@@ -86,7 +86,7 @@ pub struct Twitter {
     #[serde(with = "CredentialsDef")]
     pub client: Credentials<Box<str>>,
     pub user: i64,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub stream: bool,
     #[serde(default)]
     pub list: Option<TwitterList>,
@@ -100,7 +100,7 @@ pub struct TwitterList {
     #[serde(default = "one_sec")]
     #[serde(deserialize_with = "de_duration_from_secs")]
     pub interval: Duration,
-    #[serde(default)]
+    #[serde(default = "one_sec")]
     #[serde(deserialize_with = "de_duration_from_secs")]
     pub delay: Duration,
 }
@@ -475,6 +475,10 @@ fn one_hour() -> Duration {
 
 fn one_sec() -> Duration {
     Duration::from_secs(1)
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn resolve_path(path: &str, base: &str) -> Option<Box<str>> {
