@@ -63,11 +63,10 @@ use futures::{ready, Future};
 use http_body::Body;
 use pin_project::pin_project;
 use serde::{de, Deserialize};
-use tower_service::Service;
 
 #[cfg(test)]
 pub use self::connection::connection;
-pub use self::http_service::HttpService;
+pub use self::http_service::{HttpService, Service};
 pub use self::serde_wrapper::{MapAccessDeserializer, SeqAccessDeserializer, Serde};
 pub use self::time::{instant_from_unix, instant_now, now_unix, system_time_now};
 #[cfg(test)]
@@ -114,9 +113,9 @@ macro_rules! trace_fn {
     }};
 }
 
-impl<S, T, R, E, F> Service<T> for ArcService<S>
+impl<S, T, R, E, F> tower_service::Service<T> for ArcService<S>
 where
-    for<'a> &'a S: Service<T, Response = R, Error = E, Future = F>,
+    for<'a> &'a S: tower_service::Service<T, Response = R, Error = E, Future = F>,
     F: Future<Output = Result<R, E>>,
 {
     type Response = R;

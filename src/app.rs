@@ -28,7 +28,7 @@ use crate::router::Router;
 use crate::schema::*;
 use crate::socket;
 use crate::twitter;
-use crate::util::{self, snowflake_to_system_time, HttpService, Maybe};
+use crate::util::{self, snowflake_to_system_time, HttpService, Maybe, Service};
 use crate::websub;
 
 use self::core::Core;
@@ -41,14 +41,14 @@ where
     S: HttpService<B>,
 {
     #[pin]
-    core: Core<S>,
+    core: Core<Service<S>>,
     #[pin]
-    twitter_list: twitter::ListTimeline<S, B>,
+    twitter_list: twitter::ListTimeline<Service<S>, B>,
     #[pin]
     twitter: Option<TwitterStream<S::ResponseBody>>,
     #[pin]
-    websub: Option<websub::Subscriber<S, B, I>>,
-    sender: Sender<S, B>,
+    websub: Option<websub::Subscriber<Service<S>, B, I>>,
+    sender: Sender<Service<S>, B>,
 }
 
 #[cfg(feature = "native-tls")]
@@ -132,7 +132,7 @@ where
     where
         F: FnOnce(&mut ListenFd) -> anyhow::Result<Option<I>>,
     {
-        let core = Core::new(manifest, client)?;
+        let core = Core::new(manifest, Service::new(client))?;
         let websub = Self::init_websub(&core, make_unix_incoming)?;
         let twitter = core.init_twitter().await?;
         let twitter_list = core.init_twitter_list()?;
@@ -151,9 +151,9 @@ where
     }
 
     fn init_websub<F>(
-        core: &Core<S>,
+        core: &Core<Service<S>>,
         make_unix_incoming: F,
-    ) -> anyhow::Result<Option<websub::Subscriber<S, B, I>>>
+    ) -> anyhow::Result<Option<websub::Subscriber<Service<S>, B, I>>>
     where
         F: FnOnce(&mut ListenFd) -> anyhow::Result<Option<I>>,
     {
@@ -450,7 +450,7 @@ impl<S: HttpService<B>, B, I> App<S, B, I> {
     }
 
     pub fn http_client(&self) -> &S {
-        self.core.http_client()
+        self.core.http_client().get_ref()
     }
 }
 
