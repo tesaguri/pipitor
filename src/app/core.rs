@@ -142,9 +142,7 @@ impl<S> Core<S> {
             .chain(Some(manifest.twitter.user))
             .filter(|user| !self.twitter_tokens.contains_key(&user))
             // Make the values unique so that the later `_.len() != _.len()` comparison makes sense.
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+            .collect::<HashSet<_>>();
 
         let tokens: Vec<models::TwitterToken> = twitter_tokens::table
             .filter(twitter_tokens::id.eq_any(&unauthed_users))
