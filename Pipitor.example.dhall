@@ -3,13 +3,12 @@ let Pipitor = ./schema.dhall
 
 let botUserId = 12345
 
-in
-Pipitor.Manifest::{
+let manifest = Pipitor.Manifest::{
     websub = Some Pipitor.WebSub::{
         callback = "https://your-domain.example/websub/",
         bind = Some "tcp://0.0.0.0:8080",
     },
-    twitter = Pipitor.Twitter::{
+    twitter = Some Pipitor.Twitter::{
         client = {
             identifier = "Your application's API key",
             secret = "Your application's API secret",
@@ -47,3 +46,7 @@ Pipitor.Manifest::{
         },
     ],
 }
+
+let _ = assert : Pipitor.Manifest/validate manifest === True
+
+in manifest

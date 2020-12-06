@@ -239,6 +239,8 @@ where
             };
         }
 
+        try_!(manifest.validate());
+
         let old_pool = if manifest.database_url == self.manifest().database_url {
             None
         } else {
@@ -299,12 +301,14 @@ where
             this.core.load_twitter_tokens()?;
 
             let new = this.manifest();
-            if this.manifest().twitter.client.identifier != old.twitter.client.identifier
-                || new.twitter.user != old.twitter.user
-                || new
+            let has_updates = new.twitter.as_ref().map_or(false, |newt| {
+                old.twitter.as_ref().map_or(true, |oldt| {
+                    newt.client.identifier != oldt.client.identifier || newt.user != oldt.user
+                }) || new
                     .twitter_topics()
                     .any(|user| !old.has_topic(&TopicId::Twitter(user)))
-            {
+            });
+            if has_updates {
                 let twitter = this.core.init_twitter().await?;
                 let twitter_list = this.core.init_twitter_list()?;
                 this.twitter = twitter;
@@ -321,6 +325,7 @@ where
             Ok(()) => {
                 let old = guard.old.take().unwrap();
                 mem::forget(guard);
+                self.core.gc_twitter_tokens();
                 *self.core.router_mut() = Router::from_manifest(self.manifest());
                 Ok(old)
             }
@@ -486,7 +491,7 @@ where
             }
         }
 
-        if self.manifest().twitter.stream {
+        if self.manifest().twitter.as_ref().map_or(false, |t| t.stream) {
             if let Poll::Ready(result) = self.as_mut().poll_twitter(cx) {
                 return Poll::Ready(result);
             }

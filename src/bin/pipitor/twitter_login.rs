@@ -20,6 +20,13 @@ pub struct Opt {}
 
 pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let manifest = opt.open_manifest()?;
+
+    let config = if let Some(ref config) = manifest.twitter {
+        config
+    } else {
+        anyhow::bail!("missing `twitter` in the manifest");
+    };
+
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
     let pool = pipitor::private::util::r2d2::new_pool(manager)
         .context("failed to initialize the connection pool")?;
@@ -27,7 +34,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
     let unauthed_users: FuturesUnordered<_> = manifest
         .twitter_outboxes()
-        .chain(Some(manifest.twitter.user))
+        .chain(Some(config.user))
         .collect::<HashSet<_>>()
         .iter()
         .map(|&user| {
@@ -37,12 +44,11 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
                 .optional()
                 .context("failed to load tokens from the database")?;
 
-            // Make borrowck happy
-            let (manifest, client) = (&manifest, client.clone());
+            let client = client.clone();
             Ok(async move {
                 if let Some(token) = token {
                     match twitter::account::VerifyCredentials::new()
-                        .send(&manifest.twitter.client, &(&token).into(), client)
+                        .send(&config.client, &(&token).into(), client)
                         .await
                     {
                         Ok(_) => return Ok(None),
@@ -73,16 +79,15 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let mut stdin = tokio::io::BufReader::new(stdin).lines();
 
     while !unauthed_users.is_empty() {
-        let temporary =
-            twitter::oauth::request_token(manifest.twitter.client.as_ref(), &mut client)
-                .await
-                .context("error while getting OAuth request token from Twitter")?;
+        let temporary = twitter::oauth::request_token(config.client.as_ref(), &mut client)
+            .await
+            .context("error while getting OAuth request token from Twitter")?;
 
         let verifier = input_verifier(&mut stdin, temporary.identifier(), &unauthed_users).await?;
 
         let token = twitter::oauth::access_token(
             &verifier,
-            manifest.twitter.client.as_ref(),
+            config.client.as_ref(),
             temporary.as_ref(),
             &mut client,
         )

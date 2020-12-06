@@ -12,12 +12,12 @@ use pin_project::pin_project;
 use tower_util::ServiceExt;
 use twitter_stream::TwitterStream;
 
+use crate::manifest::{self, Manifest};
 use crate::models;
 use crate::router::Router;
 use crate::schema::*;
 use crate::twitter;
 use crate::util::{self, HttpService};
-use crate::Manifest;
 
 use super::shutdown::Shutdown;
 
@@ -40,6 +40,8 @@ impl<S> Core<S> {
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
     {
         trace_fn!(Core::<S>::new);
+
+        manifest.validate()?;
 
         let manager = ConnectionManager::new(manifest.database_url());
         let pool =
@@ -76,13 +78,19 @@ impl<S> Core<S> {
     {
         trace_fn!(Core::<S>::init_twitter);
 
-        if !self.manifest.twitter.stream {
+        let config = if let Some(ref config) = self.manifest.twitter {
+            config
+        } else {
+            return Ok(None);
+        };
+
+        if !config.stream {
             return Ok(None);
         }
 
-        let token = self.twitter_token(self.manifest.twitter.user).unwrap();
+        let token = self.twitter_token(config.user).unwrap();
 
-        let stream_token = Token::new(self.manifest.twitter.client.as_ref(), token);
+        let stream_token = Token::new(config.client.as_ref(), token);
 
         let mut twitter_topics: Vec<_> =
             self.manifest.twitter_topics().map(|id| id as u64).collect();
@@ -110,10 +118,14 @@ impl<S> Core<S> {
         <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
         B: Default + From<Vec<u8>> + Send + 'static,
     {
-        let list = if let Some(ref list) = self.manifest.twitter.list {
-            list
-        } else {
-            return Ok(twitter::ListTimeline::empty());
+        let (user, client, list) = match self.manifest.twitter {
+            Some(manifest::Twitter {
+                user,
+                ref client,
+                list: Some(ref list),
+                ..
+            }) => (user, client.clone(), list),
+            _ => return Ok(twitter::ListTimeline::empty()),
         };
 
         let since_id = last_tweet::table
@@ -123,8 +135,6 @@ impl<S> Core<S> {
             .optional()?
             .filter(|&n| n > 0);
 
-        let user = self.manifest().twitter.user;
-        let client = self.manifest().twitter.client.clone();
         let token = self.twitter_tokens.get(&user).unwrap().clone();
 
         let http = self.client.clone();
@@ -135,11 +145,16 @@ impl<S> Core<S> {
     }
 
     pub fn load_twitter_tokens(&mut self) -> anyhow::Result<()> {
-        let manifest = self.manifest();
+        let config = if let Some(ref config) = self.manifest().twitter {
+            config
+        } else {
+            return Ok(());
+        };
 
-        let unauthed_users = manifest
+        let unauthed_users = self
+            .manifest()
             .twitter_outboxes()
-            .chain(Some(manifest.twitter.user))
+            .chain(Some(config.user))
             .filter(|user| !self.twitter_tokens.contains_key(&user))
             // Make the values unique so that the later `_.len() != _.len()` comparison makes sense.
             .collect::<HashSet<_>>();
@@ -157,6 +172,31 @@ impl<S> Core<S> {
             .extend(tokens.into_iter().map(|token| (token.id, token.into())));
 
         Ok(())
+    }
+
+    pub fn gc_twitter_tokens(&mut self) {
+        let config = if let Some(ref config) = self.manifest().twitter {
+            config
+        } else {
+            self.twitter_tokens = HashMap::new();
+            return;
+        };
+
+        let users = self
+            .manifest()
+            .twitter_outboxes()
+            .chain(Some(config.user))
+            .collect::<HashSet<_>>();
+
+        // TODO: Use `HashMap::drain_filter` once it hits stable.
+        // <https://github.com/rust-lang/rust/issues/59618>
+        self.twitter_tokens = self
+            .twitter_tokens
+            .drain()
+            .filter(|(k, _)| users.contains(k))
+            .collect();
+
+        self.twitter_tokens.shrink_to_fit();
     }
 
     pub fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()> {

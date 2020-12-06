@@ -19,15 +19,12 @@ use crate::twitter::Tweet;
 use crate::util::{MapAccessDeserializer, SeqAccessDeserializer, Serde};
 
 #[non_exhaustive]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default)]
 pub struct Manifest {
-    #[serde(default)]
     pub database_url: Option<Box<str>>,
     pub rule: Box<[Rule]>,
-    #[serde(default)]
     pub websub: Option<WebSub>,
-    pub twitter: Twitter,
-    #[serde(default)]
+    pub twitter: Option<Twitter>,
     pub skip_duplicate: bool,
 }
 
@@ -154,6 +151,10 @@ macro_rules! union_visitor {
 }
 
 impl Manifest {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
     pub fn resolve_paths(&mut self, base: &str) {
         if let Some(new) = self
             .database_url
@@ -204,6 +205,64 @@ impl Manifest {
         self.outboxes().map(|outbox| match *outbox {
             Outbox::Twitter(user) => user,
         })
+    }
+
+    /// Validates the manifest.
+    ///
+    /// This is automatically done on deserialization so you do not need to call this method
+    /// unless you have manually modified the struct.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(e) = self.validate_() {
+            anyhow::bail!(e);
+        }
+        Ok(())
+    }
+
+    fn validate_(&self) -> Option<&'static str> {
+        if self.twitter.is_none() {
+            if self.twitter_topics().next().is_some() {
+                return Some(
+                    "the manifest has Twitter topics, but API credentials are not provided",
+                );
+            } else if self.twitter_outboxes().next().is_some() {
+                return Some(
+                    "the manifest has Twitter outboxes, but API credentials are not provided",
+                );
+            }
+        }
+        None
+    }
+}
+
+impl<'de> Deserialize<'de> for Manifest {
+    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        pub struct Prototype {
+            #[serde(default)]
+            pub database_url: Option<Box<str>>,
+            pub rule: Box<[Rule]>,
+            #[serde(default)]
+            pub websub: Option<WebSub>,
+            #[serde(default)]
+            pub twitter: Option<Twitter>,
+            #[serde(default)]
+            pub skip_duplicate: bool,
+        }
+
+        let p = Prototype::deserialize(d)?;
+        let ret = Manifest {
+            database_url: p.database_url,
+            rule: p.rule,
+            websub: p.websub,
+            twitter: p.twitter,
+            skip_duplicate: p.skip_duplicate,
+        };
+
+        if let Some(e) = ret.validate_() {
+            return Err(de::Error::custom(e));
+        }
+
+        Ok(ret)
     }
 }
 

@@ -18,11 +18,15 @@ pub struct Opt {}
 
 pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let manifest = opt.open_manifest()?;
-    let list_id = if let Some(ref list) = manifest.twitter.list {
-        list.id
+
+    let (config, list_id) = if let Some((config, Some(list))) = manifest
+        .twitter
+        .as_ref()
+        .map(|config| (config, &config.list))
+    {
+        (config, list.id)
     } else {
-        println!("`twitter.list` is not set in the manifest");
-        return Ok(());
+        anyhow::bail!("missing `twitter.list` in the manifest");
     };
 
     let manager = ConnectionManager::<SqliteConnection>::new(manifest.database_url());
@@ -32,7 +36,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let mut client = client();
 
     let token: Credentials<_> = twitter_tokens::table
-        .find(&manifest.twitter.user)
+        .find(&config.user)
         .get_result::<models::TwitterToken>(&*pool.get()?)
         .optional()
         .context("failed to load tokens from the database")?
@@ -41,7 +45,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
     let res_fut = twitter::lists::Members::new(list_id)
         .count(Some(5000))
-        .send(&manifest.twitter.client, &token, &mut client);
+        .send(&config.client, &token, &mut client);
     println!("Retrieving the list...");
 
     let users: HashSet<i64> = manifest.twitter_topics().collect();
@@ -58,7 +62,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .difference(&users)
         .map(|&user| {
             twitter::lists::members::Destroy::new(list_id, user).send(
-                &manifest.twitter.client,
+                &config.client,
                 &token,
                 client.clone(),
             )
@@ -78,7 +82,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .difference(&list)
         .map(|&user| {
             twitter::lists::members::Create::new(list_id, user)
-                .send(&manifest.twitter.client, &token, client.clone())
+                .send(&config.client, &token, client.clone())
                 .map(move |r| (r, user))
         })
         .collect();
