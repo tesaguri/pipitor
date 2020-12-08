@@ -59,6 +59,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Buf;
+use cfg_if::cfg_if;
 use futures::{ready, Future};
 use http_body::Body;
 use pin_project::pin_project;
@@ -263,6 +264,63 @@ pub fn snowflake_to_system_time(id: u64) -> SystemTime {
         (snowflake_time_ms as u32 % 1_000 + 657) * 1_000 * 1_000,
     );
     UNIX_EPOCH + timestamp
+}
+
+cfg_if! {
+    if #[cfg(test)] {
+        use futures::future;
+
+        #[pin_project]
+        pub struct First<A, B> {
+            #[pin]
+            a: A,
+            #[pin]
+            b: B,
+        }
+
+        pub trait EitherUnwrapExt {
+            type Left;
+            type Right;
+
+            fn unwrap_left(self) -> Self::Left;
+        }
+
+        impl<A, B> EitherUnwrapExt for future::Either<A, B> {
+            type Left = A;
+            type Right = B;
+
+            #[track_caller]
+            fn unwrap_left(self) -> A {
+                match self {
+                    future::Either::Left(a) => a,
+                    future::Either::Right(_) => {
+                        panic!("called `Either::unwrap_left()` on a `Right` value");
+                    }
+                }
+            }
+        }
+
+        impl<A: Future, B: Future> Future for First<A, B> {
+            type Output = future::Either<A::Output, B::Output>;
+
+            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                let this = self.project();
+                match this.a.poll(cx) {
+                    Poll::Ready(x) => Poll::Ready(future::Either::Left(x)),
+                    Poll::Pending => match this.b.poll(cx) {
+                        Poll::Ready(x) => Poll::Ready(future::Either::Right(x)),
+                        Poll::Pending => Poll::Pending,
+                    },
+                }
+            }
+        }
+
+        /// Like `futures::future::select`, but accepts `!Unpin` futures and resolves to
+        /// `Either<A::Output, B::Output>` instead of `Either<(_, _), (_, _)>`.
+        pub fn first<A, B>(a: A, b: B) -> First<A, B> {
+            First { a, b }
+        }
+    }
 }
 
 #[cfg(test)]

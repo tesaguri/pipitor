@@ -1,5 +1,5 @@
 use diesel::prelude::*;
-use diesel::r2d2::{ConnectionManager, CustomizeConnection, Pool};
+use diesel::r2d2::{self, ConnectionManager, CustomizeConnection, Pool};
 
 use crate::query;
 
@@ -18,7 +18,14 @@ impl CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for ConnectionCu
 pub fn new_pool(
     manager: ConnectionManager<SqliteConnection>,
 ) -> Result<Pool<ConnectionManager<SqliteConnection>>, diesel::r2d2::PoolError> {
-    Pool::builder()
+    pool_with_builder(Pool::builder(), manager)
+}
+
+pub fn pool_with_builder(
+    builder: r2d2::Builder<ConnectionManager<SqliteConnection>>,
+    manager: ConnectionManager<SqliteConnection>,
+) -> Result<Pool<ConnectionManager<SqliteConnection>>, diesel::r2d2::PoolError> {
+    builder
         .connection_customizer(Box::new(ConnectionCustomizer))
         .build(manager)
 }

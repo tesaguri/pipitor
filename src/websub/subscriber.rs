@@ -196,8 +196,10 @@ mod tests {
     use std::convert::Infallible;
     use std::str;
 
+    use diesel::connection::SimpleConnection;
     use diesel::r2d2::ConnectionManager;
     use futures::channel::oneshot;
+    use futures::future;
     use hmac::{Hmac, Mac, NewMac};
     use http::header::CONTENT_TYPE;
     use http::Uri;
@@ -210,7 +212,7 @@ mod tests {
     use crate::util::consts::{
         APPLICATION_ATOM_XML, APPLICATION_WWW_FORM_URLENCODED, HUB_SIGNATURE,
     };
-    use crate::util::{self, ConcatBody, FutureTimeoutExt};
+    use crate::util::{self, ConcatBody, EitherUnwrapExt, FutureTimeoutExt};
 
     use super::super::hub;
     use super::*;
@@ -219,6 +221,8 @@ mod tests {
     const HUB: &str = "http://example.com/hub";
     const FEED: &str = include_str!("testcases/feed.xml");
     const MARGIN: Duration = Duration::from_secs(42);
+    /// Network delay for communications between the subscriber and the hub.
+    const DELAY: Duration = Duration::from_millis(1);
 
     #[test]
     fn callback_prefix() {
@@ -240,18 +244,180 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test() {
+    async fn renew_multi_subs() {
         tokio::time::pause();
 
-        let (subscriber, client, mut listener) = prepare_subscriber();
-        let mut subscriber = tokio_test::task::spawn(subscriber);
+        let begin = i64::try_from(util::now_unix().as_secs()).unwrap();
+
+        let pool = util::r2d2::pool_with_builder(
+            Pool::builder().max_size(1),
+            ConnectionManager::new(":memory:"),
+        )
+        .unwrap();
+        let conn = pool.get().unwrap();
+        crate::migrations::run(&*conn).unwrap();
+
+        conn.batch_execute(
+            "INSERT INTO websub_subscriptions (hub, topic, secret)
+            VALUES
+                ('http://example.com/hub', 'http://example.com/topic/1', 'secret1'),
+                ('http://example.com/hub', 'http://example.com/topic/2', 'secret2');",
+        )
+        .unwrap();
+
+        let expiry1 = begin + MARGIN.as_secs() as i64 + 1;
+        let expiry2 = expiry1 + MARGIN.as_secs() as i64;
+        let values = [
+            websub_active_subscriptions::expires_at.eq(expiry1),
+            websub_active_subscriptions::expires_at.eq(expiry2),
+        ];
+        insert_into(websub_active_subscriptions::table)
+            .values(&values[..])
+            .execute(&*conn)
+            .unwrap();
+
+        drop(conn);
+
+        let (mut subscriber, client, listener) = prepare_subscriber_with_pool(pool);
+        let mut listener = tokio_test::task::spawn(listener);
 
         let hub = Http::new();
+
+        listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
+
+        // Renewal of first subscription.
+
+        tokio::time::advance(MARGIN + Duration::from_secs(2)).await;
+
+        // Subscriber should re-subscribe to the topic.
+        let form = accept_request(&mut listener, &hub, "/hub").timeout().await;
+        let callback1 = match form {
+            hub::Form::Subscribe {
+                callback, topic, ..
+            } => {
+                assert_eq!(topic, "http://example.com/topic/1");
+                callback
+            }
+            _ => panic!(),
+        };
+        listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
+
+        // Intent verification of the re-subscription.
+        let task = verify_intent(
+            &client,
+            &callback1,
+            &hub::Verify::Subscribe {
+                topic: "http://example.com/topic/1",
+                challenge: "subscription_challenge1",
+                lease_seconds: MARGIN.as_secs() + 1,
+            },
+        );
+        util::first(task.timeout(), subscriber.next())
+            .await
+            .unwrap_left();
+
+        // Subscriber should unsubscribe from the old subscription.
+        let id = super::super::encode_callback_id(&1_i64.to_le_bytes()).to_string();
+        let old_callback1 = Uri::try_from(format!("http://example.com/{}", id)).unwrap();
+        let form = accept_request(&mut listener, &hub, "/hub").timeout().await;
+        match form {
+            hub::Form::Unsubscribe {
+                callback, topic, ..
+            } => {
+                assert_eq!(callback, old_callback1);
+                assert_eq!(topic, "http://example.com/topic/1");
+            }
+            _ => panic!(),
+        }
+        listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
+
+        // Intent verification of the unsubscription.
+        let task = verify_intent(
+            &client,
+            &old_callback1,
+            &hub::Verify::Unsubscribe {
+                topic: "http://example.com/topic/1",
+                challenge: "unsubscription_challenge1",
+            },
+        );
+        util::first(task.timeout(), subscriber.next())
+            .await
+            .unwrap_left();
+
+        // Renewal of second subscription.
+
+        tokio::time::advance(MARGIN).await;
+
+        // FIXME: The following line hangs.
+        let form = accept_request(&mut listener, &hub, "/hub").timeout().await;
+        let callback2 = match form {
+            hub::Form::Subscribe {
+                callback, topic, ..
+            } => {
+                assert_eq!(topic, "http://example.com/topic/2");
+                callback
+            }
+            _ => panic!(),
+        };
+        listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
+
+        let task = verify_intent(
+            &client,
+            &callback2,
+            &hub::Verify::Subscribe {
+                topic: "http://example.com/topic/2",
+                challenge: "subscription_challenge2",
+                lease_seconds: MARGIN.as_secs(),
+            },
+        );
+        util::first(task.timeout(), subscriber.next())
+            .await
+            .unwrap_left();
+
+        let id = super::super::encode_callback_id(&2_i64.to_le_bytes()).to_string();
+        let old_callback2 = Uri::try_from(format!("http://example.com/{}", id)).unwrap();
+        let form = accept_request(&mut listener, &hub, "/hub").timeout().await;
+        match form {
+            hub::Form::Unsubscribe {
+                callback, topic, ..
+            } => {
+                assert_eq!(callback, old_callback2);
+                assert_eq!(topic, "http://example.com/topic/2");
+            }
+            _ => panic!(),
+        }
+        listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
+
+        let task = verify_intent(
+            &client,
+            &old_callback1,
+            &hub::Verify::Unsubscribe {
+                topic: "http://example.com/topic/2",
+                challenge: "unsubscription_challenge2",
+            },
+        );
+        util::first(task.timeout(), subscriber.next())
+            .await
+            .unwrap_left();
+    }
+
+    /// Go through the entire protocol flow at once.
+    #[tokio::test]
+    async fn entire_flow() {
+        tokio::time::pause();
+
+        let (subscriber, client, listener) = prepare_subscriber();
+        let mut subscriber = tokio_test::task::spawn(subscriber);
+        let mut listener = tokio_test::task::spawn(listener);
+
+        let hub = Http::new();
+        listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
 
         // Discover the hub from the feed.
 
         let task = tokio::spawn(subscriber.service().discover(TOPIC.to_owned()));
 
+        tokio::time::advance(DELAY).await;
         let sock = listener.next().timeout().await.unwrap().unwrap();
         hub.serve_connection(
             sock,
@@ -262,12 +428,14 @@ mod tests {
                     .header(CONTENT_TYPE, APPLICATION_ATOM_XML)
                     .body(Body::from(FEED))
                     .unwrap();
+                tokio::time::advance(DELAY).await;
                 Ok::<_, Infallible>(res)
             }),
         )
         .timeout()
         .await
         .unwrap();
+        listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
 
         let (topic, hubs) = task.timeout().await.unwrap().unwrap();
         assert_eq!(topic, TOPIC);
@@ -276,83 +444,40 @@ mod tests {
 
         // Subscribe to the topic.
 
-        let task = subscriber.service().subscribe(
+        let req_task = subscriber.service().subscribe(
             HUB.to_owned(),
             topic,
             &subscriber.service().pool.get().unwrap(),
         );
-        let task = tokio::spawn(task);
-
-        let (tx, rx) = oneshot::channel();
-        let mut tx = Some(tx);
-
-        let sock = listener.next().timeout().await.unwrap().unwrap();
-        hub.serve_connection(
-            sock,
-            service::service_fn(move |req| {
-                let tx = tx.take().unwrap();
-                async move {
-                    assert_eq!(req.uri().path_and_query().unwrap(), "/hub");
-                    assert_eq!(
-                        req.headers().get(CONTENT_TYPE).unwrap(),
-                        APPLICATION_WWW_FORM_URLENCODED
-                    );
-                    let body = ConcatBody::new(req.into_body()).await.unwrap();
-                    let form: hub::Form = serde_urlencoded::from_bytes(&body).unwrap();
-                    let (callback, topic, secret) = match form {
-                        hub::Form::Subscribe {
-                            callback,
-                            topic,
-                            secret,
-                        } => (callback, topic, secret),
-                        _ => panic!(),
-                    };
-                    assert_eq!(topic, TOPIC);
-
-                    tx.send((callback, secret)).unwrap();
-
-                    let res = Response::builder()
-                        .status(StatusCode::ACCEPTED)
-                        .body(Body::empty())
-                        .unwrap();
-                    Ok::<_, Infallible>(res)
-                }
-            }),
-        )
-        .timeout()
-        .await
-        .unwrap();
-
-        task.timeout().await.unwrap().unwrap();
-
-        let (callback, secret) = rx.await.unwrap();
-
-        // Run `subscriber` in the background.
-        let pool = subscriber.service().pool.clone();
-        tokio::spawn(async move {
-            let (topic, content) = subscriber.next().await.unwrap().unwrap();
-            assert_eq!(topic, TOPIC);
-            assert_eq!(str::from_utf8(&content.content).unwrap(), FEED);
-
-            assert!(subscriber.next().await.is_none());
-        });
+        tokio::time::advance(DELAY).await;
+        let accept_task = accept_request(&mut listener, &hub, "/hub");
+        let (result, form) = future::join(req_task, accept_task).timeout().await;
+        result.unwrap();
+        let (callback, topic, secret) = match form {
+            hub::Form::Subscribe {
+                callback,
+                topic,
+                secret,
+            } => (callback, topic, secret),
+            _ => panic!(),
+        };
+        assert_eq!(topic, TOPIC);
+        listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
 
         // Hub verifies intent of the subscriber.
 
-        let query = serde_urlencoded::to_string(&hub::Verify::Subscribe {
-            topic: TOPIC,
-            challenge: "subscription_challenge",
-            lease_seconds: (2 * MARGIN).as_secs(),
-        })
-        .unwrap();
-        let res = client
-            .get(format!("{}?{}", callback, query).try_into().unwrap())
-            .timeout()
+        let task = verify_intent(
+            &client,
+            &callback,
+            &hub::Verify::Subscribe {
+                topic: TOPIC,
+                challenge: "subscription_challenge",
+                lease_seconds: (2 * MARGIN).as_secs(),
+            },
+        );
+        util::first(task.timeout(), subscriber.next())
             .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = ConcatBody::new(res.into_body()).timeout().await.unwrap();
-        assert_eq!(body, b"subscription_challenge");
+            .unwrap_left();
 
         // Content distribution.
 
@@ -364,132 +489,89 @@ mod tests {
             .header(HUB_SIGNATURE, format!("sha1={}", hex::encode(&*signature)))
             .body(Body::from(FEED))
             .unwrap();
-        let res = client.request(req).timeout().await.unwrap();
+        let task = client.request(req);
+        let (res, update) = future::join(task, subscriber.next()).timeout().await;
+
+        let res = res.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
+
+        let (topic, content) = update.unwrap().unwrap();
+        assert_eq!(topic, TOPIC);
+        assert_eq!(str::from_utf8(&content.content).unwrap(), FEED);
 
         // Subscription renewal.
 
         // tokio::task::yield_now().await;
         tokio::time::advance(MARGIN).await;
 
-        let (tx, rx) = oneshot::channel();
-        let mut tx = Some(tx);
-
-        // FIXME: This line occasionally hangs. If you uncomment `yield_now` above,
+        tokio::time::advance(DELAY).await;
+        // FIXME: The following task occasionally hangs. If you uncomment `yield_now` above,
         // the hang occurs deterministically.
-        let sock = listener.next().timeout().await.unwrap().unwrap();
-        let old_callback = callback.clone();
-        hub.serve_connection(
-            sock,
-            service::service_fn(|req| {
-                let tx = tx.take().unwrap();
-                let old_callback = old_callback.clone();
-                async move {
-                    assert_eq!(
-                        req.headers().get(CONTENT_TYPE).unwrap(),
-                        APPLICATION_WWW_FORM_URLENCODED
-                    );
-                    let body = ConcatBody::new(req.into_body()).await.unwrap();
-                    let form: hub::Form = serde_urlencoded::from_bytes(&body).unwrap();
-                    let (callback, topic) = match form {
-                        hub::Form::Subscribe {
-                            callback,
-                            topic,
-                            secret: _,
-                        } => (callback, topic),
-                        _ => panic!(),
-                    };
-                    assert_ne!(callback, old_callback);
-                    assert_eq!(topic, TOPIC);
-
-                    tx.send(callback).unwrap();
-
-                    let res = Response::builder()
-                        .status(StatusCode::ACCEPTED)
-                        .body(Body::empty())
-                        .unwrap();
-                    Ok::<_, Infallible>(res)
-                }
-            }),
-        )
-        .timeout()
-        .await
-        .unwrap();
-
-        let new_callback = rx.await.unwrap();
+        let task = accept_request(&mut listener, &hub, "/hub").timeout();
+        let form = util::first(task, subscriber.next()).await.unwrap_left();
+        let (new_callback, topic) = match form {
+            hub::Form::Subscribe {
+                callback,
+                topic,
+                secret: _,
+            } => (callback, topic),
+            _ => panic!(),
+        };
+        assert_ne!(new_callback, callback);
+        assert_eq!(topic, TOPIC);
+        listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
 
         // Hub verifies intent of the subscriber.
 
-        let query = serde_urlencoded::to_string(&hub::Verify::Subscribe {
-            topic: TOPIC,
-            challenge: "renewal_challenge",
-            lease_seconds: (2 * MARGIN).as_secs(),
-        })
-        .unwrap();
-        let res = client
-            .get(format!("{}?{}", new_callback, query).try_into().unwrap())
-            .timeout()
+        let task = verify_intent(
+            &client,
+            &new_callback,
+            &hub::Verify::Subscribe {
+                topic: TOPIC,
+                challenge: "renewal_challenge",
+                lease_seconds: (2 * MARGIN).as_secs(),
+            },
+        );
+        util::first(task.timeout(), subscriber.next())
             .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = ConcatBody::new(res.into_body()).timeout().await.unwrap();
-        assert_eq!(body, b"renewal_challenge");
+            .unwrap_left();
 
         // `subscriber` should unsubscribe from the old subscription.
 
-        let sock = listener.next().timeout().await.unwrap().unwrap();
-        let old_callback = callback.clone();
-        hub.serve_connection(
-            sock,
-            service::service_fn(|req| {
-                let old_callback = old_callback.clone();
-                async move {
-                    assert_eq!(
-                        req.headers().get(CONTENT_TYPE).unwrap(),
-                        APPLICATION_WWW_FORM_URLENCODED
-                    );
-                    let body = ConcatBody::new(req.into_body()).await.unwrap();
-                    let form: hub::Form = serde_urlencoded::from_bytes(&body).unwrap();
-                    let (callback, topic) = match form {
-                        hub::Form::Unsubscribe { callback, topic } => (callback, topic),
-                        _ => panic!(),
-                    };
-                    assert_eq!(callback, old_callback);
-                    assert_eq!(topic, TOPIC);
-
-                    let res = Response::builder()
-                        .status(StatusCode::ACCEPTED)
-                        .body(Body::empty())
-                        .unwrap();
-                    Ok::<_, Infallible>(res)
-                }
-            }),
-        )
-        .timeout()
-        .await
-        .unwrap();
+        tokio::time::advance(DELAY).await;
+        let task = accept_request(&mut listener, &hub, "/hub").timeout();
+        let form = util::first(task, subscriber.next()).await.unwrap_left();
+        let (unsubscribed, topic) = match form {
+            hub::Form::Unsubscribe { callback, topic } => (callback, topic),
+            _ => panic!(),
+        };
+        assert_eq!(unsubscribed, callback);
+        assert_eq!(topic, TOPIC);
+        listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
 
         // Hub verifies intent of the subscriber.
 
-        let query = serde_urlencoded::to_string(&hub::Verify::Unsubscribe {
-            topic: TOPIC,
-            challenge: "unsubscription_challenge",
-        })
-        .unwrap();
-        let res = client
-            .get(format!("{}?{}", callback, query).try_into().unwrap())
-            .timeout()
+        let task = verify_intent(
+            &client,
+            &callback,
+            &hub::Verify::Unsubscribe {
+                topic: TOPIC,
+                challenge: "unsubscription_challenge",
+            },
+        );
+        util::first(task.timeout(), subscriber.next())
             .await
-            .unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = ConcatBody::new(res.into_body()).timeout().await.unwrap();
-        assert_eq!(body, b"unsubscription_challenge");
+            .unwrap_left();
+
+        // Subscriber should have processed all requests.
+
+        subscriber.enter(|cx, subscriber| assert!(subscriber.poll_next(cx).is_pending()));
 
         // Old subscription should be deleted from the database.
 
         let id = callback.path().rsplit('/').next().unwrap();
         let id = crate::websub::decode_callback_id(id).unwrap() as i64;
-        let conn = pool.get().unwrap();
+        let conn = subscriber.service().pool.get().unwrap();
 
         let row = websub_subscriptions::table.find(id);
         assert!(!select(exists(row)).get_result::<bool>(&conn).unwrap());
@@ -501,6 +583,22 @@ mod tests {
     }
 
     fn prepare_subscriber() -> (
+        Subscriber<Client<Connector>, Body, Listener>,
+        Client<Connector>,
+        Listener,
+    ) {
+        let pool = util::r2d2::pool_with_builder(
+            Pool::builder().max_size(1),
+            ConnectionManager::new(":memory:"),
+        )
+        .unwrap();
+        crate::migrations::run(&*pool.get().unwrap()).unwrap();
+        prepare_subscriber_with_pool(pool)
+    }
+
+    fn prepare_subscriber_with_pool(
+        pool: Pool<ConnectionManager<SqliteConnection>>,
+    ) -> (
         Subscriber<Client<Connector>, Body, Listener>,
         Client<Connector>,
         Listener,
@@ -522,10 +620,64 @@ mod tests {
             bind: None,
             renewal_margin: MARGIN,
         };
-        let pool = util::r2d2::new_pool(ConnectionManager::new(":memory:")).unwrap();
-        crate::migrations::run(&*pool.get().unwrap()).unwrap();
         let subscriber = Subscriber::new(&manifest, sub_listener, sub_client, pool);
 
         (subscriber, hub_client, hub_listener)
+    }
+
+    async fn accept_request<'a>(
+        listener: &'a mut Listener,
+        http: &'a Http,
+        path: &'static str,
+    ) -> hub::Form {
+        let (tx, rx) = oneshot::channel();
+        let mut tx = Some(tx);
+
+        let sock = listener.next().await;
+        http.serve_connection(
+            sock.unwrap().unwrap(),
+            service::service_fn(move |req| {
+                let tx = tx.take().unwrap();
+                async move {
+                    assert_eq!(req.uri().path_and_query().unwrap(), path);
+                    assert_eq!(
+                        req.headers().get(CONTENT_TYPE).unwrap(),
+                        APPLICATION_WWW_FORM_URLENCODED
+                    );
+                    let body = ConcatBody::new(req.into_body()).await.unwrap();
+                    let form: hub::Form = serde_urlencoded::from_bytes(&body).unwrap();
+                    tx.send(form).unwrap();
+
+                    let res = Response::builder()
+                        .status(StatusCode::ACCEPTED)
+                        .body(Body::empty())
+                        .unwrap();
+                    tokio::time::advance(DELAY).await;
+                    Ok::<_, Infallible>(res)
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        rx.await.unwrap()
+    }
+
+    fn verify_intent<'a>(
+        client: &Client<Connector>,
+        callback: &Uri,
+        query: &hub::Verify<&'a str>,
+    ) -> impl std::future::Future<Output = ()> + 'a {
+        let challenge = match *query {
+            hub::Verify::Subscribe { challenge, .. } => challenge,
+            hub::Verify::Unsubscribe { challenge, .. } => challenge,
+        };
+        let query = serde_urlencoded::to_string(query).unwrap();
+        let res = client.get(format!("{}?{}", callback, query).try_into().unwrap());
+        async move {
+            let res = res.await.unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+            let body = ConcatBody::new(res.into_body()).timeout().await.unwrap();
+            assert_eq!(body, challenge.as_bytes());
+        }
     }
 }

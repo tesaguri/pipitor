@@ -15,7 +15,7 @@ use tower_util::ServiceExt;
 use crate::schema::*;
 use crate::util::{consts::APPLICATION_WWW_FORM_URLENCODED, HttpService};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "hub.mode")]
 #[serde(rename_all = "lowercase")]
 pub enum Form<S = String> {
