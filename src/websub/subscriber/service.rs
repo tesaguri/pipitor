@@ -363,7 +363,7 @@ where
 
                 // Remove the old subscription if the subscription was created by a renewal.
                 let old_id = websub_renewing_subscriptions::table
-                    .filter(websub_renewing_subscriptions::new.eq(id))
+                    .find(id)
                     .select(websub_renewing_subscriptions::old)
                     .get_result::<i64>(conn)
                     .optional()

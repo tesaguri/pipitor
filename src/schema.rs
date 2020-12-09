@@ -57,7 +57,7 @@ table! {
 }
 
 table! {
-    websub_renewing_subscriptions (old, new) {
+    websub_renewing_subscriptions (new) {
         old -> BigInt,
         new -> BigInt,
     }
