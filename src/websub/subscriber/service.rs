@@ -147,7 +147,9 @@ where
 
     pub fn renew_subscriptions(&self, conn: &SqliteConnection) {
         let now_unix = now_unix();
-        let threshold: i64 = (now_unix + super::RENEW).as_secs().try_into().unwrap();
+        let threshold: i64 = (now_unix.as_secs() + self.renewal_margin + 1)
+            .try_into()
+            .unwrap();
 
         let expiring = websub_subscriptions::table
             .inner_join(websub_active_subscriptions::table)

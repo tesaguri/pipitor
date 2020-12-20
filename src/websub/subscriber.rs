@@ -6,7 +6,6 @@ use std::marker::{PhantomData, Unpin};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
 
 use bytes::Bytes;
 use diesel::dsl::*;
@@ -42,9 +41,6 @@ pub struct Content {
     kind: feed::MediaType,
     content: Vec<u8>,
 }
-
-// XXX: mediocre naming
-const RENEW: Duration = Duration::from_secs(10);
 
 impl<S, B, I> Subscriber<S, B, I>
 where
@@ -195,6 +191,7 @@ fn prepare_callback_prefix(prefix: Uri) -> Uri {
 mod tests {
     use std::convert::Infallible;
     use std::str;
+    use std::time::Duration;
 
     use diesel::connection::SimpleConnection;
     use diesel::r2d2::ConnectionManager;
@@ -287,7 +284,7 @@ mod tests {
 
         // Renewal of first subscription.
 
-        tokio::time::advance(MARGIN + Duration::from_secs(2)).await;
+        tokio::time::advance(Duration::from_secs(2)).await;
 
         // Subscriber should re-subscribe to the topic.
         let form = accept_request(&mut listener, &hub, "/hub").timeout().await;
@@ -309,7 +306,8 @@ mod tests {
             &hub::Verify::Subscribe {
                 topic: "http://example.com/topic/1",
                 challenge: "subscription_challenge1",
-                lease_seconds: MARGIN.as_secs() + 1,
+                // The subscription should never be renewed again in this test.
+                lease_seconds: 2 * MARGIN.as_secs() + 2,
             },
         );
         util::first(task.timeout(), subscriber.next())
@@ -367,7 +365,7 @@ mod tests {
             &hub::Verify::Subscribe {
                 topic: "http://example.com/topic/2",
                 challenge: "subscription_challenge2",
-                lease_seconds: MARGIN.as_secs(),
+                lease_seconds: MARGIN.as_secs() + 1,
             },
         );
         util::first(task.timeout(), subscriber.next())
@@ -547,6 +545,7 @@ mod tests {
         };
         assert_eq!(unsubscribed, callback);
         assert_eq!(topic, TOPIC);
+        // FIXME: The listener unexpectedly receives a subscription request.
         listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
 
         // Hub verifies intent of the subscriber.
