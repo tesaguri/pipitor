@@ -4,7 +4,7 @@ use http_body::Body;
 use oauth_credentials::Credentials;
 use tower_util::ServiceExt;
 
-use crate::util::{ConcatBody, HttpService};
+use crate::util::HttpService;
 
 use super::super::models::AccessToken;
 use super::{Error, Response};
@@ -37,9 +37,7 @@ where
 
     let status = res.status();
     let rate_limit = super::rate_limit(&res);
-    let body = ConcatBody::new(res.into_body())
-        .await
-        .map_err(Error::Body)?;
+    let body = hyper::body::to_bytes(res).await.map_err(Error::Body)?;
 
     super::make_response(status, rate_limit, &body, |body| {
         serde_urlencoded::from_bytes(body).map_err(|_| Error::Unexpected)
@@ -77,9 +75,7 @@ where
 
     let status = res.status();
     let rate_limit = super::rate_limit(&res);
-    let body = ConcatBody::new(res.into_body())
-        .await
-        .map_err(Error::Body)?;
+    let body = hyper::body::to_bytes(res).await.map_err(Error::Body)?;
 
     super::make_response(status, rate_limit, &body, |body| {
         serde_urlencoded::from_bytes(body).map_err(|_| Error::Unexpected)

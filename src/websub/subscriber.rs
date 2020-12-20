@@ -209,7 +209,7 @@ mod tests {
     use crate::util::consts::{
         APPLICATION_ATOM_XML, APPLICATION_WWW_FORM_URLENCODED, HUB_SIGNATURE,
     };
-    use crate::util::{self, ConcatBody, EitherUnwrapExt, FutureTimeoutExt};
+    use crate::util::{self, EitherUnwrapExt, FutureTimeoutExt};
 
     use super::super::hub;
     use super::*;
@@ -643,7 +643,7 @@ mod tests {
                         req.headers().get(CONTENT_TYPE).unwrap(),
                         APPLICATION_WWW_FORM_URLENCODED
                     );
-                    let body = ConcatBody::new(req.into_body()).await.unwrap();
+                    let body = hyper::body::to_bytes(req).await.unwrap();
                     let form: hub::Form = serde_urlencoded::from_bytes(&body).unwrap();
                     tx.send(form).unwrap();
 
@@ -675,7 +675,7 @@ mod tests {
         async move {
             let res = res.await.unwrap();
             assert_eq!(res.status(), StatusCode::OK);
-            let body = ConcatBody::new(res.into_body()).timeout().await.unwrap();
+            let body = hyper::body::to_bytes(res).timeout().await.unwrap();
             assert_eq!(body, challenge.as_bytes());
         }
     }

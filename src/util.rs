@@ -42,14 +42,13 @@ pub mod http_service;
 pub mod r2d2;
 pub mod time;
 
+mod concat_body;
 mod serde_wrapper;
 
-use std::convert::TryInto;
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::io;
 use std::marker::PhantomData;
-use std::mem;
 use std::ops::Range;
 use std::pin::Pin;
 use std::str;
@@ -58,13 +57,11 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use bytes::Buf;
 use cfg_if::cfg_if;
-use futures::{ready, Future};
-use http_body::Body;
-use pin_project::pin_project;
+use futures::Future;
 use serde::{de, Deserialize};
 
+pub use self::concat_body::ConcatBody;
 #[cfg(test)]
 pub use self::connection::connection;
 pub use self::http_service::{HttpService, Service};
@@ -74,13 +71,6 @@ pub use self::time::{instant_from_unix, instant_now, now_unix, system_time_now};
 pub use self::time::{FutureTimeoutExt, Sleep};
 
 pub struct ArcService<S>(pub Arc<S>);
-
-#[pin_project]
-pub struct ConcatBody<B> {
-    #[pin]
-    body: B,
-    accum: Vec<u8>,
-}
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -129,31 +119,6 @@ where
 
     fn call(&mut self, req: T) -> Self::Future {
         (&*self.0).call(req)
-    }
-}
-
-impl<B: Body> ConcatBody<B> {
-    pub fn new(body: B) -> Self {
-        let cap = body.size_hint().lower();
-        ConcatBody {
-            body,
-            accum: Vec::with_capacity(cap.try_into().unwrap_or(0)),
-        }
-    }
-}
-
-impl<B: Body> Future for ConcatBody<B> {
-    type Output = Result<Vec<u8>, B::Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-
-        loop {
-            match ready!(this.body.as_mut().poll_data(cx)?) {
-                Some(buf) => this.accum.extend(buf.bytes()),
-                None => return Poll::Ready(Ok(mem::take(this.accum))),
-            }
-        }
     }
 }
 
@@ -269,6 +234,7 @@ pub fn snowflake_to_system_time(id: u64) -> SystemTime {
 cfg_if! {
     if #[cfg(test)] {
         use futures::future;
+        use pin_project::pin_project;
 
         #[pin_project]
         pub struct First<A, B> {
