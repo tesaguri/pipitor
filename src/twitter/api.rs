@@ -55,7 +55,6 @@ pub mod lists;
 pub mod oauth;
 pub mod statuses;
 
-use std::borrow::Borrow;
 use std::error;
 use std::fmt::{self, Display, Formatter};
 use std::marker::PhantomData;
@@ -71,7 +70,7 @@ use http_body::Body;
 use oauth_credentials::Credentials;
 use pin_project::pin_project;
 use serde::{de, Deserialize};
-use tower_util::{Oneshot, ServiceExt};
+use tower::util::{Oneshot, ServiceExt};
 
 use crate::util::http_service::{HttpService, IntoService};
 use crate::util::{self, ConcatBody};
@@ -152,8 +151,8 @@ pub trait Request: oauth1::Request {
         http: S,
     ) -> ResponseFuture<Self::Data, S, B>
     where
-        C: Borrow<str>,
-        T: Borrow<str>,
+        C: AsRef<str>,
+        T: AsRef<str>,
         S: HttpService<B>,
         B: From<Vec<u8>>,
     {

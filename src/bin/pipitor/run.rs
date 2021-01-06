@@ -3,7 +3,7 @@ use std::future;
 
 use anyhow::Context;
 use fs2::FileExt;
-use futures::{pin_mut, stream, FutureExt, StreamExt, TryFutureExt};
+use futures::{pin_mut, stream, StreamExt, TryFutureExt};
 use pipitor::App;
 
 use crate::common::*;
@@ -20,7 +20,7 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     lock.try_lock_exclusive()
         .context("failed to acquire a file lock")?;
 
-    let mut runtime = tokio::runtime::Runtime::new().context("failed to start a Tokio runtime")?;
+    let runtime = tokio::runtime::Runtime::new().context("failed to start a Tokio runtime")?;
 
     let ipc_path = ipc_path(manifest_path);
     let opt = opt.clone();
@@ -28,15 +28,15 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         let (ipc, _guard) = match ipc::server(&ipc_path)
             .with_context(|| format!("failed to create an IPC socket at {:?}", ipc_path))
         {
-            Ok(ipc) => (ipc.left_stream().fuse(), Some(RmGuard(ipc_path))),
+            Ok(ipc) => (ipc.left_stream(), Some(RmGuard(ipc_path))),
             Err(e) => {
                 error!("{:?}", e);
-                (stream::empty().right_stream().fuse(), None)
+                (stream::empty().right_stream(), None)
             }
         };
         pin_mut!(ipc);
 
-        let signal = quit_signal().unwrap().fuse();
+        let signal = quit_signal().unwrap();
         pin_mut!(signal);
 
         let client = client();
@@ -48,9 +48,8 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         info!("initialized the application");
 
         loop {
-            let mut app_fuse = (&mut app).fuse();
-            futures::select! {
-                result = app_fuse => {
+            tokio::select! {
+                result = &mut app => {
                     match result {
                         Ok(()) => info!("disconnected from Twitter Streaming API"),
                         Err(e) => {
@@ -61,13 +60,13 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
                     info!("restarting the application");
                     app.as_mut().reset().await?;
                 }
-                _signal_id = signal => {
+                _signal_id = &mut signal => {
                     info!("shutdown requested via console");
                     app.as_mut().shutdown().await?;
                     info!("exiting normally");
                     return Ok(());
                 }
-                conn = ipc.select_next_some() => {
+                Some(conn) = ipc.next() => {
                     let (req, write) = conn;
 
                     match req {

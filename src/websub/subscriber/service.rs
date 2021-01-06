@@ -17,7 +17,7 @@ use http::header::{HeaderName, CONTENT_TYPE};
 use http::{Request, Response, StatusCode, Uri};
 use hyper::Body;
 use sha1::Sha1;
-use tower_util::ServiceExt;
+use tower::ServiceExt;
 
 use crate::feed::{self, RawFeed};
 use crate::query;

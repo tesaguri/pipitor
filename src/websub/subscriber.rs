@@ -288,7 +288,7 @@ mod tests {
         // Renewal of first subscription.
 
         // tokio::time::advance(Duration::from_secs(2)).await;
-        tokio::time::delay_for(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
 
         // Subscriber should re-subscribe to the topic.
         let form = accept_request(&mut listener, &hub, "/hub").timeout().await;
@@ -349,9 +349,8 @@ mod tests {
         // Renewal of second subscription.
 
         // tokio::time::advance(MARGIN).await;
-        tokio::time::delay_for(MARGIN).await;
+        tokio::time::sleep(MARGIN).await;
 
-        // FIXME: The following line hangs.
         let form = accept_request(&mut listener, &hub, "/hub").timeout().await;
         let callback2 = match form {
             hub::Form::Subscribe {
@@ -421,7 +420,7 @@ mod tests {
         let task = tokio::spawn(subscriber.service().discover(TOPIC.to_owned()));
 
         // tokio::time::advance(DELAY).await;
-        tokio::time::delay_for(DELAY).await;
+        tokio::time::sleep(DELAY).await;
         let sock = listener.next().timeout().await.unwrap().unwrap();
         hub.serve_connection(
             sock,
@@ -433,7 +432,7 @@ mod tests {
                     .body(Body::from(FEED))
                     .unwrap();
                 // tokio::time::advance(DELAY).await;
-                tokio::time::delay_for(DELAY).await;
+                tokio::time::sleep(DELAY).await;
                 Ok::<_, Infallible>(res)
             }),
         )
@@ -455,7 +454,7 @@ mod tests {
             &subscriber.service().pool.get().unwrap(),
         );
         // tokio::time::advance(DELAY).await;
-        tokio::time::delay_for(DELAY).await;
+        tokio::time::sleep(DELAY).await;
         let accept_task = accept_request(&mut listener, &hub, "/hub");
         let (result, form) = future::join(req_task, accept_task).timeout().await;
         result.unwrap();
@@ -508,10 +507,10 @@ mod tests {
         // Subscription renewal.
 
         // tokio::time::advance(MARGIN).await;
-        tokio::time::delay_for(MARGIN).await;
+        tokio::time::sleep(MARGIN).await;
 
         // tokio::time::advance(DELAY).await;
-        tokio::time::delay_for(DELAY).await;
+        tokio::time::sleep(DELAY).await;
         let task = accept_request(&mut listener, &hub, "/hub").timeout();
         let form = util::first(task, subscriber.next()).await.unwrap_left();
         let (new_callback, topic) = match form {
@@ -544,7 +543,7 @@ mod tests {
         // `subscriber` should unsubscribe from the old subscription.
 
         // tokio::time::advance(DELAY).await;
-        tokio::time::delay_for(DELAY).await;
+        tokio::time::sleep(DELAY).await;
         let task = accept_request(&mut listener, &hub, "/hub").timeout();
         let form = util::first(task, subscriber.next()).await.unwrap_left();
         let (unsubscribed, topic) = match form {
@@ -660,7 +659,7 @@ mod tests {
                         .body(Body::empty())
                         .unwrap();
                     // tokio::time::advance(DELAY).await;
-                    tokio::time::delay_for(DELAY).await;
+                    tokio::time::sleep(DELAY).await;
                     Ok::<_, Infallible>(res)
                 }
             }),

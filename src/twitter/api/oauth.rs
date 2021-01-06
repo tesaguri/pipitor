@@ -2,7 +2,7 @@ use http::header::AUTHORIZATION;
 use http::Uri;
 use http_body::Body;
 use oauth_credentials::Credentials;
-use tower_util::ServiceExt;
+use tower::ServiceExt;
 
 use crate::util::HttpService;
 

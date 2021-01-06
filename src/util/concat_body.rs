@@ -38,7 +38,7 @@ impl<B: Body> Future for ConcatBody<B> {
 
         while let Some(mut data) = ready!(this.body.as_mut().poll_data(cx)?) {
             match this.state {
-                State::Init => *this.state = State::Once(data.to_bytes()),
+                State::Init => *this.state = State::Once(data.copy_to_bytes(data.remaining())),
                 State::Once(first) => {
                     let cap = first.remaining()
                         + data.remaining()

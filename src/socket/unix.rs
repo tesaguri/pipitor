@@ -1,11 +1,9 @@
 use std::io;
-use std::mem::MaybeUninit;
 use std::path::Path;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use bytes::BufMut;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use super::Bind;
 
@@ -38,7 +36,7 @@ cfg_if::cfg_if! {
             type Item = Result<MaybeUnixStream, io::Error>;
 
             fn poll_next(
-                mut self: Pin<&mut Self>,
+                self: Pin<&mut Self>,
                 cx: &mut Context<'_>,
             ) -> Poll<Option<Self::Item>> {
                 self.inner
@@ -87,21 +85,9 @@ cfg_if::cfg_if! {
             fn poll_read(
                 mut self: Pin<&mut Self>,
                 cx: &mut Context<'_>,
-                buf: &mut [u8],
-            ) -> Poll<io::Result<usize>> {
+                buf: &mut ReadBuf<'_>,
+            ) -> Poll<io::Result<()>> {
                 Pin::new(&mut self.inner).poll_read(cx, buf)
-            }
-
-            unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
-                self.inner.prepare_uninitialized_buffer(buf)
-            }
-
-            fn poll_read_buf<B: BufMut>(
-                mut self: Pin<&mut Self>,
-                cx: &mut Context<'_>,
-                buf: &mut B,
-            ) -> Poll<io::Result<usize>> {
-                Pin::new(&mut self.inner).poll_read_buf(cx, buf)
             }
         }
 
@@ -128,12 +114,16 @@ cfg_if::cfg_if! {
                 Pin::new(&mut self.inner).poll_shutdown(cx)
             }
 
-            fn poll_write_buf<B: bytes::Buf>(
+            fn poll_write_vectored(
                 mut self: Pin<&mut Self>,
                 cx: &mut Context<'_>,
-                buf: &mut B,
+                bufs: &[io::IoSlice<'_>],
             ) -> Poll<io::Result<usize>> {
-                Pin::new(&mut self.inner).poll_write_buf(cx, buf)
+                Pin::new(&mut self.inner).poll_write_vectored(cx, bufs)
+            }
+
+            fn is_write_vectored(&self) -> bool {
+                self.inner.is_write_vectored()
             }
         }
 
@@ -188,20 +178,8 @@ cfg_if::cfg_if! {
             fn poll_read(
                 self: Pin<&mut Self>,
                 _cx: &mut Context<'_>,
-                _buf: &mut [u8],
-            ) -> Poll<io::Result<usize>> {
-                match self.inner {}
-            }
-
-            unsafe fn prepare_uninitialized_buffer(&self, _buf: &mut [MaybeUninit<u8>]) -> bool {
-                match self.inner {}
-            }
-
-            fn poll_read_buf<B: BufMut>(
-                self: Pin<&mut Self>,
-                _cx: &mut Context<'_>,
-                _buf: &mut B,
-            ) -> Poll<io::Result<usize>> {
+                _buf: &mut ReadBuf<'_>,
+            ) -> Poll<io::Result<()>> {
                 match self.inner {}
             }
         }
@@ -229,11 +207,15 @@ cfg_if::cfg_if! {
                 match self.inner {}
             }
 
-            fn poll_write_buf<B: bytes::Buf>(
+            fn poll_write_vectored(
                 self: Pin<&mut Self>,
                 _cx: &mut Context<'_>,
-                _buf: &mut B,
+                _bufs: &[io::IoSlice<'_>],
             ) -> Poll<io::Result<usize>> {
+                match self.inner {}
+            }
+
+            fn is_write_vectored(&self) -> bool {
                 match self.inner {}
             }
         }

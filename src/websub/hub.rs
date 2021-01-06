@@ -10,7 +10,7 @@ use http::header::{HeaderValue, CONTENT_TYPE, LOCATION};
 use http::uri::{Parts, PathAndQuery, Uri};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use tower_util::ServiceExt;
+use tower::ServiceExt;
 
 use crate::schema::*;
 use crate::util::{consts::APPLICATION_WWW_FORM_URLENCODED, HttpService};

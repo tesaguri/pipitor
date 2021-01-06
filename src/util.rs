@@ -61,6 +61,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use cfg_if::cfg_if;
 use futures::Future;
 use serde::{de, Deserialize};
+use tokio::io::ReadBuf;
 
 pub use self::concat_body::ConcatBody;
 #[cfg(test)]
@@ -136,8 +137,8 @@ impl tokio::io::AsyncRead for Never {
     fn poll_read(
         self: Pin<&mut Self>,
         _: &mut Context<'_>,
-        _: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        _: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         match *self {}
     }
 }

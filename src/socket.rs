@@ -3,15 +3,14 @@ pub mod unix;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Formatter};
 use std::io;
-use std::mem::MaybeUninit;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use bytes::BufMut;
 use futures::TryStream;
 use pin_project::pin_project;
+use tokio::io::ReadBuf;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use serde::de;
@@ -107,29 +106,11 @@ where
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         match self.project() {
             StreamProj::Tcp(s) => s.poll_read(cx, buf),
             StreamProj::Unix(s) => s.poll_read(cx, buf),
-        }
-    }
-
-    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
-        match *self {
-            Stream::Tcp(ref s) => s.prepare_uninitialized_buffer(buf),
-            Stream::Unix(ref s) => s.prepare_uninitialized_buffer(buf),
-        }
-    }
-
-    fn poll_read_buf<B: BufMut>(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<io::Result<usize>> {
-        match self.project() {
-            StreamProj::Tcp(s) => s.poll_read_buf(cx, buf),
-            StreamProj::Unix(s) => s.poll_read_buf(cx, buf),
         }
     }
 }
@@ -164,14 +145,21 @@ where
         }
     }
 
-    fn poll_write_buf<B: bytes::Buf>(
+    fn poll_write_vectored(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut B,
+        bufs: &[io::IoSlice<'_>],
     ) -> Poll<io::Result<usize>> {
         match self.project() {
-            StreamProj::Tcp(s) => s.poll_write_buf(cx, buf),
-            StreamProj::Unix(s) => s.poll_write_buf(cx, buf),
+            StreamProj::Tcp(s) => s.poll_write_vectored(cx, bufs),
+            StreamProj::Unix(s) => s.poll_write_vectored(cx, bufs),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        match *self {
+            Stream::Tcp(ref s) => s.is_write_vectored(),
+            Stream::Unix(ref s) => s.is_write_vectored(),
         }
     }
 }
@@ -234,7 +222,7 @@ pub struct TokioListenerStream<L>(L);
 impl futures::Stream for TokioListenerStream<tokio::net::TcpListener> {
     type Item = io::Result<tokio::net::TcpStream>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.0.poll_accept(cx).map_ok(|(sock, _)| sock).map(Some)
     }
 }

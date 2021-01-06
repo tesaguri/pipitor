@@ -6,15 +6,18 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use futures::task::AtomicWaker;
-use futures::{ready, FutureExt, Stream};
-use tokio::time::Delay;
+use futures::{ready, Future, Stream};
+use pin_project::pin_project;
+use tokio::time::Sleep;
 
 use crate::util;
 
 /// Like `tokio::time::Interval`, but can be controlled by a `Handle`.
+#[pin_project]
 pub struct Interval<T> {
     handle: Weak<T>,
-    delay: Delay,
+    #[pin]
+    delay: Sleep,
 }
 
 pub struct Handle {
@@ -35,7 +38,7 @@ where
     pub fn at(at: Instant, handle: Weak<T>) -> Self {
         Interval {
             handle,
-            delay: tokio::time::delay_until(at.into()),
+            delay: tokio::time::sleep_until(at.into()),
         }
     }
 }
@@ -46,8 +49,10 @@ where
 {
     type Item = Arc<T>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Arc<T>>> {
-        let t = if let Some(handle) = self.handle.upgrade() {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Arc<T>>> {
+        let mut this = self.project();
+
+        let t = if let Some(handle) = this.handle.upgrade() {
             handle
         } else {
             return Poll::Ready(None);
@@ -57,16 +62,16 @@ where
         handle.waker.register(cx.waker());
 
         if let Some(next_tick) = handle.decode_next_tick() {
-            if self.delay.deadline().into_std() < next_tick {
-                self.delay.reset(next_tick.into());
+            if this.delay.deadline().into_std() < next_tick {
+                this.delay.as_mut().reset(next_tick.into());
             }
         }
 
-        ready!(self.delay.poll_unpin(cx));
+        ready!(this.delay.as_mut().poll(cx));
 
         let now = util::instant_now();
-        let next_tick = self.delay.deadline() + handle.period;
-        self.delay.reset(cmp::max(next_tick, now.into()));
+        let next_tick = this.delay.deadline() + handle.period;
+        this.delay.reset(cmp::max(next_tick, now.into()));
 
         Poll::Ready(Some(t))
     }

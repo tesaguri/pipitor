@@ -9,7 +9,7 @@ use diesel::SqliteConnection;
 use http_body::Body;
 use oauth_credentials::{Credentials, Token};
 use pin_project::pin_project;
-use tower_util::ServiceExt;
+use tower::ServiceExt;
 use twitter_stream::TwitterStream;
 
 use crate::manifest::{self, Manifest};

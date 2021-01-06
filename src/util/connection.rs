@@ -6,7 +6,7 @@ use std::{future, io};
 use futures::channel::mpsc;
 use http::Uri;
 use hyper::client::connect::{Connected, Connection};
-use tokio::io::{AsyncRead, AsyncWrite, DuplexStream};
+use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
 use tower_service::Service;
 
 #[derive(Clone)]
@@ -47,8 +47,8 @@ impl AsyncRead for Stream {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         Pin::new(&mut self.inner).poll_read(cx, buf)
     }
 }
@@ -70,12 +70,16 @@ impl AsyncWrite for Stream {
         Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 
-    fn poll_write_buf<B: bytes::Buf>(
+    fn poll_write_vectored(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.inner).poll_write_buf(cx, buf)
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<Result<usize, io::Error>> {
+        Pin::new(&mut self.inner).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
     }
 }
 

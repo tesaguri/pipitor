@@ -6,8 +6,9 @@ use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use futures::ready;
 use futures::task::AtomicWaker;
-use futures::{ready, FutureExt};
+use pin_project::pin_project;
 
 use crate::util;
 
@@ -17,9 +18,11 @@ use crate::util;
 // with a few differences: unlike `Interval`, `Scheduler` resets the next tick based on the
 // WebSub subscription's expiration time in the database, so it takes a closure to "inject" a logic
 // to determine the next tick.
+#[pin_project]
 pub struct Scheduler<T, F> {
     handle: Weak<T>,
-    delay: Option<tokio::time::Delay>,
+    #[pin]
+    delay: Option<tokio::time::Sleep>,
     get_next_tick: F,
 }
 
@@ -38,7 +41,7 @@ where
             delay: (**handle)
                 .as_ref()
                 .decode_next_tick()
-                .map(|next_tick| tokio::time::delay_until(next_tick.into())),
+                .map(|next_tick| tokio::time::sleep_until(next_tick.into())),
             handle: Arc::downgrade(handle),
             get_next_tick,
         }
@@ -52,10 +55,10 @@ where
 {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         trace_fn!(Scheduler::<T, F>::poll);
 
-        let this = &mut *self;
+        let mut this = self.project();
 
         let t = if let Some(t) = this.handle.upgrade() {
             t
@@ -66,21 +69,23 @@ where
 
         handle.task.register(cx.waker());
 
-        let delay = if let Some(ref mut delay) = this.delay {
+        let mut delay = if let Some(mut delay) = this.delay.as_mut().as_pin_mut() {
             if let Some(next_tick) = handle.decode_next_tick() {
                 if next_tick < delay.deadline().into_std() {
-                    delay.reset(next_tick.into());
+                    delay.as_mut().reset(next_tick.into());
                 }
             }
             delay
         } else if let Some(next_tick) = handle.decode_next_tick() {
-            this.delay = Some(tokio::time::delay_until(next_tick.into()));
-            this.delay.as_mut().unwrap()
+            this.delay
+                .as_mut()
+                .set(Some(tokio::time::sleep_until(next_tick.into())));
+            this.delay.as_mut().as_pin_mut().unwrap()
         } else {
             return Poll::Pending;
         };
 
-        ready!(delay.poll_unpin(cx));
+        ready!(delay.as_mut().poll(cx));
 
         if let Some(next_tick) = (this.get_next_tick)(&t) {
             handle.next_tick.store(next_tick, Ordering::Relaxed);
@@ -88,7 +93,7 @@ where
             delay.reset(next_tick.into());
         } else {
             handle.next_tick.store(u64::MAX, Ordering::Relaxed);
-            this.delay = None;
+            this.delay.set(None);
         }
 
         Poll::Pending

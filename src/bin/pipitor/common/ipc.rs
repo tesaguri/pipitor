@@ -20,7 +20,7 @@ mod imp {
     pub type Stream = tokio::net::UnixStream;
 
     pub fn bind(path: &Path) -> io::Result<impl futures::Stream<Item = io::Result<Stream>>> {
-        let mut listener = UnixListener::bind(path)?;
+        let listener = UnixListener::bind(path)?;
         Ok(stream! {
             while let result = listener.accept().await {
                 yield result.map(|(sock, _)| sock);
