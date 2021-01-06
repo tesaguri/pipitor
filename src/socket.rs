@@ -23,7 +23,7 @@ pub enum Addr {
 }
 
 #[pin_project(project = ListenerProj)]
-pub enum Listener<T = tokio::net::TcpListener, U = unix::MaybeUnixListener> {
+pub enum Listener<T = TokioListenerStream<tokio::net::TcpListener>, U = unix::MaybeUnixListener> {
     Tcp(#[pin] T),
     Unix(#[pin] U),
 }
@@ -226,5 +226,37 @@ impl<'de> de::Deserialize<'de> for Addr {
         }
 
         d.deserialize_string(Visitor)
+    }
+}
+
+pub struct TokioListenerStream<L>(L);
+
+impl futures::Stream for TokioListenerStream<tokio::net::TcpListener> {
+    type Item = io::Result<tokio::net::TcpStream>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.0.poll_accept(cx).map_ok(|(sock, _)| sock).map(Some)
+    }
+}
+
+impl<L> TryFrom<std::net::TcpListener> for TokioListenerStream<L>
+where
+    std::net::TcpListener: TryInto<L>,
+{
+    type Error = <std::net::TcpListener as TryInto<L>>::Error;
+
+    fn try_from(listener: std::net::TcpListener) -> Result<Self, Self::Error> {
+        listener.try_into().map(TokioListenerStream)
+    }
+}
+
+impl<A, L> Bind<A> for TokioListenerStream<L>
+where
+    L: Bind<A>,
+{
+    type Error = L::Error;
+
+    fn bind(addr: &A) -> Result<Self, L::Error> {
+        L::bind(addr).map(TokioListenerStream)
     }
 }

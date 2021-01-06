@@ -4,7 +4,7 @@ use std::io;
 use std::path::Path;
 
 use futures::channel::mpsc;
-use futures::{FutureExt, StreamExt};
+use futures::{pin_mut, FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display, Formatter};
 use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -14,12 +14,18 @@ mod imp {
     use std::io;
     use std::path::Path;
 
+    use async_stream::stream;
     use tokio::net::UnixListener;
 
     pub type Stream = tokio::net::UnixStream;
 
     pub fn bind(path: &Path) -> io::Result<impl futures::Stream<Item = io::Result<Stream>>> {
-        UnixListener::bind(path)
+        let mut listener = UnixListener::bind(path)?;
+        Ok(stream! {
+            while let result = listener.accept().await {
+                yield result.map(|(sock, _)| sock);
+            }
+        })
     }
 }
 
@@ -31,7 +37,7 @@ mod imp {
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
-    use tokio::io::{AsyncRead, AsyncWrite};
+    use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
     pub enum Stream {}
 
@@ -47,9 +53,9 @@ mod imp {
     impl AsyncRead for Stream {
         fn poll_read(
             self: Pin<&mut Self>,
-            _: &mut Context,
-            _: &mut [u8],
-        ) -> Poll<io::Result<usize>> {
+            _: &mut Context<'_>,
+            _: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
             match *self {}
         }
     }
@@ -155,10 +161,11 @@ where
 }
 
 fn server_(path: &Path) -> io::Result<impl futures::Stream<Item = (Request, impl AsyncWrite)>> {
-    let mut listener = imp::bind(path)?;
+    let listener = imp::bind(path)?;
     let (tx, rx) = mpsc::unbounded();
 
     let task = async move {
+        pin_mut!(listener);
         loop {
             let mut socket = match listener.next().await {
                 Some(Ok(socket)) => socket,

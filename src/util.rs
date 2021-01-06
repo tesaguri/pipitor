@@ -43,7 +43,6 @@ pub mod r2d2;
 pub mod time;
 
 mod concat_body;
-#[cfg(test)]
 mod first;
 mod serde_wrapper;
 
@@ -66,7 +65,6 @@ use serde::{de, Deserialize};
 pub use self::concat_body::ConcatBody;
 #[cfg(test)]
 pub use self::connection::connection;
-#[cfg(test)]
 pub use self::first::{first, First};
 pub use self::http_service::{HttpService, Service};
 pub use self::serde_wrapper::{MapAccessDeserializer, SeqAccessDeserializer, Serde};

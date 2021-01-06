@@ -14,8 +14,6 @@ cfg_if::cfg_if! {
         use std::convert::{TryFrom, TryInto};
         use std::fs;
 
-        use futures::StreamExt;
-
         use super::Listener;
 
         pub struct MaybeUnixListener {
@@ -43,9 +41,9 @@ cfg_if::cfg_if! {
                 mut self: Pin<&mut Self>,
                 cx: &mut Context<'_>,
             ) -> Poll<Option<Self::Item>> {
-                self.inner.poll_next_unpin(cx).map(|option| {
-                    option.map(|result| result.map(|inner| MaybeUnixStream { inner }))
-                })
+                self.inner
+                    .poll_accept(cx)
+                    .map(|result| Some(result.map(|(inner, _)| MaybeUnixStream { inner })))
             }
         }
 

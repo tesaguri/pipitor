@@ -3,14 +3,14 @@ pub mod ipc;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self};
 use std::io;
-use std::marker::Unpin;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use futures::future::{self, Future, FutureExt};
-use futures::{Stream, StreamExt};
+use async_stream::stream;
+use futures::future::{Future, FutureExt};
+use futures::{pin_mut, Stream, StreamExt};
 use hyper::client::{connect::Connect, Client};
-use pipitor::Manifest;
+use pipitor::{private::util, Manifest};
 
 #[derive(Clone, structopt::StructOpt)]
 pub struct Opt {
@@ -143,8 +143,18 @@ cfg_if::cfg_if! {
 pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
     use tokio::signal::unix::{signal, SignalKind};
 
-    let int = signal(SignalKind::interrupt())?;
-    let term = signal(SignalKind::terminate())?;
+    let mut int = signal(SignalKind::interrupt())?;
+    let int = stream! {
+        while let Some(()) = int.recv().await {
+            yield ();
+        }
+    };
+    let mut term = signal(SignalKind::terminate())?;
+    let term = stream! {
+        while let Some(()) = term.recv().await {
+            yield ();
+        }
+    };
     Ok(merge_select(first(int), first(term)))
 }
 
@@ -153,18 +163,24 @@ pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
     use tokio::signal::{ctrl_c, windows::ctrl_break};
 
     let cc = Box::pin(ctrl_c()).map(|result| result.unwrap());
-    let cb = ctrl_break()?;
+    let mut cb = ctrl_break()?;
+    let cb = stream! {
+        while let Some(()) = cb.recv().await {
+            yield ();
+        }
+    };
     Ok(merge_select(cc, first(cb)))
 }
 
-fn first<S: Stream<Item = ()> + Unpin>(s: S) -> impl Future<Output = ()> {
-    s.into_future().map(|(opt, _)| opt.unwrap())
+async fn first<S: Stream<Item = ()>>(s: S) {
+    pin_mut!(s);
+    s.next().await;
 }
 
 fn merge_select<A, B>(a: A, b: B) -> impl Future<Output = A::Output>
 where
-    A: Future + Unpin,
-    B: Future<Output = A::Output> + Unpin,
+    A: Future,
+    B: Future<Output = A::Output>,
 {
-    future::select(a, b).map(|either| either.factor_first().0)
+    util::first(a, b).map(|either| either.into_inner())
 }

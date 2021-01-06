@@ -17,6 +17,7 @@ path = "src/bin/pipitor/main.rs"
 
 [dependencies]
 anyhow = "1"
+async-stream = "0.3"
 atoi = "0.4"
 atom = { version = "0.9", package = "atom_syndication" }
 auto_enums = "0.7"
@@ -54,7 +55,7 @@ smallvec = { version = "1", features = ["serde"] }
 string = { version = "0.2", default-features = false }
 structopt = "0.3"
 thiserror = "1"
-tokio = { version = "0.2", features = ["io-std", "io-util", "signal", "stream", "tcp", "time", "uds"] }
+tokio = { version = "0.2", features = ["io-std", "io-util", "signal", "tcp", "time", "uds"] }
 tower-service = "0.3"
 tower-util = "0.3"
 toml = "0.5"

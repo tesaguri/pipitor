@@ -36,6 +36,7 @@ pub mod private {
     }
 
     pub mod util {
+        pub use crate::util::first;
         pub use crate::util::r2d2;
     }
 

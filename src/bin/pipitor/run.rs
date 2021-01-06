@@ -36,7 +36,8 @@ pub fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         };
         pin_mut!(ipc);
 
-        let mut signal = quit_signal().unwrap().fuse();
+        let signal = quit_signal().unwrap().fuse();
+        pin_mut!(signal);
 
         let client = client();
         let app = App::<_, _>::with_http_client(client, manifest)

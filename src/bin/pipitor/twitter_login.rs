@@ -1,12 +1,13 @@
 use std::collections::HashSet;
 use std::io::{self, Write};
+use std::pin::Pin;
 
 use anyhow::Context;
 use diesel::prelude::*;
 use diesel::r2d2::ConnectionManager;
 use diesel::SqliteConnection;
-use futures::future;
 use futures::stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt};
+use futures::{future, stream};
 use http::StatusCode;
 use pipitor::models;
 use pipitor::private::twitter::{self, Request as _};
@@ -77,6 +78,11 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
     let stdin = tokio::io::stdin();
     let mut stdin = tokio::io::BufReader::new(stdin).lines();
+    let mut stdin = stream::poll_fn(|cx| {
+        Pin::new(&mut stdin)
+            .poll_next_line(cx)
+            .map(Result::transpose)
+    });
 
     while !unauthed_users.is_empty() {
         let temporary = twitter::oauth::request_token(config.client.as_ref(), &mut client)
