@@ -43,6 +43,8 @@ pub mod r2d2;
 pub mod time;
 
 mod concat_body;
+#[cfg(test)]
+mod first;
 mod serde_wrapper;
 
 use std::error::Error;
@@ -64,6 +66,8 @@ use serde::{de, Deserialize};
 pub use self::concat_body::ConcatBody;
 #[cfg(test)]
 pub use self::connection::connection;
+#[cfg(test)]
+pub use self::first::{first, First};
 pub use self::http_service::{HttpService, Service};
 pub use self::serde_wrapper::{MapAccessDeserializer, SeqAccessDeserializer, Serde};
 pub use self::time::{instant_from_unix, instant_now, now_unix, system_time_now};
@@ -234,15 +238,6 @@ pub fn snowflake_to_system_time(id: u64) -> SystemTime {
 cfg_if! {
     if #[cfg(test)] {
         use futures::future;
-        use pin_project::pin_project;
-
-        #[pin_project]
-        pub struct First<A, B> {
-            #[pin]
-            a: A,
-            #[pin]
-            b: B,
-        }
 
         pub trait EitherUnwrapExt {
             type Left;
@@ -264,27 +259,6 @@ cfg_if! {
                     }
                 }
             }
-        }
-
-        impl<A: Future, B: Future> Future for First<A, B> {
-            type Output = future::Either<A::Output, B::Output>;
-
-            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-                let this = self.project();
-                match this.a.poll(cx) {
-                    Poll::Ready(x) => Poll::Ready(future::Either::Left(x)),
-                    Poll::Pending => match this.b.poll(cx) {
-                        Poll::Ready(x) => Poll::Ready(future::Either::Right(x)),
-                        Poll::Pending => Poll::Pending,
-                    },
-                }
-            }
-        }
-
-        /// Like `futures::future::select`, but accepts `!Unpin` futures and resolves to
-        /// `Either<A::Output, B::Output>` instead of `Either<(_, _), (_, _)>`.
-        pub fn first<A, B>(a: A, b: B) -> First<A, B> {
-            First { a, b }
         }
     }
 }
