@@ -174,7 +174,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: rustc
-          args: --verbose --bin pipitor --release --target '${{ matrix.target }}' --no-default-features --features=rustls -- -C lto
+          args: --verbose --bin pipitor --release --target '${{ matrix.target }}' -- -C lto
           use-cross: ${{ matrix.use_cross }}
         env:
           CARGO_INCREMENTAL: 0
