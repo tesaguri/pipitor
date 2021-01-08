@@ -59,21 +59,23 @@ impl From<atom::Feed> for Feed {
 impl From<rss::Channel> for Feed {
     fn from(channel: rss::Channel) -> Self {
         Feed {
-            title: channel.title().to_owned(),
-            id: channel.link().to_owned(),
-            entries: channel.into_items().into_iter().map(Into::into).collect(),
+            title: channel.title,
+            id: channel.link,
+            entries: channel.items.into_iter().map(Into::into).collect(),
         }
     }
 }
 
 impl From<atom::Entry> for Entry {
     fn from(entry: atom::Entry) -> Self {
-        let links = entry.links();
-        let link = links
-            .iter()
-            .find(|l| l.rel() == "alternate")
-            .or_else(|| links.first())
-            .map(|l| l.href().to_owned());
+        let mut links = entry.links.into_iter();
+        let link = links.next();
+        let link = if link.as_ref().map_or(false, |l| l.rel == "alternate") {
+            link
+        } else {
+            links.find(|l| l.rel == "alternate").or(link)
+        }
+        .map(|l| l.href);
         Entry {
             title: Some(entry.title),
             id: Some(entry.id),
@@ -87,20 +89,19 @@ impl From<atom::Entry> for Entry {
 
 impl From<rss::Item> for Entry {
     fn from(item: rss::Item) -> Self {
-        let link = item
-            .link()
-            .or_else(|| {
-                item.guid()
-                    .filter(|guid| guid.is_permalink())
-                    .map(rss::Guid::value)
-            })
-            .map(str::to_owned);
+        let guid = item.guid;
+        let link = item.link.or_else(|| {
+            guid.as_ref()
+                .filter(|g| g.is_permalink())
+                .map(rss::Guid::value)
+                .map(str::to_owned)
+        });
         Entry {
-            title: item.title().map(str::to_owned),
-            id: item.guid().map(rss::Guid::value).map(str::to_owned),
+            title: item.title,
+            id: guid.map(|g| g.value),
             link,
-            summary: item.description().map(String::from),
-            content: item.content().map(String::from),
+            summary: item.description,
+            content: item.content,
             updated: None,
         }
     }
