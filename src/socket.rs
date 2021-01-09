@@ -68,10 +68,10 @@ where
         match self.project() {
             ListenerProj::Tcp(l) => l
                 .try_poll_next(cx)
-                .map(|result| result.map(|opt| opt.map(Stream::Tcp))),
+                .map(|opt| opt.map(|result| result.map(Stream::Tcp))),
             ListenerProj::Unix(l) => l
                 .try_poll_next(cx)
-                .map(|result| result.map(|opt| opt.map(Stream::Unix))),
+                .map(|opt| opt.map(|result| result.map(Stream::Unix))),
         }
     }
 }

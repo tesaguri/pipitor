@@ -307,6 +307,9 @@ where
                 }) || new
                     .twitter_topics()
                     .any(|user| !old.has_topic(&TopicId::Twitter(user)))
+                    || old
+                        .twitter_topics()
+                        .any(|user| !new.has_topic(&TopicId::Twitter(user)))
             });
             if has_updates {
                 let twitter = this.core.init_twitter().await?;

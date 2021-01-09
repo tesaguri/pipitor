@@ -93,7 +93,7 @@ impl futures::Stream for Listener {
     type Item = Result<Stream, Infallible>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        (Pin::new(&mut self.rx))
+        Pin::new(&mut self.rx)
             .poll_next(cx)
             .map(|option| option.map(Ok))
     }
