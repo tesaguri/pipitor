@@ -190,7 +190,7 @@ impl Manifest {
         })
     }
 
-    pub fn twitter_topics<'a>(&'a self) -> impl Iterator<Item = i64> + 'a {
+    pub fn twitter_topics(&self) -> impl Iterator<Item = i64> + '_ {
         self.topics().filter_map(|topic| match *topic {
             TopicId::Twitter(user) => Some(user),
             _ => None,

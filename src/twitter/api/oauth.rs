@@ -9,8 +9,8 @@ use crate::util::HttpService;
 use super::super::models::AccessToken;
 use super::{Error, Response};
 
-pub async fn request_token<'a, S, B>(
-    client_credentials: Credentials<&'a str>,
+pub async fn request_token<S, B>(
+    client_credentials: Credentials<&str>,
     client: S,
 ) -> Result<Response<Credentials<Box<str>>>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where

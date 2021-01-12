@@ -194,9 +194,7 @@ where
     <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>> + Send + 'static,
 {
-    pub fn shutdown<'a>(
-        mut self: Pin<&'a mut Self>,
-    ) -> impl Future<Output = anyhow::Result<()>> + 'a {
+    pub fn shutdown(mut self: Pin<&mut Self>) -> impl Future<Output = anyhow::Result<()>> + '_ {
         future::poll_fn(move |cx| self.as_mut().poll_shutdown(cx))
     }
 

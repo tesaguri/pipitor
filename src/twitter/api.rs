@@ -244,7 +244,7 @@ where
 }
 
 impl TwitterErrors {
-    pub fn codes<'a>(&'a self) -> impl Iterator<Item = u32> + 'a {
+    pub fn codes(&self) -> impl Iterator<Item = u32> + '_ {
         self.errors.iter().map(|e| e.code)
     }
 }
