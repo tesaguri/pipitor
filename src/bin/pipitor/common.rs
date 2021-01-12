@@ -113,6 +113,7 @@ cfg_if::cfg_if! {
             c.root_store
                 .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
             c.alpn_protocols.push(b"h2".to_vec());
+            c.alpn_protocols.push(b"http/1.1".to_vec());
             c.ct_logs = Some(&ct_logs::LOGS);
 
             HttpsConnector::from((h, c))
@@ -132,7 +133,7 @@ cfg_if::cfg_if! {
             let mut h = HttpConnector::new();
             h.enforce_http(false);
             let c = native_tls_pkg::TlsConnector::builder()
-                .request_alpns(&["h2"])
+                .request_alpns(&["h2", "http/1.1"])
                 .build()
                 .unwrap();
             HttpsConnector::from((h, c.into())).map_response(H2Stream)
