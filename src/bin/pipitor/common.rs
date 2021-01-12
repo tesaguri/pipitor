@@ -122,13 +122,7 @@ cfg_if::cfg_if! {
         use hyper_tls::HttpsConnector;
 
         pub fn https_connector() -> HttpsConnector<HttpConnector> {
-            let mut h = HttpConnector::new();
-            h.enforce_http(false);
-            let c = native_tls_pkg::TlsConnector::builder()
-                .request_alpns(&["h2"])
-                .build()
-                .unwrap();
-            HttpsConnector::from((h, c.into()))
+            HttpsConnector::new()
         }
     } else {
         compile_error!("Either `native-tls` or `rustls` feature is required");
