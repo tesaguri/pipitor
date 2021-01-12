@@ -36,7 +36,7 @@ hmac = "0.10"
 http = "0.2"
 http-body = "0.4"
 http-serde = "1"
-hyper = { version = "0.14", features = ["http1", "http2", "server", "stream"] }
+hyper = { version = "0.14", features = ["client", "http1", "http2", "server", "stream"] }
 json = { version = "1", package = "serde_json" }
 listenfd = "0.3"
 log = "0.4.6"
