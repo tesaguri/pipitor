@@ -5,7 +5,7 @@ use std::fs::{self};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
+use anyhow::Context as _;
 use async_stream::stream;
 use futures::future::{Future, FutureExt};
 use futures::{pin_mut, Stream, StreamExt};
@@ -118,11 +118,86 @@ cfg_if::cfg_if! {
             HttpsConnector::from((h, c))
         }
     } else if #[cfg(feature = "native-tls")] {
-        use hyper::client::HttpConnector;
-        use hyper_tls::HttpsConnector;
+        use std::io::IoSlice;
+        use std::pin::Pin;
+        use std::task::{Context, Poll};
 
-        pub fn https_connector() -> HttpsConnector<HttpConnector> {
-            HttpsConnector::new()
+        use hyper::client::connect::{Connected, Connection};
+        use hyper::client::HttpConnector;
+        use hyper_tls::{HttpsConnector, MaybeHttpsStream};
+        use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+        use tower::ServiceExt;
+
+        pub fn https_connector() -> impl Connect + Clone + Send + Sync {
+            let mut h = HttpConnector::new();
+            h.enforce_http(false);
+            let c = native_tls_pkg::TlsConnector::builder()
+                .request_alpns(&["h2"])
+                .build()
+                .unwrap();
+            HttpsConnector::from((h, c.into())).map_response(H2Stream)
+        }
+
+        struct H2Stream<T>(MaybeHttpsStream<T>);
+
+        impl<T: AsyncRead + AsyncWrite + Unpin> AsyncRead for H2Stream<T> {
+            #[inline]
+            fn poll_read(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context,
+                buf: &mut ReadBuf<'_>,
+            ) -> Poll<io::Result<()>> {
+                Pin::new(&mut self.0).poll_read(cx, buf)
+            }
+        }
+
+        impl<T: AsyncWrite + AsyncRead + Unpin> AsyncWrite for H2Stream<T> {
+            fn poll_write(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+                buf: &[u8],
+            ) -> Poll<io::Result<usize>> {
+                Pin::new(&mut self.0).poll_write(cx, buf)
+            }
+
+            fn poll_write_vectored(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+                bufs: &[IoSlice<'_>],
+            ) -> Poll<io::Result<usize>> {
+                Pin::new(&mut self.0).poll_write_vectored(cx, bufs)
+            }
+
+            fn is_write_vectored(&self) -> bool {
+                self.0.is_write_vectored()
+            }
+
+            fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+                Pin::new(&mut self.0).poll_flush(cx)
+            }
+
+            fn poll_shutdown(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+            ) -> Poll<io::Result<()>> {
+                Pin::new(&mut self.0).poll_shutdown(cx)
+            }
+        }
+
+        impl<T: AsyncRead + AsyncWrite + Connection + Unpin> Connection for H2Stream<T> {
+            fn connected(&self) -> Connected {
+                match self.0 {
+                    MaybeHttpsStream::Http(ref s) => s.connected(),
+                    MaybeHttpsStream::Https(ref s) => {
+                        let s = s.get_ref();
+                        if s.negotiated_alpn().ok().flatten().as_deref() == Some(b"h2") {
+                            s.get_ref().get_ref().connected().negotiated_h2()
+                        } else {
+                            s.get_ref().get_ref().connected()
+                        }
+                    }
+                }
+            }
         }
     } else {
         compile_error!("Either `native-tls` or `rustls` feature is required");

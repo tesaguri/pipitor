@@ -69,6 +69,7 @@ rustls-pkg = { version = "0.19", package = "rustls", optional = true }
 webpki-roots = { version = "0.21", optional = true }
 
 hyper-tls = { version = "0.5", optional = true }
+native-tls-pkg = { version = "0.2.7", package = "native-tls", optional = true }
 
 libsqlite3-sys = { version = ">=0.8.0, <0.19.0", optional = true }
 
@@ -81,7 +82,7 @@ required-features = ["dhall", "native-tls"]
 [features]
 default = ["native-tls"]
 dhall = ["serde_dhall"]
-native-tls = ["hyper-tls"]
+native-tls = ["hyper-tls", "native-tls-pkg/alpn"]
 openssl-vendored = ["hyper-tls/vendored"]
 rustls = ["ct-logs", "hyper-rustls", "rustls-pkg", "webpki-roots"]
 sqlite-bundled = ["libsqlite3-sys/bundled"]
