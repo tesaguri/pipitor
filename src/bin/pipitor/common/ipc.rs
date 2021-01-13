@@ -14,18 +14,12 @@ mod imp {
     use std::io;
     use std::path::Path;
 
-    use async_stream::stream;
     use tokio::net::UnixListener;
+    use tokio_stream::wrappers::UnixListenerStream;
 
-    pub type Stream = tokio::net::UnixStream;
-
-    pub fn bind(path: &Path) -> io::Result<impl futures::Stream<Item = io::Result<Stream>>> {
+    pub fn bind(path: &Path) -> io::Result<UnixListenerStream> {
         let listener = UnixListener::bind(path)?;
-        Ok(stream! {
-            while let result = listener.accept().await {
-                yield result.map(|(sock, _)| sock);
-            }
-        })
+        Ok(UnixListenerStream::new(listener))
     }
 }
 

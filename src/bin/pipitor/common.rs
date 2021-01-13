@@ -1,14 +1,12 @@
 pub mod ipc;
 
 use std::ffi::{OsStr, OsString};
-use std::fs::{self};
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use async_stream::stream;
 use futures::future::{Future, FutureExt};
-use futures::{pin_mut, Stream, StreamExt};
 use hyper::client::{connect::Connect, Client};
 use pipitor::{private::util, Manifest};
 
@@ -214,37 +212,20 @@ pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
     use tokio::signal::unix::{signal, SignalKind};
 
     let mut int = signal(SignalKind::interrupt())?;
-    let int = stream! {
-        while let Some(()) = int.recv().await {
-            yield ();
-        }
-    };
+    let int = async move { int.recv().await.unwrap() };
     let mut term = signal(SignalKind::terminate())?;
-    let term = stream! {
-        while let Some(()) = term.recv().await {
-            yield ();
-        }
-    };
-    Ok(merge_select(first(int), first(term)))
+    let term = async move { term.recv().await.unwrap() };
+    Ok(merge_select(int, term))
 }
 
 #[cfg(windows)]
 pub fn quit_signal() -> io::Result<impl Future<Output = ()>> {
     use tokio::signal::{ctrl_c, windows::ctrl_break};
 
-    let cc = Box::pin(ctrl_c()).map(|result| result.unwrap());
+    let cc = async { ctrl_c().await.unwrap() };
     let mut cb = ctrl_break()?;
-    let cb = stream! {
-        while let Some(()) = cb.recv().await {
-            yield ();
-        }
-    };
-    Ok(merge_select(cc, first(cb)))
-}
-
-async fn first<S: Stream<Item = ()>>(s: S) {
-    pin_mut!(s);
-    s.next().await;
+    let cb = async move { cb.recv().await.unwrap() };
+    Ok(merge_select(cc, cb))
 }
 
 fn merge_select<A, B>(a: A, b: B) -> impl Future<Output = A::Output>
