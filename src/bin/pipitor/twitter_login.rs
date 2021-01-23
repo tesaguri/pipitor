@@ -9,10 +9,12 @@ use diesel::SqliteConnection;
 use futures::stream::{FuturesUnordered, Stream, StreamExt, TryStreamExt};
 use futures::{future, stream};
 use http::StatusCode;
+use oauth_credentials::{Credentials, Token};
 use pipitor::models;
-use pipitor::private::twitter::{self, Request as _};
+use pipitor::private::twitter;
 use pipitor::schema::*;
 use tokio::io::AsyncBufReadExt;
+use twitter_client::Request;
 
 use crate::common::client;
 
@@ -43,17 +45,19 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
                 .find(&user)
                 .get_result::<models::TwitterToken>(&*pool.get()?)
                 .optional()
-                .context("failed to load tokens from the database")?;
+                .context("failed to load tokens from the database")?
+                .map(Credentials::from);
 
-            let client = client.clone();
+            let mut client = client.clone();
             Ok(async move {
                 if let Some(token) = token {
+                    let token = Token::from_ref(&config.client, &token);
                     match twitter::account::VerifyCredentials::new()
-                        .send(&config.client, &(&token).into(), client)
+                        .send(&token, &mut client)
                         .await
                     {
                         Ok(_) => return Ok(None),
-                        Err(twitter::Error::Twitter(ref e))
+                        Err(twitter_client::Error::Twitter(ref e))
                             if e.status == StatusCode::UNAUTHORIZED => {}
                         Err(e) => {
                             return Err(e).context("error while verifying Twitter credentials");
@@ -85,21 +89,17 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     });
 
     while !unauthed_users.is_empty() {
-        let temporary = twitter::oauth::request_token(config.client.as_ref(), &mut client)
-            .await
-            .context("error while getting OAuth request token from Twitter")?;
+        let temporary =
+            twitter_client::auth::request_token(&config.client, "oob", None, &mut client)
+                .await
+                .context("error while getting OAuth request token from Twitter")?;
 
         let verifier = input_verifier(&mut stdin, temporary.identifier(), &unauthed_users).await?;
 
-        let token = twitter::oauth::access_token(
-            &verifier,
-            config.client.as_ref(),
-            temporary.as_ref(),
-            &mut client,
-        )
-        .await
-        .context("error while getting OAuth access token from Twitter")?
-        .data;
+        let token =
+            twitter_client::auth::access_token(&config.client, &temporary, &verifier, &mut client)
+                .await
+                .context("error while getting OAuth access token from Twitter")?;
 
         if unauthed_users.remove(&token.user_id) {
             diesel::replace_into(twitter_tokens::table)

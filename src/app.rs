@@ -21,6 +21,7 @@ use http_body::Body;
 use listenfd::ListenFd;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
+use twitter_client::traits::HttpService;
 use twitter_stream::TwitterStream;
 
 use crate::manifest::{Manifest, TopicId};
@@ -28,7 +29,7 @@ use crate::router::Router;
 use crate::schema::*;
 use crate::socket;
 use crate::twitter;
-use crate::util::{self, snowflake_to_system_time, HttpService, Maybe, Service};
+use crate::util::{self, snowflake_to_system_time, Maybe, Service};
 use crate::websub;
 
 use self::core::Core;
@@ -89,6 +90,7 @@ where
 impl<S, B, I> App<S, B, I>
 where
     S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Error: Error + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
@@ -191,6 +193,7 @@ where
 impl<S, B, I> App<S, B, I>
 where
     S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Error: Error + Send + Sync,
     S::Future: Send,
     S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: Error + Send + Sync,
@@ -478,6 +481,7 @@ impl<S: HttpService<B>, B, I> App<S, B, I> {
 impl<S, B, I> Future for App<S, B, I>
 where
     S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Error: Error + Send + Sync,
     S::Future: Send,
     S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: Error + Send + Sync,

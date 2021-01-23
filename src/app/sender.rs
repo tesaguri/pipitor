@@ -9,11 +9,12 @@ use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use http_body::Body;
 use pin_project::pin_project;
+use twitter_client::request::RawRequest;
+use twitter_client::traits::HttpService;
 
 use crate::feed::{Entry, Feed};
 use crate::manifest::Outbox;
 use crate::schema::*;
-use crate::util::HttpService;
 use crate::{models, twitter};
 
 use super::{Core, TwitterRequestExt as _};
@@ -30,6 +31,7 @@ where
 impl<S, B> Sender<S, B>
 where
     S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Error: Error + Send + Sync,
     S::Future: Send,
     S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: Error + Send + Sync,
@@ -175,17 +177,17 @@ where
             .first::<Option<i64>>(&*conn)?;
         let retweet = self.retweet(&tweet, core)?;
         if let Some(dup) = duplicate {
+            let token = core.twitter_token(None).unwrap();
             // Check whether the duplicate Tweet still exists
-            let task =
-                twitter::statuses::Show::new(dup)
-                    .send(core, None)
-                    .then(|result| async move {
-                        if result.is_err() {
-                            // Either the duplicate Tweet does not exist anymore (404)
-                            // or the Tweet's existence could not be verified because of an error.
-                            retweet.await;
-                        }
-                    });
+            let task = twitter::statuses::Show::new(dup)
+                .send_raw(&token, &mut core.http_client().clone())
+                .then(|result| async move {
+                    if result.is_err() {
+                        // Either the duplicate Tweet does not exist anymore (404)
+                        // or the Tweet's existence could not be verified because of an error.
+                        retweet.await;
+                    }
+                });
             tokio::spawn(core.shutdown_handle().wrap_future(task));
         } else {
             tokio::spawn(core.shutdown_handle().wrap_future(retweet));
@@ -225,9 +227,9 @@ where
                             .send(core, user)
                             .map_ok(|_| {})
                             .or_else(|e| {
-                                if let twitter::Error::Twitter(ref e) = e {
+                                if let twitter_client::Error::Twitter(ref e) = e {
                                     let is_negligible = |code| {
-                                        use twitter::ErrorCode;
+                                        use twitter_client::error::ErrorCode;
                                         [
                                             ErrorCode::YOU_HAVE_ALREADY_RETWEETED_THIS_TWEET,
                                             ErrorCode::NO_STATUS_FOUND_WITH_THAT_ID,
@@ -262,11 +264,9 @@ where
 
 impl<S, B> Default for Sender<S, B>
 where
-    S: HttpService<B> + Clone + Send + Sync + 'static,
-    S::Future: Send,
-    S::ResponseBody: Send,
+    S: HttpService<B> + Clone,
     <S::ResponseBody as Body>::Error: Error + Send + Sync,
-    B: Default + From<Vec<u8>> + Send + 'static,
+    B: Default + From<Vec<u8>>,
 {
     fn default() -> Self {
         Sender {

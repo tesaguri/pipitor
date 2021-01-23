@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
+use std::fmt::Debug;
 use std::future;
 use std::marker::PhantomData;
 use std::mem;
@@ -21,11 +22,12 @@ use http::{Request, Response, StatusCode, Uri};
 use http_body::{Body, Full};
 use sha1::Sha1;
 use tower::ServiceExt;
+use twitter_client::traits::HttpService;
 
 use crate::feed::{self, Feed, RawFeed};
 use crate::query;
 use crate::schema::*;
-use crate::util::{self, consts::HUB_SIGNATURE, now_unix, ConcatBody, HttpService, Never};
+use crate::util::{self, consts::HUB_SIGNATURE, http_service, now_unix, ConcatBody, Never};
 use crate::websub::hub;
 
 use super::scheduler;
@@ -58,6 +60,7 @@ where
 
     pub fn discover_and_subscribe(&self, topic: String) -> impl Future<Output = anyhow::Result<()>>
     where
+        S::Error: Error + Send + Sync,
         <S::ResponseBody as Body>::Error: Error + Send + Sync,
         B: Default,
     {
@@ -89,6 +92,7 @@ where
         topic: String,
     ) -> impl Future<Output = anyhow::Result<(String, Option<impl Iterator<Item = String>>)>>
     where
+        S::Error: Error + Send + Sync,
         <S::ResponseBody as Body>::Error: Error + Send + Sync,
         B: Default,
     {
@@ -96,9 +100,7 @@ where
 
         let req = http::Request::get(&*topic).body(B::default()).unwrap();
         let mut tx = self.tx.clone();
-        self.client
-            .clone()
-            .into_service()
+        http_service::IntoService(self.client.clone())
             .oneshot(req)
             .map_err(Into::into)
             .and_then(|res| async move {
@@ -152,7 +154,10 @@ where
         hub::subscribe(&self.callback, hub, topic, self.client.clone(), conn)
     }
 
-    pub fn renew_subscriptions(&self, conn: &SqliteConnection) {
+    pub fn renew_subscriptions(&self, conn: &SqliteConnection)
+    where
+        S::Error: Debug,
+    {
         let now_unix = now_unix();
         let threshold: i64 = (now_unix.as_secs() + self.renewal_margin + 1)
             .try_into()
@@ -209,7 +214,10 @@ where
         hub::unsubscribe(&self.callback, id, hub, topic, self.client.clone(), conn)
     }
 
-    fn call(&self, req: Request<hyper::Body>) -> Response<Full<Bytes>> {
+    fn call(&self, req: Request<hyper::Body>) -> Response<Full<Bytes>>
+    where
+        S::Error: Debug,
+    {
         macro_rules! validate {
             ($input:expr) => {
                 match $input {
@@ -344,12 +352,10 @@ where
         Response::new(Full::default())
     }
 
-    fn verify_intent(
-        &self,
-        id: i64,
-        query: &str,
-        conn: &SqliteConnection,
-    ) -> Response<Full<Bytes>> {
+    fn verify_intent(&self, id: i64, query: &str, conn: &SqliteConnection) -> Response<Full<Bytes>>
+    where
+        S::Error: Debug,
+    {
         let row = |topic| {
             websub_subscriptions::table
                 .filter(websub_subscriptions::id.eq(id))
@@ -440,6 +446,7 @@ impl<S, B> AsRef<scheduler::Handle> for Service<S, B> {
 impl<S, B> tower_service::Service<Request<hyper::Body>> for &Service<S, B>
 where
     S: HttpService<B> + Clone + Send + 'static,
+    S::Error: Debug,
     S::Future: Send,
     S::ResponseBody: Send,
     B: From<Vec<u8>> + Send + 'static,

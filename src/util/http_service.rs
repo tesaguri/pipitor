@@ -1,10 +1,8 @@
-use std::error::Error;
-use std::future::Future;
 use std::task::{Context, Poll};
 
 use http::header::{HeaderValue, USER_AGENT};
 use http::{Request, Response};
-use http_body::Body;
+use twitter_client::traits::HttpService;
 
 /// A wrapper for `impl tower_service::Service` to adjust its behavior for our usage.
 #[derive(Clone)]
@@ -12,23 +10,7 @@ pub struct Service<S> {
     inner: S,
 }
 
-pub struct IntoService<S>(S);
-
-pub trait HttpService<B> {
-    type ResponseBody: Body;
-    type Error: Error + Send + Sync + 'static;
-    type Future: Future<Output = Result<Response<Self::ResponseBody>, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>>;
-    fn call(&mut self, request: Request<B>) -> Self::Future;
-
-    fn into_service(self) -> IntoService<Self>
-    where
-        Self: Sized,
-    {
-        IntoService(self)
-    }
-}
+pub struct IntoService<S>(pub S);
 
 #[allow(clippy::declare_interior_mutable_const)]
 const USER_AGENT_PIPITOR: HeaderValue =
@@ -56,24 +38,6 @@ impl<S: HttpService<B>, B> tower_service::Service<Request<B>> for Service<S> {
     fn call(&mut self, mut request: Request<B>) -> Self::Future {
         request.headers_mut().insert(USER_AGENT, USER_AGENT_PIPITOR);
         self.inner.call(request)
-    }
-}
-
-impl<S, ReqB, ResB: Body> HttpService<ReqB> for S
-where
-    S: tower_service::Service<Request<ReqB>, Response = Response<ResB>>,
-    S::Error: Error + Send + Sync + 'static,
-{
-    type ResponseBody = ResB;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), S::Error>> {
-        tower_service::Service::poll_ready(self, cx)
-    }
-
-    fn call(&mut self, request: Request<ReqB>) -> Self::Future {
-        tower_service::Service::call(self, request)
     }
 }
 

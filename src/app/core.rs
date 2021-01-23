@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::error::Error;
 use std::fmt::Debug;
 use std::task::{Context, Poll};
 
@@ -11,6 +12,7 @@ use http_body::Body;
 use oauth_credentials::{Credentials, Token};
 use pin_project::pin_project;
 use tower::ServiceExt;
+use twitter_client::traits::HttpService;
 use twitter_stream::TwitterStream;
 
 use crate::manifest::{self, Manifest};
@@ -18,7 +20,7 @@ use crate::models;
 use crate::router::Router;
 use crate::schema::*;
 use crate::twitter;
-use crate::util::{self, HttpService};
+use crate::util::{self, http_service};
 
 use super::shutdown::Shutdown;
 
@@ -74,6 +76,7 @@ impl<S> Core<S> {
     pub async fn init_twitter<B>(&self) -> anyhow::Result<Option<TwitterStream<S::ResponseBody>>>
     where
         S: HttpService<B> + Clone,
+        S::Error: Error + Send + Sync + 'static,
         B: Default + From<Vec<u8>>,
     {
         trace_fn!(Core::<S>::init_twitter);
@@ -88,7 +91,7 @@ impl<S> Core<S> {
             return Ok(None);
         }
 
-        let token = self.twitter_token(config.user).unwrap();
+        let token = self.twitter_access_token(config.user).unwrap();
 
         let stream_token = Token::new(config.client.as_ref(), token);
 
@@ -97,7 +100,7 @@ impl<S> Core<S> {
         twitter_topics.sort_unstable();
         twitter_topics.dedup();
 
-        let mut client = self.client.clone().into_service();
+        let mut client = http_service::IntoService(self.client.clone());
         client
             .ready()
             .await
@@ -113,6 +116,7 @@ impl<S> Core<S> {
     pub(super) fn init_twitter_list<B>(&self) -> anyhow::Result<twitter::ListTimeline<S, B>>
     where
         S: HttpService<B> + Clone + Send + Sync + 'static,
+        S::Error: Debug,
         S::Future: Send + 'static,
         S::ResponseBody: Send,
         <S::ResponseBody as Body>::Error: Debug,
@@ -136,12 +140,11 @@ impl<S> Core<S> {
             .filter(|&n| n > 0);
 
         let token = self.twitter_tokens.get(&user).unwrap().clone();
+        let token = Token::new(client, token);
 
         let http = self.client.clone();
 
-        Ok(twitter::ListTimeline::new(
-            list, since_id, client, token, http,
-        ))
+        Ok(twitter::ListTimeline::new(list, since_id, token, http))
     }
 
     pub fn load_twitter_tokens(&mut self) -> anyhow::Result<()> {
@@ -244,7 +247,14 @@ impl<S> Core<S> {
             .map_err(Into::into)
     }
 
-    pub fn twitter_token(&self, user: i64) -> Option<Credentials<&str>> {
+    pub fn twitter_access_token(&self, user: i64) -> Option<Credentials<&str>> {
         self.twitter_tokens.get(&user).map(Credentials::as_ref)
+    }
+
+    pub fn twitter_token(&self, user: Option<i64>) -> Option<Token<&str>> {
+        self.manifest.twitter.as_ref().and_then(|config| {
+            self.twitter_access_token(user.unwrap_or(config.user))
+                .map(|token| Token::new(config.client.as_ref(), token))
+        })
     }
 }

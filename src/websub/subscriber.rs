@@ -2,6 +2,7 @@ mod scheduler;
 mod service;
 
 use std::convert::{TryFrom, TryInto};
+use std::fmt::Debug;
 use std::marker::{PhantomData, Unpin};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -16,12 +17,13 @@ use http::uri::{PathAndQuery, Uri};
 use hyper::server::conn::Http;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
+use twitter_client::traits::HttpService;
 
 use crate::feed::Feed;
 use crate::manifest;
 use crate::query;
 use crate::schema::*;
-use crate::util::{ArcService, HttpService};
+use crate::util::ArcService;
 
 use self::scheduler::Scheduler;
 use self::service::Service;
@@ -39,6 +41,7 @@ pub struct Subscriber<S, B, I> {
 impl<S, B, I> Subscriber<S, B, I>
 where
     S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Error: Debug,
     S::Future: Send,
     S::ResponseBody: Send,
     B: Default + From<Vec<u8>> + Send + 'static,
@@ -129,6 +132,7 @@ impl<S, B, I> Subscriber<S, B, I> {
 impl<S, B, I> Stream for Subscriber<S, B, I>
 where
     S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Error: Debug,
     S::Future: Send,
     S::ResponseBody: Send,
     B: Default + From<Vec<u8>> + Send + 'static,

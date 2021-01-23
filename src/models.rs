@@ -77,6 +77,16 @@ impl<'a> From<&'a TwitterToken> for Credentials<&'a str> {
     }
 }
 
+impl<'a> From<&'a twitter_client::auth::AccessToken> for NewTwitterTokens<'a> {
+    fn from(t: &'a twitter_client::auth::AccessToken) -> Self {
+        NewTwitterTokens {
+            id: t.user_id,
+            access_token: &t.credentials.identifier,
+            access_token_secret: &t.credentials.secret,
+        }
+    }
+}
+
 impl<'a> From<&'a crate::twitter::Tweet> for NewTweet<'a> {
     fn from(tweet: &'a crate::twitter::Tweet) -> Self {
         NewTweet {

@@ -1,14 +1,7 @@
 use serde::de;
+use twitter_client::request::RawRequest;
 
 api_requests! {
-    // XXX: This would be HEAD request if we could skip deserialization of the response
-    GET "https://api.twitter.com/1.1/statuses/show.json" => de::IgnoredAny;
-    pub struct Show {
-        id: i64;
-        trim_user: bool = true,
-        include_entities: bool,
-    }
-
     POST "https://api.twitter.com/1.1/statuses/retweet.json" => de::IgnoredAny;
     pub struct Retweet {
         id: i64;
@@ -18,5 +11,32 @@ api_requests! {
     pub struct Update<'a> {
         status: &'a str;
         trim_user: bool = true,
+    }
+}
+
+#[derive(oauth1::Request)]
+pub struct Show {
+    id: i64,
+    trim_user: bool,
+    include_entities: bool,
+}
+
+impl Show {
+    pub fn new(id: i64) -> Self {
+        Show {
+            id,
+            trim_user: true,
+            include_entities: false,
+        }
+    }
+}
+
+impl RawRequest for Show {
+    fn method(&self) -> &http::Method {
+        &http::Method::HEAD
+    }
+
+    fn uri(&self) -> &'static str {
+        "https://api.twitter.com/1.1/statuses/show.json"
     }
 }

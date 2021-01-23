@@ -15,14 +15,16 @@ use std::time::{Duration, SystemTime};
 use futures::channel::mpsc;
 use futures::{ready, FutureExt, Stream, StreamExt};
 use http_body::Body;
-use oauth_credentials::Credentials;
+use oauth_credentials::Token;
 use pin_project::pin_project;
+use twitter_client::traits::HttpService;
+use twitter_client::Request;
 
 use crate::manifest;
 use crate::util::time::system_time_now;
-use crate::util::{snowflake_to_system_time, system_time_to_snowflake, HttpService};
+use crate::util::{snowflake_to_system_time, system_time_to_snowflake};
 
-use super::{Request, Tweet};
+use super::Tweet;
 
 use self::interval::Interval;
 
@@ -44,8 +46,7 @@ struct RequestSender<S, B> {
     since_id: AtomicI64,
     tx: mpsc::Sender<Vec<Tweet>>,
     handle: interval::Handle,
-    client: Credentials<Box<str>>,
-    token: Credentials<Box<str>>,
+    token: Token<Box<str>>,
     http: S,
     marker: PhantomData<fn() -> B>,
 }
@@ -58,22 +59,22 @@ where
     since_id: i64,
     sender: Arc<RequestSender<S, B>>,
     #[pin]
-    response: super::ResponseFuture<Vec<Tweet>, S, B>,
+    response: twitter_client::response::ResponseFuture<Vec<Tweet>, S::Future>,
 }
 
 impl<S, B> ListTimeline<S, B>
 where
     S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Error: Debug,
     S::Future: Send + 'static,
     S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: Debug,
-    B: Default + From<Vec<u8>> + Send + 'static,
+    B: From<Vec<u8>> + 'static,
 {
     pub fn new(
         list: &manifest::TwitterList,
         since_id: Option<i64>,
-        client: Credentials<Box<str>>,
-        token: Credentials<Box<str>>,
+        token: Token<Box<str>>,
         http: S,
     ) -> Self {
         let manifest::TwitterList {
@@ -89,7 +90,6 @@ where
             since_id: AtomicI64::new(0),
             tx,
             handle: interval::Handle::new(interval),
-            client,
             token,
             http,
             marker: PhantomData,
@@ -98,7 +98,7 @@ where
         if let Some(since_id) = since_id {
             let response = super::lists::Statuses::new(list.id)
                 .since_id(Some(since_id))
-                .send(&sender.client, &sender.token, sender.http.clone());
+                .send(&sender.token, &mut sender.http.clone());
             tokio::spawn(Backfill {
                 since_id,
                 response,
@@ -168,10 +168,9 @@ impl<S, B> Stream for ListTimeline<S, B> {
 impl<S, B> Future for Backfill<S, B>
 where
     S: HttpService<B> + Clone + Send + Sync + 'static,
-    S::Future: Send,
-    S::ResponseBody: Send,
+    S::Error: Debug,
     <S::ResponseBody as Body>::Error: Debug,
-    B: Default + From<Vec<u8>> + Send + 'static,
+    B: From<Vec<u8>>,
 {
     type Output = ();
 
@@ -197,11 +196,7 @@ where
         let res = super::lists::Statuses::new(this.sender.list_id)
             .since_id(Some(*this.since_id))
             .max_id(Some(tweets.last().unwrap().id - 1))
-            .send(
-                &this.sender.client,
-                &this.sender.token,
-                this.sender.http.clone(),
-            );
+            .send(&this.sender.token, &mut this.sender.http.clone());
         this.response.set(res);
 
         if let Err(e) = this.sender.tx.clone().start_send(tweets) {
@@ -218,10 +213,11 @@ where
 impl<S, B> RequestSender<S, B>
 where
     S: HttpService<B> + Clone + Send + Sync + 'static,
-    S::Future: Send + 'static,
+    S::Error: Debug,
+    S::Future: Send,
     S::ResponseBody: Send,
     <S::ResponseBody as Body>::Error: Debug,
-    B: Default + From<Vec<u8>> + Send + 'static,
+    B: From<Vec<u8>> + 'static,
 {
     fn send(self: Arc<Self>) {
         trace_fn!(RequestSender::<S, B>::send);
@@ -237,7 +233,7 @@ where
             .count(Some(count))
             .include_rts(Some(false))
             .since_id(since_id)
-            .send(&self.client, &self.token, self.http.clone())
+            .send(&self.token, &mut self.http.clone())
             .map(move |result| {
                 let rate_limit = match result {
                     Ok(resp) => {
@@ -256,7 +252,7 @@ where
                         // since the request will be retried soon.
                         warn!("error while retrieving Tweets from the list: {:?}", e);
 
-                        if let super::Error::Twitter(e) = e {
+                        if let twitter_client::Error::Twitter(e) = e {
                             e.rate_limit
                         } else {
                             return;
@@ -273,7 +269,9 @@ where
 
         tokio::spawn(task);
     }
+}
 
+impl<S, B> RequestSender<S, B> {
     fn set_since_id(&self, since_id: i64) {
         self.since_id.fetch_max(since_id, Ordering::AcqRel);
     }

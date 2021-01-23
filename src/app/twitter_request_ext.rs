@@ -1,14 +1,13 @@
-use crate::twitter;
-use crate::util::HttpService;
+use twitter_client::traits::HttpService;
 
 use super::Core;
 
-pub trait TwitterRequestExt: twitter::Request {
+pub trait TwitterRequestExt: twitter_client::Request {
     fn send<S, B>(
         &self,
         core: &Core<S>,
         user: impl Into<Option<i64>>,
-    ) -> twitter::ResponseFuture<Self::Data, S, B>
+    ) -> twitter_client::response::ResponseFuture<Self::Data, S::Future>
     where
         S: HttpService<B> + Clone,
         B: Default + From<Vec<u8>>;
@@ -16,7 +15,7 @@ pub trait TwitterRequestExt: twitter::Request {
 
 impl<T> TwitterRequestExt for T
 where
-    T: twitter::Request,
+    T: twitter_client::Request,
 {
     /// # Panics
     ///
@@ -27,18 +26,12 @@ where
         &self,
         core: &Core<S>,
         user: impl Into<Option<i64>>,
-    ) -> twitter::ResponseFuture<Self::Data, S, B>
+    ) -> twitter_client::response::ResponseFuture<Self::Data, S::Future>
     where
         S: HttpService<B> + Clone,
         B: Default + From<Vec<u8>>,
     {
-        let config = core.manifest().twitter.as_ref().unwrap();
-        let user = user.into().unwrap_or(config.user);
-        twitter::Request::send(
-            self,
-            &config.client,
-            &core.twitter_token(user).unwrap(),
-            core.http_client().clone(),
-        )
+        let token = core.twitter_token(user.into()).unwrap();
+        twitter_client::Request::send(self, &token, &mut core.http_client().clone())
     }
 }

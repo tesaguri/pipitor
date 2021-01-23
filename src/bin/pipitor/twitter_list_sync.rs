@@ -6,10 +6,11 @@ use diesel::r2d2::ConnectionManager;
 use diesel::SqliteConnection;
 use futures::future::{self, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
-use oauth_credentials::Credentials;
+use oauth_credentials::{Credentials, Token};
 use pipitor::models;
-use pipitor::private::twitter::{self, Request as _};
+use pipitor::private::twitter;
 use pipitor::schema::*;
+use twitter_client::Request;
 
 use crate::common::client;
 
@@ -42,10 +43,11 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .context("failed to load tokens from the database")?
         .context("please run `pipitor twitter-login` first to login")?
         .into();
+    let token = Token::from_ref(&config.client, &token);
 
     let res_fut = twitter::lists::Members::new(list_id)
         .count(Some(5000))
-        .send(&config.client, &token, &mut client);
+        .send(&token, &mut client);
     println!("Retrieving the list...");
 
     let users: HashSet<i64> = manifest.twitter_topics().collect();
@@ -60,13 +62,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
 
     let destroy: FuturesUnordered<_> = list
         .difference(&users)
-        .map(|&user| {
-            twitter::lists::members::Destroy::new(list_id, user).send(
-                &config.client,
-                &token,
-                client.clone(),
-            )
-        })
+        .map(|&user| twitter::lists::members::Destroy::new(list_id, user).send(&token, &mut client))
         .collect();
     if !destroy.is_empty() {
         println!("Removing redundant user in the list...");
@@ -82,7 +78,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
         .difference(&list)
         .map(|&user| {
             twitter::lists::members::Create::new(list_id, user)
-                .send(&config.client, &token, client.clone())
+                .send(&token, &mut client)
                 .map(move |r| (r, user))
         })
         .collect();
@@ -96,15 +92,15 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
             Ok(_) => future::ok(()),
             Err(e) => {
                 warn!("failed to add user {} to the list", user);
-                if let twitter::Error::Twitter(ref e) = e {
+                if let twitter_client::Error::Twitter(ref e) = e {
                     for c in e.codes() {
                         match c {
                             // Skip this error as it occurs if (but not only if) the user is protected.
-                            twitter::ErrorCode::YOU_ARENT_ALLOWED_TO_ADD_MEMBERS_TO_THIS_LIST => {
+                            twitter_client::error::ErrorCode::YOU_ARENT_ALLOWED_TO_ADD_MEMBERS_TO_THIS_LIST => {
                                 warn!("You aren't allowed to add the user to the list");
                                 return future::ok(());
                             }
-                            twitter::ErrorCode::CANNOT_FIND_SPECIFIED_USER => {
+                            twitter_client::error::ErrorCode::CANNOT_FIND_SPECIFIED_USER => {
                                 warn!("Cannot find the user");
                                 return future::ok(());
                             }

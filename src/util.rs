@@ -37,9 +37,6 @@ pub mod consts {
     pub const APPLICATION_ATOM_XML: HeaderValue = HeaderValue::from_static("application/atom+xml");
     pub const HUB_SIGNATURE: &str = "x-hub-signature";
     pub const NS_ATOM: &str = "http://www.w3.org/2005/Atom";
-    pub const RATE_LIMIT_LIMIT: &str = "x-rate-limit-limit";
-    pub const RATE_LIMIT_REMAINING: &str = "x-rate-limit-remaining";
-    pub const RATE_LIMIT_RESET: &str = "x-rate-limit-reset";
 }
 
 #[cfg(test)]
@@ -74,7 +71,7 @@ pub use self::concat_body::ConcatBody;
 #[cfg(test)]
 pub use self::connection::connection;
 pub use self::first::{first, First};
-pub use self::http_service::{HttpService, Service};
+pub use self::http_service::Service;
 pub use self::serde_wrapper::{MapAccessDeserializer, SeqAccessDeserializer, Serde};
 pub use self::time::{instant_from_unix, instant_now, now_unix, system_time_now};
 #[cfg(test)]

@@ -10,9 +10,11 @@ use http::uri::{Parts, PathAndQuery, Uri};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
+use twitter_client::traits::HttpService;
 
 use crate::schema::*;
-use crate::util::{consts::APPLICATION_WWW_FORM_URLENCODED, HttpService};
+use crate::util::consts::APPLICATION_WWW_FORM_URLENCODED;
+use crate::util::http_service;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "hub.mode")]
@@ -202,27 +204,29 @@ where
         .body(B::from(body.into_bytes()))
         .unwrap();
 
-    client.into_service().oneshot(req).map_ok(move |res| {
-        let status = res.status();
+    http_service::IntoService(client)
+        .oneshot(req)
+        .map_ok(move |res| {
+            let status = res.status();
 
-        if status.is_success() {
-            return;
-        }
-
-        if status.is_redirection() {
-            if let Some(to) = res.headers().get(LOCATION) {
-                let to = String::from_utf8_lossy(to.as_bytes());
-                log::warn!("Topic {} at hub {} redirects to {}", topic, hub, to);
+            if status.is_success() {
+                return;
             }
-        }
 
-        log::warn!(
-            "Topic {} at hub {} returned HTTP status code {}",
-            topic,
-            hub,
-            status
-        );
-    })
+            if status.is_redirection() {
+                if let Some(to) = res.headers().get(LOCATION) {
+                    let to = String::from_utf8_lossy(to.as_bytes());
+                    log::warn!("Topic {} at hub {} redirects to {}", topic, hub, to);
+                }
+            }
+
+            log::warn!(
+                "Topic {} at hub {} returned HTTP status code {}",
+                topic,
+                hub,
+                status
+            );
+        })
 }
 
 fn create_subscription(hub: &str, topic: &str, conn: &SqliteConnection) -> (i64, Secret) {
