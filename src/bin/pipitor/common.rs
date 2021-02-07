@@ -104,17 +104,7 @@ cfg_if::cfg_if! {
         use hyper_rustls::HttpsConnector;
 
         pub fn https_connector() -> HttpsConnector<HttpConnector> {
-            let mut h = HttpConnector::new();
-            h.enforce_http(false);
-
-            let mut c = rustls_pkg::ClientConfig::new();
-            c.root_store
-                .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
-            c.alpn_protocols.push(b"h2".to_vec());
-            c.alpn_protocols.push(b"http/1.1".to_vec());
-            c.ct_logs = Some(&ct_logs::LOGS);
-
-            HttpsConnector::from((h, c))
+            HttpsConnector::with_native_roots()
         }
     } else if #[cfg(feature = "native-tls")] {
         use std::io::IoSlice;
