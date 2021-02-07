@@ -45,7 +45,7 @@ where
     core: Core<Service<S>>,
     twitter_list: twitter::ListTimeline<Service<S>, B>,
     #[pin]
-    twitter: Option<TwitterStream<S::ResponseBody>>,
+    twitter: Option<TwitterStream<<Service<S> as HttpService<B>>::ResponseBody>>,
     #[pin]
     websub: Option<websub::Subscriber<Service<S>, B, I>>,
     sender: Sender<Service<S>, B>,
@@ -93,6 +93,7 @@ where
     S::Error: Error + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
+    <S::ResponseBody as Body>::Data: Send,
     <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>> + Send + 'static,
     I: TryStream + socket::Bind<socket::Addr>,
@@ -196,7 +197,8 @@ where
     S::Error: Error + Send + Sync,
     S::Future: Send,
     S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: Error + Send + Sync,
+    <S::ResponseBody as Body>::Data: Send,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>> + Send + 'static,
 {
     pub fn shutdown(mut self: Pin<&mut Self>) -> impl Future<Output = anyhow::Result<()>> + '_ {
@@ -484,7 +486,8 @@ where
     S::Error: Error + Send + Sync,
     S::Future: Send,
     S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: Error + Send + Sync,
+    <S::ResponseBody as Body>::Data: Send,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>> + Send + 'static,
     I: TryStream,
     I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
