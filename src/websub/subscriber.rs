@@ -7,7 +7,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use bytes::Bytes;
 use diesel::dsl::*;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
@@ -179,7 +178,7 @@ fn prepare_callback_prefix(prefix: Uri) -> Uri {
             let mut buf = String::with_capacity(path.len() + 1);
             buf.push_str(path);
             buf.push('/');
-            PathAndQuery::from_maybe_shared(Bytes::from(buf)).unwrap()
+            PathAndQuery::try_from(buf).unwrap()
         };
         let mut parts = prefix.into_parts();
         parts.path_and_query = Some(path);

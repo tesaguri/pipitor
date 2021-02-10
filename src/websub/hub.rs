@@ -1,7 +1,6 @@
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::str;
 
-use bytes::Bytes;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::SqliteConnection;
@@ -271,7 +270,7 @@ fn make_callback(prefix: Uri, id: i64) -> Uri {
     let mut parts = Parts::from(prefix);
     // `subscriber::prepare_callback_prefix` ensures that `path_and_query` is `Some`.
     let path = format!("{}{}", parts.path_and_query.unwrap(), id);
-    parts.path_and_query = Some(PathAndQuery::from_maybe_shared(Bytes::from(path)).unwrap());
+    parts.path_and_query = Some(PathAndQuery::try_from(path).unwrap());
     parts.try_into().unwrap()
 }
 
