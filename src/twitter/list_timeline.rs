@@ -248,8 +248,6 @@ where
         let since_id = self.since_id.load(Ordering::Relaxed);
         let since_id = if since_id == 0 {
             None
-        } else if self.delay == Duration::from_secs(0) {
-            Some(since_id)
         } else {
             // Subtract `delay` from the "time part"
             // and round down the non-time part of Snowflake ID.
