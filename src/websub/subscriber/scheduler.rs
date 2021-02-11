@@ -121,11 +121,7 @@ impl Handle {
 
     fn decode_next_tick(&self) -> Option<Instant> {
         let next_tick = self.next_tick.load(Ordering::Relaxed);
-        if next_tick == u64::MAX {
-            None
-        } else {
-            Some(util::instant_from_unix(Duration::from_secs(next_tick)))
-        }
+        (next_tick != u64::MAX).then(|| util::instant_from_unix(Duration::from_secs(next_tick)))
     }
 }
 

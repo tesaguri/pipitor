@@ -95,11 +95,7 @@ impl Handle {
 
     fn decode_next_tick(&self) -> Option<Instant> {
         let next_tick = self.next_tick.swap(0, Ordering::Relaxed);
-        if next_tick == 0 {
-            None
-        } else {
-            Some(util::instant_from_unix(Duration::from_secs(next_tick)))
-        }
+        (next_tick != 0).then(|| util::instant_from_unix(Duration::from_secs(next_tick)))
     }
 }
 

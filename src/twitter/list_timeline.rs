@@ -246,13 +246,9 @@ where
         trace_fn!(RequestSender::<S, B>::send);
 
         let since_id = self.since_id.load(Ordering::Relaxed);
-        let since_id = if since_id == 0 {
-            None
-        } else {
-            // Subtract `delay` from the "time part"
-            // and round down the non-time part of Snowflake ID.
-            Some(((since_id >> 22) - self.delay.as_millis() as i64) << 22)
-        };
+        // Subtract `delay` from the "time part" and round down the non-time part of Snowflake ID.
+        let since_id =
+            (since_id != 0).then(|| ((since_id >> 22) - self.delay.as_millis() as i64) << 22);
         let count = if since_id.is_some() { 200 } else { 1 };
 
         let task = super::lists::Statuses::new(self.list_id)
