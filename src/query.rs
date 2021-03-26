@@ -9,7 +9,7 @@ use crate::schema::*;
 pub struct PragmaForeignKeysOn;
 
 impl QueryFragment<Sqlite> for PragmaForeignKeysOn {
-    fn walk_ast(&self, mut out: AstPass<Sqlite>) -> QueryResult<()> {
+    fn walk_ast(&self, mut out: AstPass<'_, Sqlite>) -> QueryResult<()> {
         out.push_sql("PRAGMA foreign_keys = ON");
         Ok(())
     }

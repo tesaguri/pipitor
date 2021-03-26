@@ -133,7 +133,7 @@ cfg_if::cfg_if! {
             #[inline]
             fn poll_read(
                 mut self: Pin<&mut Self>,
-                cx: &mut Context,
+                cx: &mut Context<'_>,
                 buf: &mut ReadBuf<'_>,
             ) -> Poll<io::Result<()>> {
                 Pin::new(&mut self.0).poll_read(cx, buf)

@@ -91,9 +91,7 @@ where
     {
         log::info!("Attempting to discover WebSub hubs for topic {}", topic);
 
-        let req = http::Request::get(&*topic)
-            .body(Default::default())
-            .unwrap();
+        let req = http::Request::get(&*topic).body(B::default()).unwrap();
         self.client
             .clone()
             .into_service()
@@ -210,7 +208,7 @@ where
                     Err(_) => {
                         return Response::builder()
                             .status(StatusCode::BAD_REQUEST)
-                            .body(Default::default())
+                            .body(Body::default())
                             .unwrap();
                     }
                 }
@@ -224,7 +222,7 @@ where
         } else {
             return Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(Default::default())
+                .body(Body::default())
                 .unwrap();
         };
 
@@ -244,7 +242,7 @@ where
         } else {
             return Response::builder()
                 .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
-                .body(Default::default())
+                .body(Body::default())
                 .unwrap();
         };
 
@@ -253,7 +251,7 @@ where
             v.as_bytes()
         } else {
             log::debug!("Callback {}: missing signature", id);
-            return Response::new(Default::default());
+            return Response::new(Body::default());
         };
 
         let pos = signature_header.iter().position(|&b| b == b'=');
@@ -264,7 +262,7 @@ where
             log::debug!("Callback {}: malformed signature", id);
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
-                .body(Default::default())
+                .body(Body::default())
                 .unwrap();
         };
 
@@ -280,7 +278,7 @@ where
                 log::debug!("Callback {}: unknown digest algorithm: {}", id, method);
                 return Response::builder()
                     .status(StatusCode::NOT_ACCEPTABLE)
-                    .body(Default::default())
+                    .body(Body::default())
                     .unwrap();
             }
         };
@@ -299,7 +297,7 @@ where
                 // a previously removed subscription.
                 return Response::builder()
                     .status(StatusCode::GONE)
-                    .body(Default::default())
+                    .body(Body::default())
                     .unwrap();
             };
             let mac = Hmac::<Sha1>::new_varkey(secret.as_bytes()).unwrap();
@@ -331,7 +329,7 @@ where
             .map(|_| ());
         tokio::spawn(verify_signature);
 
-        Response::new(Default::default())
+        Response::new(Body::default())
     }
 
     fn verify_intent(&self, id: i64, query: &str, conn: &SqliteConnection) -> Response<Body> {
@@ -404,7 +402,7 @@ where
             }
             _ => Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(Default::default())
+                .body(Body::default())
                 .unwrap(),
         }
     }

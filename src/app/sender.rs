@@ -158,7 +158,7 @@ where
         }
 
         if !core.manifest().skip_duplicate {
-            let task = self.retweet(tweet, core)?;
+            let task = self.retweet(&tweet, core)?;
             tokio::spawn(core.shutdown_handle().wrap_future(task));
             return Ok(());
         }
@@ -172,7 +172,7 @@ where
             .filter(tweets::text.eq(&*tweet.text))
             .select(max(tweets::id))
             .first::<Option<i64>>(&*conn)?;
-        let retweet = self.retweet(tweet, core)?;
+        let retweet = self.retweet(&tweet, core)?;
         if let Some(dup) = duplicate {
             // Check whether the duplicate Tweet still exists
             let task =
@@ -195,7 +195,7 @@ where
 
     fn retweet(
         &self,
-        tweet: twitter::Tweet,
+        tweet: &twitter::Tweet,
         core: &Core<S>,
     ) -> anyhow::Result<impl Future<Output = ()>> {
         let conn = core.conn()?;
@@ -204,7 +204,7 @@ where
 
         conn.transaction(|| {
             diesel::replace_into(tweets::table)
-                .values(&models::NewTweet::from(&tweet))
+                .values(&models::NewTweet::from(tweet))
                 .execute(&*conn)?;
 
             for outbox in core.router().route_tweet(&tweet) {

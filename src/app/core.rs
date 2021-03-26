@@ -99,7 +99,7 @@ impl<S> Core<S> {
 
         let mut client = self.client.clone().into_service();
         client
-            .ready_and()
+            .ready()
             .await
             .context("error while connecting to Twitter's Streaming API")?;
         let twitter = twitter_stream::Builder::new(stream_token)

@@ -26,7 +26,7 @@ where
 
     let req = http::Request::post(Uri::from_static(URI))
         .header(AUTHORIZATION, authorization)
-        .body(Default::default())
+        .body(B::default())
         .unwrap();
 
     let res = client
@@ -64,7 +64,7 @@ where
 
     let req = http::Request::post(Uri::from_static(URI))
         .header(AUTHORIZATION, authorization)
-        .body(Default::default())
+        .body(B::default())
         .unwrap();
 
     let res = client

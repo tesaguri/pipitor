@@ -674,8 +674,8 @@ mod tests {
         query: &hub::Verify<&'a str>,
     ) -> impl std::future::Future<Output = ()> + 'a {
         let challenge = match *query {
-            hub::Verify::Subscribe { challenge, .. } => challenge,
-            hub::Verify::Unsubscribe { challenge, .. } => challenge,
+            hub::Verify::Subscribe { challenge, .. }
+            | hub::Verify::Unsubscribe { challenge, .. } => challenge,
         };
         let query = serde_urlencoded::to_string(query).unwrap();
         let res = client.get(format!("{}?{}", callback, query).try_into().unwrap());
