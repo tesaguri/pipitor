@@ -60,7 +60,7 @@ tower-service = "0.3"
 toml = "0.5"
 twitter-stream = { version = "0.12", default-features = false, features = ["gzip"] }
 
-serde_dhall = { version = "0.9", optional = true }
+serde_dhall = { version = "0.10", optional = true }
 
 hyper-rustls = { version = "0.22", optional = true }
 
