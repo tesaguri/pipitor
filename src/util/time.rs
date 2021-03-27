@@ -11,7 +11,6 @@ cfg_if! {
         use std::task::{Context, Poll};
         use std::{env, thread};
 
-        use futures::ready;
         use futures::task::AtomicWaker;
         use pin_project::pin_project;
 
@@ -85,11 +84,10 @@ cfg_if! {
             #[track_caller]
             fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 let this = self.project();
-                if let Poll::Ready(x) = this.future.poll(cx) {
-                    return Poll::Ready(x);
+                if this.sleep.poll(cx).is_ready() {
+                    panic!("`Future` timed out");
                 }
-                ready!(this.sleep.poll(cx));
-                panic!("`Future` timed out");
+                this.future.poll(cx)
             }
         }
 
@@ -101,10 +99,10 @@ cfg_if! {
             let instant = Instant::now();
             let sys = SystemTime::now();
             let mocked = instant_now();
-            sys + if mocked > instant {
-                mocked - instant
+            if mocked > instant {
+                sys + (mocked - instant)
             } else {
-                instant - mocked
+                sys - (instant - mocked)
             }
         }
     } else {
@@ -146,6 +144,20 @@ mod tests {
 
     const EPSILON: Duration = Duration::from_millis(10);
 
+    macro_rules! assert_almost_eq {
+        ($lhs:expr, $rhs:expr) => {{
+            if diff_abs($lhs, $rhs) >= EPSILON {
+                panic!(
+                    r#"assertion failed: `(left \approx right)`
+    left: `{:?}`,
+   right: `{:?}`,
+ epsilon: `{:?}`"#,
+                    $lhs, $rhs, EPSILON
+                );
+            }
+        }};
+    }
+
     #[tokio::test]
     async fn advance() {
         let delta = Duration::from_secs(42);
@@ -155,10 +167,23 @@ mod tests {
         tokio::time::advance(delta).await;
         let end = system_time_now();
 
-        assert!(diff_abs(end.duration_since(start).unwrap(), delta) < EPSILON);
+        assert_almost_eq!(end.duration_since(start).unwrap(), delta);
     }
 
-    fn diff_abs<T: PartialOrd + Sub<Output = T>>(x: T, y: T) -> T {
+    #[tokio::test]
+    async fn backward() {
+        let delta = Duration::from_millis(420);
+
+        tokio::time::pause();
+        let start = system_time_now();
+        std::thread::sleep(delta);
+        let end = system_time_now();
+
+        let d = end.duration_since(start).unwrap_or_else(|e| e.duration());
+        assert_almost_eq!(d, Duration::default());
+    }
+
+    fn diff_abs<T: PartialOrd + Sub>(x: T, y: T) -> T::Output {
         if x > y {
             x - y
         } else {
