@@ -1,8 +1,8 @@
 [target.aarch64-unknown-linux-gnu]
-image = "tesaguri/pipitor:aarch64-unknown-linux-gnu"
+image = "ghcr.io/tesaguri/pipitor/cross:aarch64-unknown-linux-gnu"
 
 [target.armv7-unknown-linux-gnueabihf]
-image = "tesaguri/pipitor:armv7-unknown-linux-gnueabihf"
+image = "ghcr.io/tesaguri/pipitor/cross:armv7-unknown-linux-gnueabihf"
 
 [target.x86_64-unknown-freebsd]
-image = "tesaguri/pipitor:x86_64-unknown-freebsd"
+image = "ghcr.io/tesaguri/pipitor/cross:x86_64-unknown-freebsd"
