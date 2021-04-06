@@ -55,13 +55,17 @@ mod imp {
     }
 
     impl AsyncWrite for Stream {
-        fn poll_write(self: Pin<&mut Self>, _: &mut Context, _: &[u8]) -> Poll<io::Result<usize>> {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &[u8],
+        ) -> Poll<io::Result<usize>> {
             match *self {}
         }
-        fn poll_flush(self: Pin<&mut Self>, _: &mut Context) -> Poll<io::Result<()>> {
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
             match *self {}
         }
-        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context) -> Poll<io::Result<()>> {
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
             match *self {}
         }
     }
