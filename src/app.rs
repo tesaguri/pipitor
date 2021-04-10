@@ -16,7 +16,7 @@ use anyhow::Context as _;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
-use futures::{future, ready, Future, FutureExt, Stream, TryStream};
+use futures::{future, ready, Future, FutureExt, Stream, StreamExt, TryStream};
 use http_body::Body;
 use listenfd::ListenFd;
 use pin_project::pin_project;
@@ -42,7 +42,6 @@ where
 {
     #[pin]
     core: Core<Service<S>>,
-    #[pin]
     twitter_list: twitter::ListTimeline<Service<S>, B>,
     #[pin]
     twitter: Option<TwitterStream<S::ResponseBody>>,
@@ -199,8 +198,10 @@ where
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
-        let mut this = self.project();
-        while let Some(tweets) = ready!(this.twitter_list.as_mut().poll_next_backfill(cx)) {
+        let this = self.project();
+        this.twitter_list.shutdown();
+        // Exhaust the backfill.
+        while let Some(tweets) = ready!(this.twitter_list.poll_next_unpin(cx)) {
             this.sender.send_tweets(tweets, &this.core)?;
         }
         this.core.poll_shutdown(cx).map(|()| Ok(()))
@@ -476,9 +477,9 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
         trace_fn!(App::<S, B, I>::poll);
 
-        let mut this = self.as_mut().project();
+        let this = self.as_mut().project();
 
-        while let Poll::Ready(Some(tweets)) = this.twitter_list.as_mut().poll_next(cx)? {
+        while let Poll::Ready(Some(tweets)) = this.twitter_list.poll_next_unpin(cx) {
             this.sender.send_tweets(tweets, &this.core)?;
         }
 

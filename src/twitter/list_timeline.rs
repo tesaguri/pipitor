@@ -1,5 +1,6 @@
 mod interval;
 
+use std::error::Error;
 use std::future::{self, Future};
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
@@ -25,24 +26,13 @@ use self::interval::Interval;
 /// A stream that continuously yields Tweets from a list timeline.
 ///
 /// This optionally _backfill_s past Tweets since the specified Tweet ID.
-#[pin_project]
-pub struct ListTimeline<S, B>
-where
-    S: HttpService<B>,
-{
-    #[pin]
+pub struct ListTimeline<S, B> {
     inner: Option<Inner<S, B>>,
 }
 
-#[pin_project(project = InnerProj)]
-struct Inner<S, B>
-where
-    S: HttpService<B>,
-{
+struct Inner<S, B> {
+    sender: Option<Arc<RequestSender<S, B>>>,
     rx: mpsc::Receiver<Vec<Tweet>>,
-    sender: Arc<RequestSender<S, B>>,
-    #[pin]
-    backfill: Option<Backfill<S, B>>,
 }
 
 struct RequestSender<S, B> {
@@ -63,6 +53,7 @@ where
     S: HttpService<B>,
 {
     since_id: i64,
+    sender: Arc<RequestSender<S, B>>,
     #[pin]
     response: super::ResponseFuture<Vec<Tweet>, S, B>,
 }
@@ -72,7 +63,7 @@ where
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
     S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>> + Send + 'static,
 {
     pub fn new(
@@ -82,13 +73,6 @@ where
         token: Credentials<Box<str>>,
         http: S,
     ) -> Self {
-        let backfill = since_id.map(|since_id| {
-            let response = super::lists::Statuses::new(list.id)
-                .since_id(Some(since_id))
-                .send(&client, &token, http.clone());
-            Backfill { since_id, response }
-        });
-
         let manifest::TwitterList {
             id: list_id,
             interval,
@@ -108,6 +92,17 @@ where
             marker: PhantomData,
         });
 
+        if let Some(since_id) = since_id {
+            let response = super::lists::Statuses::new(list.id)
+                .since_id(Some(since_id))
+                .send(&sender.client, &sender.token, sender.http.clone());
+            tokio::spawn(Backfill {
+                since_id,
+                response,
+                sender: sender.clone(),
+            });
+        }
+
         // Periodically send API requests in the background.
         tokio::spawn(Interval::new(Arc::downgrade(&sender)).for_each(|sender| {
             sender.send();
@@ -115,9 +110,8 @@ where
         }));
 
         let inner = Inner {
-            sender,
+            sender: Some(sender),
             rx,
-            backfill,
         };
         ListTimeline { inner: Some(inner) }
     }
@@ -126,48 +120,35 @@ where
         ListTimeline { inner: None }
     }
 
-    pub fn poll_next_backfill(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Vec<Tweet>>> {
-        match self.project().inner.as_pin_mut() {
-            Some(inner) => inner.poll_next_backfill(cx),
-            None => Poll::Ready(None),
+    pub fn shutdown(&mut self) {
+        if let Some(ref mut inner) = self.inner {
+            // Drop the `Arc` to stop the `Interval` task.
+            // If a `Backfill` task is running, the `ListTimeline` will wait for it to complete.
+            inner.sender = None;
         }
     }
 }
 
-impl<S, B> Stream for ListTimeline<S, B>
-where
-    S: HttpService<B> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-    S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-    B: Default + From<Vec<u8>> + Send + 'static,
-{
-    type Item = anyhow::Result<Vec<Tweet>>;
+impl<S, B> Stream for ListTimeline<S, B> {
+    type Item = Vec<Tweet>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         trace_fn!(ListTimeline::<S, B>::poll_next);
 
-        let mut inner = match self.project().inner.as_pin_mut() {
+        let inner = match self.inner.as_mut() {
             Some(inner) => inner,
             None => return Poll::Ready(None),
         };
 
-        if let Poll::Ready(Some(tweets)) = inner.as_mut().poll_next_backfill(cx) {
-            return Poll::Ready(Some(Ok(tweets)));
-        }
+        let tweets = if let Some(tweets) = ready!(inner.rx.poll_next_unpin(cx)) {
+            tweets
+        } else {
+            // `None` should only be returned in a shutdown process.
+            debug_assert!(inner.sender.is_none());
+            return Poll::Ready(None);
+        };
 
-        let tweets = ready!(inner.as_mut().project().rx.poll_next_unpin(cx)).unwrap();
-
-        if let Some(t) = tweets.last() {
-            inner
-                .project()
-                .sender
-                .since_id
-                .fetch_max(t.id, Ordering::Relaxed);
-
+        if let Some(t) = tweets.first() {
             if log_enabled!(log::Level::Trace) {
                 let created_at = snowflake_to_system_time(t.id as u64);
                 match SystemTime::now().duration_since(created_at) {
@@ -177,60 +158,57 @@ where
             }
         }
 
-        Poll::Ready(Some(Ok(tweets)))
+        Poll::Ready(Some(tweets))
     }
 }
 
-impl<S, B> Inner<S, B>
+impl<S, B> Future for Backfill<S, B>
 where
-    S: HttpService<B> + Clone,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-    B: Default + From<Vec<u8>>,
+    S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Future: Send,
+    S::ResponseBody: Send,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+    B: Default + From<Vec<u8>> + Send + 'static,
 {
-    fn poll_next_backfill(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Vec<Tweet>>> {
-        let InnerProj {
-            sender,
-            backfill: mut backfill_opt,
-            ..
-        } = self.project();
+    type Output = ();
 
-        let BackfillProj {
-            since_id: backfill_since_id,
-            mut response,
-        } = if let Some(bf) = backfill_opt.as_mut().as_pin_mut() {
-            bf.project()
-        } else {
-            return Poll::Ready(None);
-        };
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let mut this = self.project();
 
-        let tweets = match ready!(response.as_mut().poll(cx)) {
+        let tweets = match ready!(this.response.as_mut().poll(cx)) {
             Ok(resp) => resp.data,
             Err(e) => {
                 warn!("error while backfilling the list: {:?}", e);
                 // Just discard the backfill.
-                backfill_opt.set(None);
-                return Poll::Ready(None);
+                return Poll::Ready(());
             }
         };
 
         if tweets.is_empty() {
             debug!("timeline backfilling completed");
-            backfill_opt.set(None);
-            return Poll::Ready(None);
+            return Poll::Ready(());
         }
 
-        sender
-            .since_id
-            .fetch_max(tweets.first().unwrap().id, Ordering::Relaxed);
+        this.sender.set_since_id(tweets.first().unwrap().id);
 
-        let max_id = tweets.last().map(|t| t.id - 1);
-        let res = super::lists::Statuses::new(sender.list_id)
-            .since_id(Some(*backfill_since_id))
-            .max_id(max_id)
-            .send(&sender.client, &sender.token, sender.http.clone());
-        response.set(res);
+        let res = super::lists::Statuses::new(this.sender.list_id)
+            .since_id(Some(*this.since_id))
+            .max_id(Some(tweets.last().unwrap().id - 1))
+            .send(
+                &this.sender.client,
+                &this.sender.token,
+                this.sender.http.clone(),
+            );
+        this.response.set(res);
 
-        Poll::Ready(Some(tweets))
+        if let Err(e) = this.sender.tx.clone().start_send(tweets) {
+            debug_assert!(e.is_disconnected());
+            return Poll::Ready(());
+        }
+
+        cx.waker().wake_by_ref();
+
+        Poll::Pending
     }
 }
 
@@ -239,13 +217,13 @@ where
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
     S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>> + Send + 'static,
 {
     fn send(self: Arc<Self>) {
         trace_fn!(RequestSender::<S, B>::send);
 
-        let since_id = self.since_id.load(Ordering::Relaxed);
+        let since_id = self.since_id.load(Ordering::Acquire);
         // Subtract `delay` from the "time part" and round down the non-time part of Snowflake ID.
         let since_id =
             (since_id != 0).then(|| ((since_id >> 22) - self.delay.as_millis() as i64) << 22);
@@ -259,9 +237,13 @@ where
             .map(move |result| {
                 let rate_limit = match result {
                     Ok(resp) => {
-                        if let Err(e) = self.tx.clone().start_send(resp.data) {
-                            debug_assert!(e.is_disconnected());
-                            return;
+                        if let Some(t) = resp.data.first() {
+                            let id = t.id;
+                            if let Err(e) = self.tx.clone().start_send(resp.data) {
+                                debug_assert!(e.is_disconnected());
+                                return;
+                            }
+                            self.set_since_id(id);
                         }
                         resp.rate_limit
                     }
@@ -286,6 +268,10 @@ where
             });
 
         tokio::spawn(task);
+    }
+
+    fn set_since_id(&self, since_id: i64) {
+        self.since_id.fetch_max(since_id, Ordering::AcqRel);
     }
 }
 
