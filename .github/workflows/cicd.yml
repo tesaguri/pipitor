@@ -149,8 +149,6 @@ jobs:
           use-tool-cache: true
       - run: echo "SQLITE3_LIB_DIR=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
         if: runner.os == 'Windows'
-      - run: echo "SQLITE3_LIB_DIR=/usr/local/x86_64-unknown-freebsd12/lib" >> $GITHUB_ENV
-        if: matrix.target == 'x86_64-unknown-freebsd'
       - name: Build
         uses: actions-rs/cargo@v1
         with:
