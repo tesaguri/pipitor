@@ -46,6 +46,7 @@ mod concat_body;
 mod first;
 mod serde_wrapper;
 
+use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::io;
@@ -224,14 +225,21 @@ where
     d.deserialize_str(Visitor::<T>(PhantomData))
 }
 
+const TWEPOCH: u128 = 1288834974657;
+
 pub fn snowflake_to_system_time(id: u64) -> SystemTime {
-    // timestamp_ms = (snowflake >> 22) + 1_288_834_974_657
+    // timestamp_ms = (snowflake >> 22) + TWEPOCH
     let snowflake_time_ms = id >> 22;
     let timestamp = Duration::new(
-        snowflake_time_ms / 1_000 + 1_288_834_974,
-        (snowflake_time_ms as u32 % 1_000 + 657) * 1_000 * 1_000,
+        snowflake_time_ms / 1_000 + (TWEPOCH / 1000) as u64,
+        ((snowflake_time_ms % 1_000) as u32 + (TWEPOCH % 1000) as u32) * 1_000 * 1_000,
     );
     UNIX_EPOCH + timestamp
+}
+
+pub fn system_time_to_snowflake(t: SystemTime) -> u64 {
+    let unix = t.duration_since(UNIX_EPOCH).unwrap();
+    u64::try_from((unix.as_millis() - TWEPOCH) << 22).unwrap()
 }
 
 cfg_if! {

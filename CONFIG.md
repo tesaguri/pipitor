@@ -30,7 +30,7 @@ secret = "Your application's API secret"
 [twitter.list] # optional
 id = 12345 # required if `[twitter.list]` exists
 interval = 1
-delay = 0
+delay = 1
 
 [[rule]]
 topics = [
@@ -134,8 +134,8 @@ Defaults to 1 second.
 
 #### `twitter.list.delay`
 
-_Optional_. `Duration` of time to subtract from `since_id` parameter of API
-requests.
+_Optional_. The maximum `Duration` of time to subtract from `since_id`
+parameter of API requests.
 
 When retrieving Tweets from a List, the bot sets the `since_id` parameter to the
 largest Tweet ID the bot has received until then, in order to reduce bandwidth
@@ -145,16 +145,17 @@ of which are duplicate).
 However, the Tweet IDs are not completely sorted in chronological order.
 Instead, they are _roughly sorted_, and a new Tweet with smaller ID than the
 above `since_id` may appear after the last request. To catch such Tweets,
-the bot subtracts a small amount of time from `since_id`. `twitter.list.delay`
-specifies that amount.
+the bot may subtract a small amount of time from `since_id` as follows:
+`since_id := min(since_id, now() - delay)`, where `now()` represents the current
+timestamp in the Snowflake ID space.
 
 More accurately, Tweet IDs are k-sorted: for every two Tweets posted within
 k seconds of each other, their IDs fall in the same k-second frame in the ID
-space. Twitter has said in [their blog] (over 10 years before this writing
-though) that they were aiming to keep the k below 1 second. So
-`twitter.list.delay` value of 1 second should be sufficient.
+space. Twitter has said in [their blog][announcing-snowflake] (over 10 years
+before this writing though) that they were aiming to keep the k below 1 second. So `twitter.list.delay` value of 1 second should be sufficient, provided that
+the local time is in sync with Twitter's server time.
 
-[their blog]: https://blog.twitter.com/engineering/en_us/a/2010/announcing-snowflake.html
+[announcing-snowflake]: https://blog.twitter.com/engineering/en_us/a/2010/announcing-snowflake.html
 
 Defaults to 1 second.
 

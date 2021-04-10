@@ -1,5 +1,7 @@
 mod interval;
 
+use std::cmp;
+use std::convert::TryFrom;
 use std::error::Error;
 use std::future::{self, Future};
 use std::marker::PhantomData;
@@ -17,7 +19,8 @@ use oauth_credentials::Credentials;
 use pin_project::pin_project;
 
 use crate::manifest;
-use crate::util::{snowflake_to_system_time, HttpService};
+use crate::util::time::system_time_now;
+use crate::util::{snowflake_to_system_time, system_time_to_snowflake, HttpService};
 
 use super::{Request, Tweet};
 
@@ -224,9 +227,10 @@ where
         trace_fn!(RequestSender::<S, B>::send);
 
         let since_id = self.since_id.load(Ordering::Acquire);
-        // Subtract `delay` from the "time part" and round down the non-time part of Snowflake ID.
-        let since_id =
-            (since_id != 0).then(|| ((since_id >> 22) - self.delay.as_millis() as i64) << 22);
+        let since_id = (since_id != 0).then(|| {
+            let min = system_time_to_snowflake(system_time_now() - self.delay);
+            cmp::min(since_id, i64::try_from(min).unwrap())
+        });
         let count = if since_id.is_some() { 200 } else { 1 };
 
         let task = super::lists::Statuses::new(self.list_id)
