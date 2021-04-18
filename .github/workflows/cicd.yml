@@ -202,6 +202,18 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: actions/download-artifact@v2
+      - name: Sign release assets
+        working-directory: artifact
+        run: |
+          set -o errexit -o xtrace
+          gpg --batch --import <<< "$PRIVATE_KEY"
+          for f in *; do
+            gpg --batch --local-user C90F234F43B5075A0D96C6D5986E104E7F079F61 --armor --detach-sign "$f"
+          done
+          gpg --batch --yes --delete-secret-keys C90F234F43B5075A0D96C6D5986E104E7F079F61
+        shell: bash
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
       - name: Get the tag info
         id: tag
         run: |
