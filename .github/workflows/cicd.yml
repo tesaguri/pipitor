@@ -106,7 +106,6 @@ jobs:
       || startsWith(github.event.ref, 'refs/tags/v8')
       || startsWith(github.event.ref, 'refs/tags/v9')
       || github.event.ref == 'refs/heads/release-test'
-    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -146,14 +145,25 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
           profile: minimal
+      - uses: Swatinem/rust-cache@v1
+        if: github.event.ref == 'refs/heads/release-test'
       - name: Install `cross`
         if: matrix.use_cross
         uses: actions-rs/install@v0.1
         with:
           crate: cross
           use-tool-cache: true
-      - run: echo "SQLITE3_LIB_DIR=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
-        if: runner.os == 'Windows'
+      - if: runner.os == 'Windows'
+        run: echo "SQLITE3_LIB_DIR=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
+      - name: Set opt-level
+        if: github.event.ref == 'refs/heads/release-test'
+        run: |
+          cat <<ENV >> "$GITHUB_ENV"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+          CARGO_PROFILE_RELEASE_LTO=false
+          CARGO_PROFILE_RELEASE_OPT_LEVEL=0
+          ENV
+        shell: bash
       - name: Build
         uses: actions-rs/cargo@v1
         with:
@@ -167,7 +177,7 @@ jobs:
         id: archive
         run: |
           set -o errexit
-          tag="$(echo '${{ github.ref }}' | sed -E 's/^refs\/[^\/]+\///')"
+          tag="${GITHUB_REF##*/}"
           name="pipitor-$tag-${{ matrix.target }}"
           if [ '${{ runner.os }}' = Windows ]; then
             asset_name="$name.zip"
@@ -187,31 +197,34 @@ jobs:
 
   release:
     name: Create GitHub release
-    needs: build
+    needs: [test, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions/download-artifact@v2
-      - name: Create release and upload assets
-        # Reference: <https://github.com/actions/upload-release-asset/issues/28#issuecomment-617208601>
+      - name: Get the tag info
+        id: tag
         run: |
-          set -o errexit -o xtrace
-          args=()
-          tag_name="${GITHUB_REF##*/}"
+          set -o errexit
           if [[ "$GITHUB_REF" == 'refs/tags/'* ]]; then
-            # Fetch the tagging message
-            git tag -d "$tag_name"
-            git fetch --no-tags origin "$tag_name:$GITHUB_REF"
-            message="$(git tag -l --format='%(contents)' "$tag_name" | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')"
+            tag="${GITHUB_REF#refs/tags/}"
+            git tag -d "$tag"
+            git fetch --no-tags origin "$tag:$GITHUB_REF"
+            echo "::set-output name=subject::$(git tag --list --format='%(contents:subject)' "$tag")"
+            git tag -l --format='%(contents:body)' "$tag" |
+              sed -n '/^-----BEGIN PGP SIGNATURE-----$/q; p' \
+              > body.txt
           else
-            message='Test release'
-            args+=('--draft')
+            echo "::set-output name=subject::Test release"
+            touch body.txt
           fi
-          for asset in *.{gz,zip}; do
-            args+=('--attach' "$asset")
-          done
-          hub release create --message "$message" "${args[@]}" "$tag_name"
         shell: bash
-        working-directory: artifact
+      - name: Create release
+        uses: tesaguri/action-gh-release@draft-wo-tag
+        with:
+          body_path: body.txt
+          name: ${{ steps.tag.outputs.subject }}
+          draft: ${{ github.event.ref == 'refs/heads/release-test' }}
+          files: artifact/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
