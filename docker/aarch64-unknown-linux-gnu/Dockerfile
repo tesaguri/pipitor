@@ -1,4 +1,4 @@
-FROM rustembedded/cross:aarch64-unknown-linux-gnu
+FROM ghcr.io/tesaguri/cross:aarch64-unknown-linux-gnu
 
 RUN dpkg --add-architecture arm64 && \
     apt-get update && \

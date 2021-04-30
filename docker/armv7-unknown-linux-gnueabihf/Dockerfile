@@ -1,4 +1,4 @@
-FROM rustembedded/cross:armv7-unknown-linux-gnueabihf
+FROM ghcr.io/tesaguri/cross:armv7-unknown-linux-gnueabihf
 
 RUN dpkg --add-architecture armhf && \
     apt-get update && \
