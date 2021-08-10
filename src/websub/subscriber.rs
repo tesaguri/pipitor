@@ -241,10 +241,7 @@ mod tests {
 
     #[tokio::test]
     async fn renew_multi_subs() {
-        // XXX: Disabling Tokio's time-mocking utility until tokio-rs/tokio#2090 is fixed.
-        // https://github.com/tokio-rs/tokio/issues/2090
-
-        // tokio::time::pause();
+        tokio::time::pause();
 
         let begin = i64::try_from(util::now_unix().as_secs()).unwrap();
 
@@ -286,8 +283,7 @@ mod tests {
 
         // Renewal of first subscription.
 
-        // tokio::time::advance(Duration::from_secs(2)).await;
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::advance(Duration::from_secs(2)).await;
 
         // Subscriber should re-subscribe to the topic.
         let form = accept_request(&mut listener, &hub, "/hub").timeout().await;
@@ -347,8 +343,7 @@ mod tests {
 
         // Renewal of second subscription.
 
-        // tokio::time::advance(MARGIN).await;
-        tokio::time::sleep(MARGIN).await;
+        tokio::time::advance(MARGIN).await;
 
         let form = accept_request(&mut listener, &hub, "/hub").timeout().await;
         let callback2 = match form {
@@ -405,7 +400,7 @@ mod tests {
     /// Go through the entire protocol flow at once.
     #[tokio::test]
     async fn entire_flow() {
-        // tokio::time::pause();
+        tokio::time::pause();
 
         let (subscriber, client, listener) = prepare_subscriber();
         let mut subscriber = tokio_test::task::spawn(subscriber);
@@ -418,8 +413,7 @@ mod tests {
 
         let task = tokio::spawn(subscriber.service().discover(TOPIC.to_owned()));
 
-        // tokio::time::advance(DELAY).await;
-        tokio::time::sleep(DELAY).await;
+        tokio::time::advance(DELAY).await;
         let sock = listener.next().timeout().await.unwrap().unwrap();
         hub.serve_connection(
             sock,
@@ -430,8 +424,7 @@ mod tests {
                     .header(CONTENT_TYPE, APPLICATION_ATOM_XML)
                     .body(Body::from(FEED))
                     .unwrap();
-                // tokio::time::advance(DELAY).await;
-                tokio::time::sleep(DELAY).await;
+                tokio::time::advance(DELAY).await;
                 Ok::<_, Infallible>(res)
             }),
         )
@@ -452,8 +445,7 @@ mod tests {
             topic,
             &subscriber.service().pool.get().unwrap(),
         );
-        // tokio::time::advance(DELAY).await;
-        tokio::time::sleep(DELAY).await;
+        tokio::time::advance(DELAY).await;
         let accept_task = accept_request(&mut listener, &hub, "/hub");
         let (result, form) = future::join(req_task, accept_task).timeout().await;
         result.unwrap();
@@ -505,11 +497,9 @@ mod tests {
 
         // Subscription renewal.
 
-        // tokio::time::advance(MARGIN).await;
-        tokio::time::sleep(MARGIN).await;
+        tokio::time::advance(MARGIN).await;
 
-        // tokio::time::advance(DELAY).await;
-        tokio::time::sleep(DELAY).await;
+        tokio::time::advance(DELAY).await;
         let task = accept_request(&mut listener, &hub, "/hub").timeout();
         let form = util::first(task, subscriber.next()).await.unwrap_left();
         let (new_callback, topic) = match form {
@@ -541,8 +531,7 @@ mod tests {
 
         // `subscriber` should unsubscribe from the old subscription.
 
-        // tokio::time::advance(DELAY).await;
-        tokio::time::sleep(DELAY).await;
+        tokio::time::advance(DELAY).await;
         let task = accept_request(&mut listener, &hub, "/hub").timeout();
         let form = util::first(task, subscriber.next()).await.unwrap_left();
         let (unsubscribed, topic) = match form {
@@ -657,8 +646,7 @@ mod tests {
                         .status(StatusCode::ACCEPTED)
                         .body(Body::empty())
                         .unwrap();
-                    // tokio::time::advance(DELAY).await;
-                    tokio::time::sleep(DELAY).await;
+                    tokio::time::advance(DELAY).await;
                     Ok::<_, Infallible>(res)
                 }
             }),
