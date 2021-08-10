@@ -33,15 +33,14 @@ jobs:
             toolchain: stable
             features: []
             components: clippy,rustfmt
+          - os: windows-latest
+            features: [winsqlite3]
     continue-on-error: ${{ matrix.toolchain == 'nightly' }}
     steps:
       - uses: actions/checkout@v2
-      - name: Install extern libraries (Linux)
+      - name: Install `libsqlite3-dev`
         if: runner.os == 'Linux'
         run: sudo apt-get install libsqlite3-dev
-      - name: Install extern libraries (Windows)
-        if: runner.os == 'Windows'
-        run: vcpkg install sqlite3:x64-windows
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -129,6 +128,7 @@ jobs:
             os: macos-latest
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            features: [winsqlite3]
           - target: x86_64-unknown-freebsd
             use_cross: true
     steps:
@@ -153,8 +153,6 @@ jobs:
         with:
           crate: cross
           use-tool-cache: true
-      - if: runner.os == 'Windows'
-        run: echo "SQLITE3_LIB_DIR=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
       - name: Set opt-level
         if: github.event.ref == 'refs/heads/release-test'
         run: |
@@ -168,7 +166,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --verbose --bin pipitor --release --target '${{ matrix.target }}'
+          args: --verbose --bin pipitor --release --features='${{ join(matrix.features) }}' --target '${{ matrix.target }}'
           use-cross: ${{ matrix.use_cross }}
         env:
           # Work around <https://github.com/actions/virtual-environments/issues/2557>.
