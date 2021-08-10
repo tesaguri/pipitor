@@ -6,7 +6,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
+use bytes::Bytes;
 use futures::future::{Future, FutureExt};
+use http_body::Full;
 use hyper::client::{connect::Connect, Client};
 use pipitor::{private::util, Manifest};
 
@@ -81,7 +83,7 @@ impl<P: AsRef<Path>> Drop for RmGuard<P> {
     }
 }
 
-pub fn client() -> Client<impl Connect + Clone + Send + Sync> {
+pub fn client() -> Client<impl Connect + Clone + Send + Sync, Full<Bytes>> {
     Client::builder().build(https_connector())
 }
 

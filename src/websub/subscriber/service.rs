@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::task::{Context, Poll};
 
 use auto_enums::auto_enum;
+use bytes::Bytes;
 use diesel::dsl::*;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
@@ -15,7 +16,7 @@ use hmac::digest::FixedOutput;
 use hmac::{Hmac, Mac, NewMac};
 use http::header::{HeaderName, CONTENT_TYPE};
 use http::{Request, Response, StatusCode, Uri};
-use hyper::Body;
+use http_body::{Body, Full};
 use sha1::Sha1;
 use tower::ServiceExt;
 
@@ -55,7 +56,7 @@ where
 
     pub fn discover_and_subscribe(&self, topic: String) -> impl Future<Output = anyhow::Result<()>>
     where
-        <S::ResponseBody as http_body::Body>::Error: Error + Send + Sync + 'static,
+        <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
         B: Default,
     {
         let callback = self.callback.clone();
@@ -86,7 +87,7 @@ where
         topic: String,
     ) -> impl Future<Output = anyhow::Result<(String, Option<impl Iterator<Item = String>>)>>
     where
-        <S::ResponseBody as http_body::Body>::Error: Error + Send + Sync + 'static,
+        <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
         B: Default,
     {
         log::info!("Attempting to discover WebSub hubs for topic {}", topic);
@@ -200,7 +201,7 @@ where
         hub::unsubscribe(&self.callback, id, hub, topic, self.client.clone(), conn)
     }
 
-    fn call(&self, req: Request<Body>) -> Response<Body> {
+    fn call(&self, req: Request<hyper::Body>) -> Response<Full<Bytes>> {
         macro_rules! validate {
             ($input:expr) => {
                 match $input {
@@ -208,7 +209,7 @@ where
                     Err(_) => {
                         return Response::builder()
                             .status(StatusCode::BAD_REQUEST)
-                            .body(Body::default())
+                            .body(Full::default())
                             .unwrap();
                     }
                 }
@@ -222,7 +223,7 @@ where
         } else {
             return Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(Body::default())
+                .body(Full::default())
                 .unwrap();
         };
 
@@ -242,7 +243,7 @@ where
         } else {
             return Response::builder()
                 .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
-                .body(Body::default())
+                .body(Full::default())
                 .unwrap();
         };
 
@@ -251,7 +252,7 @@ where
             v.as_bytes()
         } else {
             log::debug!("Callback {}: missing signature", id);
-            return Response::new(Body::default());
+            return Response::new(Full::default());
         };
 
         let pos = signature_header.iter().position(|&b| b == b'=');
@@ -262,7 +263,7 @@ where
             log::debug!("Callback {}: malformed signature", id);
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
-                .body(Body::default())
+                .body(Full::default())
                 .unwrap();
         };
 
@@ -278,7 +279,7 @@ where
                 log::debug!("Callback {}: unknown digest algorithm: {}", id, method);
                 return Response::builder()
                     .status(StatusCode::NOT_ACCEPTABLE)
-                    .body(Body::default())
+                    .body(Full::default())
                     .unwrap();
             }
         };
@@ -297,7 +298,7 @@ where
                 // a previously removed subscription.
                 return Response::builder()
                     .status(StatusCode::GONE)
-                    .body(Body::default())
+                    .body(Full::default())
                     .unwrap();
             };
             let mac = Hmac::<Sha1>::new_varkey(secret.as_bytes()).unwrap();
@@ -329,10 +330,15 @@ where
             .map(|_| ());
         tokio::spawn(verify_signature);
 
-        Response::new(Body::default())
+        Response::new(Full::default())
     }
 
-    fn verify_intent(&self, id: i64, query: &str, conn: &SqliteConnection) -> Response<Body> {
+    fn verify_intent(
+        &self,
+        id: i64,
+        query: &str,
+        conn: &SqliteConnection,
+    ) -> Response<Full<Bytes>> {
         let row = |topic| {
             websub_subscriptions::table
                 .filter(websub_subscriptions::id.eq(id))
@@ -402,7 +408,7 @@ where
             }
             _ => Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(Body::default())
+                .body(Full::default())
                 .unwrap(),
         }
     }
@@ -420,14 +426,14 @@ impl<S, B> AsRef<scheduler::Handle> for Service<S, B> {
     }
 }
 
-impl<S, B> tower_service::Service<Request<Body>> for &Service<S, B>
+impl<S, B> tower_service::Service<Request<hyper::Body>> for &Service<S, B>
 where
     S: HttpService<B> + Clone + Send + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
     B: From<Vec<u8>> + Send + 'static,
 {
-    type Response = Response<Body>;
+    type Response = Response<Full<Bytes>>;
     type Error = Never;
     type Future = future::Ready<Result<Self::Response, Self::Error>>;
 
@@ -435,7 +441,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
+    fn call(&mut self, req: Request<hyper::Body>) -> Self::Future {
         log::trace!("Service::call; req.uri()={:?}", req.uri());
         future::ready(Ok((*self).call(req)))
     }

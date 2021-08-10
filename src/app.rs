@@ -51,8 +51,11 @@ where
 }
 
 #[cfg(feature = "native-tls")]
-impl<I> App<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>, hyper::Body, I>
+impl<B, I> App<hyper::Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>, B>, B, I>
 where
+    B: Body + Default + From<Vec<u8>> + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn Error + Send + Sync>>,
     I: TryStream + socket::Bind<socket::Addr>,
     I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     <I as TryStream>::Error: Error + Send + Sync + 'static,

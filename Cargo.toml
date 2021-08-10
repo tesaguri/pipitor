@@ -33,7 +33,7 @@ futures = { version = "0.3", default-features = false, features = ["async-await"
 hex = "0.4"
 hmac = "0.10"
 http = "0.2.2"
-http-body = "0.4"
+http-body = "0.4.2"
 http-serde = "1"
 hyper = { version = "0.14", features = ["client", "http1", "http2", "server", "stream"] }
 json = { version = "1", package = "serde_json" }

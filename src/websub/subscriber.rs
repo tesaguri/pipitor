@@ -192,6 +192,7 @@ mod tests {
     use std::str;
     use std::time::Duration;
 
+    use bytes::Bytes;
     use diesel::connection::SimpleConnection;
     use diesel::r2d2::ConnectionManager;
     use futures::channel::oneshot;
@@ -200,8 +201,9 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use http::Uri;
     use http::{Method, Request, Response, StatusCode};
+    use http_body::Full;
     use hyper::server::conn::Http;
-    use hyper::{service, Body, Client};
+    use hyper::{service, Client};
     use sha1::Sha1;
 
     use crate::util::connection::{Connector, Listener};
@@ -422,7 +424,7 @@ mod tests {
                 assert_eq!(req.uri().path_and_query().unwrap(), "/feed.xml");
                 let res = Response::builder()
                     .header(CONTENT_TYPE, APPLICATION_ATOM_XML)
-                    .body(Body::from(FEED))
+                    .body(Full::new(Bytes::from_static(FEED.as_bytes())))
                     .unwrap();
                 tokio::time::advance(DELAY).await;
                 Ok::<_, Infallible>(res)
@@ -483,7 +485,7 @@ mod tests {
         let req = Request::post(&callback)
             .header(CONTENT_TYPE, APPLICATION_ATOM_XML)
             .header(HUB_SIGNATURE, format!("sha1={}", hex::encode(&*signature)))
-            .body(Body::from(FEED))
+            .body(Full::new(Bytes::from_static(FEED.as_bytes())))
             .unwrap();
         let task = client.request(req);
         let (res, update) = future::join(task, subscriber.next()).timeout().await;
@@ -577,8 +579,8 @@ mod tests {
     }
 
     fn prepare_subscriber() -> (
-        Subscriber<Client<Connector>, Body, Listener>,
-        Client<Connector>,
+        Subscriber<Client<Connector, Full<Bytes>>, Full<Bytes>, Listener>,
+        Client<Connector, Full<Bytes>>,
         Listener,
     ) {
         let pool = util::r2d2::pool_with_builder(
@@ -593,8 +595,8 @@ mod tests {
     fn prepare_subscriber_with_pool(
         pool: Pool<ConnectionManager<SqliteConnection>>,
     ) -> (
-        Subscriber<Client<Connector>, Body, Listener>,
-        Client<Connector>,
+        Subscriber<Client<Connector, Full<Bytes>>, Full<Bytes>, Listener>,
+        Client<Connector, Full<Bytes>>,
         Listener,
     ) {
         let (hub_conn, sub_listener) = util::connection();
@@ -603,11 +605,11 @@ mod tests {
             // https://github.com/hyperium/hyper/issues/2312#issuecomment-722125137
             .pool_idle_timeout(Duration::from_secs(0))
             .pool_max_idle_per_host(0)
-            .build::<_, Body>(sub_conn);
+            .build::<_, Full<Bytes>>(sub_conn);
         let hub_client = Client::builder()
             .pool_idle_timeout(Duration::from_secs(0))
             .pool_max_idle_per_host(0)
-            .build::<_, Body>(hub_conn);
+            .build::<_, Full<Bytes>>(hub_conn);
 
         let manifest = manifest::WebSub {
             callback: Uri::from_static("http://example.com/"),
@@ -644,7 +646,7 @@ mod tests {
 
                     let res = Response::builder()
                         .status(StatusCode::ACCEPTED)
-                        .body(Body::empty())
+                        .body(http_body::Empty::<Bytes>::new())
                         .unwrap();
                     tokio::time::advance(DELAY).await;
                     Ok::<_, Infallible>(res)
@@ -657,7 +659,7 @@ mod tests {
     }
 
     fn verify_intent<'a>(
-        client: &Client<Connector>,
+        client: &Client<Connector, Full<Bytes>>,
         callback: &Uri,
         query: &hub::Verify<&'a str>,
     ) -> impl std::future::Future<Output = ()> + 'a {
