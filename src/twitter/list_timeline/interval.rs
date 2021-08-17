@@ -128,10 +128,11 @@ mod tests {
         task.enter(|cx, interval| assert!(interval.poll_next(cx).is_pending()));
         assert!(!task.is_woken());
 
-        // Advance the time a little because `Delay` does not yield when `now == deadline` exactly.
-        tokio::time::advance(Duration::from_nanos(1)).await;
+        // Advance the for 1 ms (the precision of `Sleep`) because
+        // `tokio::time::sleep_until(Instant::now())` does not complete immediately.
+        tokio::time::advance(Duration::from_millis(1)).await;
 
-        // `interval` created by `Interval::new` should yield immediately (+ 1 nsec).
+        // `interval` created by `Interval::new` should yield almost immediately (+ 1 ms).
         assert!(task.is_woken());
         task.enter(|cx, mut interval| {
             assert!(interval.as_mut().poll_next(cx).is_ready());
@@ -156,13 +157,12 @@ mod tests {
             assert!(interval.poll_next(cx).is_pending());
         });
 
-        // FIXME: `interval` should yield only once here, but currently it yields twice.
-        // tokio::time::advance(2 * PERIOD).await;
-        // assert!(task.is_woken());
-        // task.enter(|cx, mut interval| {
-        //     assert!(interval.as_mut().poll_next(cx).is_ready());
-        //     assert!(interval.poll_next(cx).is_pending());
-        // });
+        tokio::time::advance(2 * PERIOD).await;
+        assert!(task.is_woken());
+        task.enter(|cx, mut interval| {
+            assert!(interval.as_mut().poll_next(cx).is_ready());
+            assert!(interval.poll_next(cx).is_pending());
+        });
     }
 
     #[tokio::test]
