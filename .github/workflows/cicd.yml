@@ -33,8 +33,6 @@ jobs:
             toolchain: stable
             features: []
             components: clippy,rustfmt
-          - os: windows-latest
-            features: [winsqlite3]
     continue-on-error: ${{ matrix.toolchain == 'nightly' }}
     steps:
       - uses: actions/checkout@v2
@@ -55,14 +53,12 @@ jobs:
           command: fmt
           args: -- --check
       - uses: Swatinem/rust-cache@v1
-      - run: echo "SQLITE3_LIB_DIR=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
-        if: runner.os == 'Windows'
       - name: Clippy library
         if: contains(matrix.components, 'clippy')
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --lib --no-default-features --features=${{ join(matrix.features) }} -- --deny rust-2018-idioms --deny warnings
+          args: --lib --no-default-features --features=winsqlite3,${{ join(matrix.features) }} -- --deny rust-2018-idioms --deny warnings
       - name: Clippy all
         # XXX: GitHub Actions seem to have no ability to handle array literals in expressions
         # like `matrix.features != []`.
@@ -70,23 +66,23 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --no-default-features --features=${{ join(matrix.features) }} -- --deny rust-2018-idioms --deny warnings
+          args: --no-default-features --features=winsqlite3,${{ join(matrix.features) }} -- --deny rust-2018-idioms --deny warnings
       - name: Build library
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --lib --verbose --no-default-features --features=${{ join(matrix.features) }}
+          args: --lib --verbose --no-default-features --features=winsqlite3,${{ join(matrix.features) }}
       - name: Build all
         if: join(matrix.features) != ''
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --verbose --no-default-features --features=${{ join(matrix.features) }}
+          args: --verbose --no-default-features --features=winsqlite3,${{ join(matrix.features) }}
       - name: Test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --lib --no-default-features --features=${{ join(matrix.features) }}
+          args: --lib --no-default-features --features=winsqlite3,${{ join(matrix.features) }}
 
   build:
     name: Build release artifacts
