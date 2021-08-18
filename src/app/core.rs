@@ -155,7 +155,7 @@ impl<S> Core<S> {
             .manifest()
             .twitter_outboxes()
             .chain(Some(config.user))
-            .filter(|user| !self.twitter_tokens.contains_key(&user))
+            .filter(|user| !self.twitter_tokens.contains_key(user))
             // Make the values unique so that the later `_.len() != _.len()` comparison makes sense.
             .collect::<HashSet<_>>();
 

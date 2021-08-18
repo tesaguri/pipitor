@@ -332,7 +332,7 @@ impl Filter {
                     .as_ref()
                     .into_iter()
                     .chain(entry.summary.as_ref())
-                    .any(|c| t.is_match(&c))
+                    .any(|c| t.is_match(c))
             })
     }
 

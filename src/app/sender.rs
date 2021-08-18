@@ -84,7 +84,7 @@ where
         let shared = Arc::new((Box::<str>::from(topic), entry));
         let entry = &shared.1;
         let mut conn = Some(conn);
-        for outbox in core.router().route_entry(topic, &entry) {
+        for outbox in core.router().route_entry(topic, entry) {
             debug!("sending an entry to outbox {:?}: {:?}", outbox, entry);
 
             match *outbox {
@@ -207,7 +207,7 @@ where
                 .values(&models::NewTweet::from(tweet))
                 .execute(&*conn)?;
 
-            for outbox in core.router().route_tweet(&tweet) {
+            for outbox in core.router().route_tweet(tweet) {
                 debug!("sending a Tweet to outbox {:?}: {:?}", outbox, tweet);
 
                 match *outbox {
