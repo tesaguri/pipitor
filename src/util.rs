@@ -88,15 +88,15 @@ pub enum Never {}
 
 macro_rules! trace_fn {
     (@heading $path:path) => {
-        concat!(file!(), ':', line!(), ':', column!(), ' ', stringify!($path));
+        concat!(file!(), ':', line!(), ':', column!(), ' ', stringify!($path))
     };
     ($path:path) => {{
         // Ensure that at least the symbol `$path` exists.
-        #[allow(path_statements)] { $path; }
+        let _ = &$path;
         trace!(trace_fn!(@heading $path));
     }};
     ($path:path, $dbg1:expr $(, $dbg:expr)*) => {{
-        #[allow(path_statements)] { $path; }
+        let _ = &$path;
         trace!(
             concat!(
                 trace_fn!(@heading $path), "; ",
