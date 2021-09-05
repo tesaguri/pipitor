@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::future::{self, Future};
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -31,7 +32,7 @@ where
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync,
     B: Default + From<Vec<u8>> + Send + 'static,
 {
     pub fn new() -> Self {
@@ -261,9 +262,11 @@ where
 
 impl<S, B> Default for Sender<S, B>
 where
-    S: HttpService<B> + Clone,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
-    B: Default + From<Vec<u8>>,
+    S: HttpService<B> + Clone + Send + Sync + 'static,
+    S::Future: Send,
+    S::ResponseBody: Send,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync,
+    B: Default + From<Vec<u8>> + Send + 'static,
 {
     fn default() -> Self {
         Sender {

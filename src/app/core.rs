@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::task::{Context, Poll};
 
 use anyhow::Context as _;
@@ -37,7 +38,7 @@ impl<S> Core<S> {
     pub fn new<B>(manifest: Manifest, client: S) -> anyhow::Result<Self>
     where
         S: HttpService<B> + Clone,
-        <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+        <S::ResponseBody as Body>::Error: Debug,
     {
         trace_fn!(Core::<S>::new);
 
@@ -73,7 +74,6 @@ impl<S> Core<S> {
     pub async fn init_twitter<B>(&self) -> anyhow::Result<Option<TwitterStream<S::ResponseBody>>>
     where
         S: HttpService<B> + Clone,
-        <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
         B: Default + From<Vec<u8>>,
     {
         trace_fn!(Core::<S>::init_twitter);
@@ -115,7 +115,7 @@ impl<S> Core<S> {
         S: HttpService<B> + Clone + Send + Sync + 'static,
         S::Future: Send + 'static,
         S::ResponseBody: Send,
-        <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
+        <S::ResponseBody as Body>::Error: Debug,
         B: Default + From<Vec<u8>> + Send + 'static,
     {
         let (user, client, list) = match self.manifest.twitter {

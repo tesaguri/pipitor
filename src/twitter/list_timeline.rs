@@ -2,7 +2,7 @@ mod interval;
 
 use std::cmp;
 use std::convert::TryFrom;
-use std::error::Error;
+use std::fmt::Debug;
 use std::future::{self, Future};
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
@@ -66,7 +66,7 @@ where
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
     S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+    <S::ResponseBody as Body>::Error: Debug,
     B: Default + From<Vec<u8>> + Send + 'static,
 {
     pub fn new(
@@ -170,7 +170,7 @@ where
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+    <S::ResponseBody as Body>::Error: Debug,
     B: Default + From<Vec<u8>> + Send + 'static,
 {
     type Output = ();
@@ -220,7 +220,7 @@ where
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
     S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+    <S::ResponseBody as Body>::Error: Debug,
     B: Default + From<Vec<u8>> + Send + 'static,
 {
     fn send(self: Arc<Self>) {

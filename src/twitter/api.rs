@@ -108,11 +108,7 @@ pub struct RateLimit {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error<SE, BE>
-where
-    SE: std::error::Error + 'static,
-    BE: std::error::Error + 'static,
-{
+pub enum Error<SE, BE> {
     #[error("Failed to deserialize the response body.")]
     Deserializing(#[source] json::Error),
     #[error("HTTP error")]
@@ -191,7 +187,6 @@ where
 impl<T: de::DeserializeOwned, S, B> Future for ResponseFuture<T, S, B>
 where
     S: HttpService<B>,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
 {
     #[allow(clippy::type_complexity)]
     type Output = Result<Response<T>, Error<S::Error, <S::ResponseBody as Body>::Error>>;
@@ -288,8 +283,6 @@ fn make_response<T, F, SE, BE>(
 ) -> Result<Response<T>, Error<SE, BE>>
 where
     F: FnOnce(&[u8]) -> Result<T, Error<SE, BE>>,
-    SE: std::error::Error + Send + Sync,
-    BE: std::error::Error + Send + Sync,
 {
     if let StatusCode::OK = status {
         parse(body).map(|data| Response { data, rate_limit })

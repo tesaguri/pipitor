@@ -193,7 +193,7 @@ where
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync,
     B: Default + From<Vec<u8>> + Send + 'static,
 {
     pub fn shutdown(mut self: Pin<&mut Self>) -> impl Future<Output = anyhow::Result<()>> + '_ {
@@ -469,7 +469,7 @@ where
     S: HttpService<B> + Clone + Send + Sync + 'static,
     S::Future: Send,
     S::ResponseBody: Send,
-    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync,
     B: Default + From<Vec<u8>> + Send + 'static,
     I: TryStream,
     I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,

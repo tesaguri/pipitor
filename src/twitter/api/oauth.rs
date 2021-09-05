@@ -15,7 +15,6 @@ pub async fn request_token<S, B>(
 ) -> Result<Response<Credentials<Box<str>>>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
     S: HttpService<B>,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>>,
 {
     const URI: &str = "https://api.twitter.com/oauth/request_token";
@@ -52,7 +51,6 @@ pub async fn access_token<'a, S, B>(
 ) -> Result<Response<AccessToken>, Error<S::Error, <S::ResponseBody as Body>::Error>>
 where
     S: HttpService<B>,
-    <S::ResponseBody as Body>::Error: std::error::Error + Send + Sync + 'static,
     B: Default + From<Vec<u8>>,
 {
     const URI: &str = "https://api.twitter.com/oauth/access_token";

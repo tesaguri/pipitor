@@ -56,7 +56,7 @@ where
 
     pub fn discover_and_subscribe(&self, topic: String) -> impl Future<Output = anyhow::Result<()>>
     where
-        <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+        <S::ResponseBody as Body>::Error: Error + Send + Sync,
         B: Default,
     {
         let callback = self.callback.clone();
@@ -87,7 +87,7 @@ where
         topic: String,
     ) -> impl Future<Output = anyhow::Result<(String, Option<impl Iterator<Item = String>>)>>
     where
-        <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+        <S::ResponseBody as Body>::Error: Error + Send + Sync,
         B: Default,
     {
         log::info!("Attempting to discover WebSub hubs for topic {}", topic);
