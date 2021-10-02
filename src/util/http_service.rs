@@ -1,7 +1,9 @@
+use std::error::Error;
 use std::task::{Context, Poll};
 
 use http::header::{HeaderValue, USER_AGENT};
 use http::{Request, Response};
+use http_body::Body;
 use tower_http::decompression::{self, Decompression};
 use twitter_client::traits::HttpService;
 
@@ -30,7 +32,10 @@ impl<S> Service<S> {
     }
 }
 
-impl<S: HttpService<B>, B> tower_service::Service<Request<B>> for Service<S> {
+impl<S: HttpService<B>, B> tower_service::Service<Request<B>> for Service<S>
+where
+    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+{
     type Response = Response<decompression::DecompressionBody<S::ResponseBody>>;
     type Error = S::Error;
     type Future = decompression::ResponseFuture<S::Future>;
