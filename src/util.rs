@@ -26,9 +26,15 @@ macro_rules! serde_delegate {
 }
 
 pub mod consts {
-    pub const APPLICATION_WWW_FORM_URLENCODED: &str = "application/x-www-form-urlencoded";
+    use http::header::HeaderValue;
+
+    // <https://github.com/rust-lang/rust-clippy/issues/5812>
+    #[allow(clippy::declare_interior_mutable_const)]
+    pub const APPLICATION_WWW_FORM_URLENCODED: HeaderValue =
+        HeaderValue::from_static("application/x-www-form-urlencoded");
     #[cfg(test)]
-    pub const APPLICATION_ATOM_XML: &str = "application/atom+xml";
+    #[allow(clippy::declare_interior_mutable_const)]
+    pub const APPLICATION_ATOM_XML: HeaderValue = HeaderValue::from_static("application/atom+xml");
     pub const HUB_SIGNATURE: &str = "x-hub-signature";
     pub const NS_ATOM: &str = "http://www.w3.org/2005/Atom";
     pub const RATE_LIMIT_LIMIT: &str = "x-rate-limit-limit";

@@ -32,7 +32,7 @@ fs2 = "0.4"
 futures = { version = "0.3", default-features = false, features = ["async-await", "std"] }
 hex = "0.4"
 hmac = "0.10"
-http = "0.2.2"
+http = "0.2.5"
 http-body = "0.4.2"
 http-serde = "1"
 hyper = { version = "0.14", features = ["client", "http1", "http2", "server", "stream"] }

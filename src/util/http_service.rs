@@ -30,7 +30,9 @@ pub trait HttpService<B> {
     }
 }
 
-const USER_AGENT_PIPITOR: &str = concat!("Pipitor/", env!("CARGO_PKG_VERSION"));
+#[allow(clippy::declare_interior_mutable_const)]
+const USER_AGENT_PIPITOR: HeaderValue =
+    HeaderValue::from_static(concat!("Pipitor/", env!("CARGO_PKG_VERSION")));
 
 impl<S> Service<S> {
     pub fn new(inner: S) -> Self {
@@ -52,8 +54,7 @@ impl<S: HttpService<B>, B> tower_service::Service<Request<B>> for Service<S> {
     }
 
     fn call(&mut self, mut request: Request<B>) -> Self::Future {
-        let ua = HeaderValue::from_static(USER_AGENT_PIPITOR);
-        request.headers_mut().insert(USER_AGENT, ua);
+        request.headers_mut().insert(USER_AGENT, USER_AGENT_PIPITOR);
         self.inner.call(request)
     }
 }

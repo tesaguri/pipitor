@@ -5,7 +5,7 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::SqliteConnection;
 use futures::{Future, TryFutureExt};
-use http::header::{HeaderValue, CONTENT_TYPE, LOCATION};
+use http::header::{CONTENT_TYPE, LOCATION};
 use http::uri::{Parts, PathAndQuery, Uri};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -197,9 +197,8 @@ where
     S: HttpService<B>,
     B: From<Vec<u8>>,
 {
-    let application_www_form_urlencoded = HeaderValue::from_static(APPLICATION_WWW_FORM_URLENCODED);
     let req = http::Request::post(&hub)
-        .header(CONTENT_TYPE, application_www_form_urlencoded)
+        .header(CONTENT_TYPE, APPLICATION_WWW_FORM_URLENCODED)
         .body(B::from(body.into_bytes()))
         .unwrap();
 

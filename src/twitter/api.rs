@@ -72,6 +72,7 @@ use pin_project::pin_project;
 use serde::{de, Deserialize};
 use tower::util::{Oneshot, ServiceExt};
 
+use crate::util::consts::APPLICATION_WWW_FORM_URLENCODED;
 use crate::util::http_service::{HttpService, IntoService};
 use crate::util::{self, ConcatBody};
 
@@ -321,18 +322,17 @@ where
 
     trace!("{} {}", method, uri);
 
+    #[allow(clippy::declare_interior_mutable_const)]
+    const GZIP: HeaderValue = HeaderValue::from_static("gzip");
     let http = http::Request::builder()
         .method(method)
-        .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
+        .header(ACCEPT_ENCODING, GZIP)
         .header(AUTHORIZATION, authorization);
 
     if form {
         let data = oauth1::to_form_urlencoded(req).into_bytes();
         http.uri(Uri::from_static(uri))
-            .header(
-                CONTENT_TYPE,
-                HeaderValue::from_static("application/x-www-form-urlencoded"),
-            )
+            .header(CONTENT_TYPE, APPLICATION_WWW_FORM_URLENCODED)
             .body(data)
             .unwrap()
     } else {

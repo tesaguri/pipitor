@@ -634,6 +634,7 @@ mod tests {
             sock.unwrap().unwrap(),
             service::service_fn(move |req| {
                 let tx = tx.take().unwrap();
+                #[allow(clippy::borrow_interior_mutable_const)]
                 async move {
                     assert_eq!(req.uri().path_and_query().unwrap(), path);
                     assert_eq!(
