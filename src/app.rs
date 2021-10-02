@@ -423,6 +423,17 @@ where
             tokio::spawn(task);
         }
 
+        // Fetch feed entries of existing subscriptions.
+        for &topic in topics.iter().filter(|&&t| subscribed.contains(t)) {
+            let task = websub.service().discover(topic.to_owned());
+            let task = task.map(|result| {
+                if let Err(e) = result {
+                    log::error!("Error: {:?}", e);
+                }
+            });
+            tokio::spawn(task);
+        }
+
         for topic in subscribed.into_iter().filter(|t| !topics.contains(&**t)) {
             for task in websub.service().unsubscribe_all(topic, conn) {
                 let task = task.map(|result| {
@@ -487,12 +498,8 @@ where
         }
 
         if let Some(mut websub) = this.websub.as_pin_mut() {
-            while let Poll::Ready(Some((topic, content))) = websub.as_mut().poll_next(cx)? {
-                if let Some(feed) = content.parse_feed() {
-                    this.sender.send_feed(&topic, feed, &this.core)?;
-                } else {
-                    log::warn!("Failed to parse an updated content of topic {}", topic);
-                }
+            while let Poll::Ready(Some((topic, feed))) = websub.as_mut().poll_next(cx)? {
+                this.sender.send_feed(&topic, feed, &this.core)?;
             }
         }
 

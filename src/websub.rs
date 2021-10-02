@@ -2,7 +2,7 @@ pub mod hub;
 
 mod subscriber;
 
-pub use subscriber::{Content, Subscriber};
+pub use subscriber::Subscriber;
 
 use std::convert::TryInto;
 

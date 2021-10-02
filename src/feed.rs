@@ -1,13 +1,13 @@
 use mime::Mime;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Feed {
     pub title: String,
     pub id: String,
     pub entries: Vec<Entry>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Entry {
     pub title: Option<String>,
     pub id: Option<String>,

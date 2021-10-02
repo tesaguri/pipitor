@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::future;
 use std::marker::PhantomData;
+use std::mem;
 use std::task::{Context, Poll};
 
 use auto_enums::auto_enum;
@@ -20,20 +22,20 @@ use http_body::{Body, Full};
 use sha1::Sha1;
 use tower::ServiceExt;
 
-use crate::feed::{self, RawFeed};
+use crate::feed::{self, Feed, RawFeed};
 use crate::query;
 use crate::schema::*;
 use crate::util::{self, consts::HUB_SIGNATURE, now_unix, ConcatBody, HttpService, Never};
 use crate::websub::hub;
 
-use super::{scheduler, Content};
+use super::scheduler;
 
 pub struct Service<S, B> {
     pub(super) callback: Uri,
     pub(super) renewal_margin: u64,
     pub(super) client: S,
     pub(super) pool: Pool<ConnectionManager<SqliteConnection>>,
-    pub(super) tx: mpsc::Sender<(String, Content)>,
+    pub(super) tx: mpsc::Sender<(String, Feed)>,
     pub(super) handle: scheduler::Handle,
     pub(super) _marker: PhantomData<fn() -> B>,
 }
@@ -93,6 +95,7 @@ where
         log::info!("Attempting to discover WebSub hubs for topic {}", topic);
 
         let req = http::Request::get(&*topic).body(B::default()).unwrap();
+        let mut tx = self.tx.clone();
         self.client
             .clone()
             .into_service()
@@ -114,16 +117,24 @@ where
 
                 let body = ConcatBody::new(res.into_body()).await?;
 
-                if let Some(feed) = RawFeed::parse(kind, &body) {
+                if let Some(mut feed) = RawFeed::parse(kind, &body) {
                     #[auto_enum(Iterator)]
                     let hubs = match feed {
-                        RawFeed::Atom(feed) => feed
-                            .links
+                        RawFeed::Atom(ref mut feed) => mem::take(&mut feed.links)
                             .into_iter()
                             .filter(|link| link.rel == "hub")
                             .map(|link| link.href),
-                        RawFeed::Rss(channel) => rss_hub_links(channel),
+                        RawFeed::Rss(ref mut channel) => rss_hub_links(
+                            mem::take(&mut channel.extensions),
+                            mem::take(&mut channel.namespaces),
+                        ),
                     };
+                    if let Err(e) = tx.start_send((topic.clone(), feed.into())) {
+                        // A `Sender` has a guaranteed slot in the channel capacity
+                        // so it won't return a `full` error in this case.
+                        // https://docs.rs/futures/0.3.17/futures/channel/mpsc/fn.channel.html
+                        debug_assert!(e.is_disconnected());
+                    }
                     Ok((topic, Some(hubs)))
                 } else {
                     log::warn!("Topic {}: failed to parse the content", topic);
@@ -313,10 +324,13 @@ where
             .map_ok(move |(content, mac)| {
                 let code = mac.finalize().into_bytes();
                 if *code == signature {
-                    if let Err(e) = tx.start_send((topic, Content { kind, content })) {
-                        // A `Sender` has a guaranteed slot in the channel capacity ([1])
-                        // so it won't return a `full` error in this case.
-                        // https://docs.rs/futures/0.3.5/futures/channel/mpsc/fn.channel.html
+                    let feed = if let Some(feed) = Feed::parse(kind, &content) {
+                        feed
+                    } else {
+                        log::warn!("Failed to parse an updated content of topic {}", topic);
+                        return;
+                    };
+                    if let Err(e) = tx.start_send((topic, feed)) {
                         debug_assert!(e.is_disconnected());
                     }
                 } else {
@@ -444,32 +458,31 @@ where
     }
 }
 
-fn rss_hub_links(channel: rss::Channel) -> impl Iterator<Item = String> {
-    let namespaces = channel.namespaces;
-    channel
-        .extensions
-        .into_iter()
-        .flat_map(move |(prefix, map)| {
-            let prefix_is_atom = namespaces
-                .get(&*prefix)
-                .map_or(false, |s| s == util::consts::NS_ATOM);
-            map.into_iter()
-                .filter_map(|(name, elms)| (name == "link").then(move || elms))
-                .flatten()
-                .filter(move |elm| {
-                    if let Some((_, ns)) = elm
-                        .attrs
-                        .iter()
-                        .find(|(k, _)| k.starts_with("xmlns:") && k[6..] == *prefix)
-                    {
-                        ns == util::consts::NS_ATOM
-                    } else {
-                        prefix_is_atom
-                    }
-                })
-                .filter(|elm| elm.attrs.get("rel").map(|s| &**s) == Some("hub"))
-                .flat_map(|mut elm| elm.attrs.remove("href"))
-        })
+fn rss_hub_links(
+    extensions: rss::extension::ExtensionMap,
+    namespaces: HashMap<String, String>,
+) -> impl Iterator<Item = String> {
+    extensions.into_iter().flat_map(move |(prefix, map)| {
+        let prefix_is_atom = namespaces
+            .get(&*prefix)
+            .map_or(false, |s| s == util::consts::NS_ATOM);
+        map.into_iter()
+            .filter_map(|(name, elms)| (name == "link").then(move || elms))
+            .flatten()
+            .filter(move |elm| {
+                if let Some((_, ns)) = elm
+                    .attrs
+                    .iter()
+                    .find(|(k, _)| k.starts_with("xmlns:") && k[6..] == *prefix)
+                {
+                    ns == util::consts::NS_ATOM
+                } else {
+                    prefix_is_atom
+                }
+            })
+            .filter(|elm| elm.attrs.get("rel").map(|s| &**s) == Some("hub"))
+            .flat_map(|mut elm| elm.attrs.remove("href"))
+    })
 }
 
 fn log_and_discard_error<T, E>(result: Result<T, E>)

@@ -17,7 +17,7 @@ use hyper::server::conn::Http;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::feed::{self, Feed};
+use crate::feed::Feed;
 use crate::manifest;
 use crate::query;
 use crate::schema::*;
@@ -32,13 +32,8 @@ pub struct Subscriber<S, B, I> {
     #[pin]
     incoming: I,
     server: Http,
-    rx: mpsc::Receiver<(String, Content)>,
+    rx: mpsc::Receiver<(String, Feed)>,
     service: Arc<Service<S, B>>,
-}
-
-pub struct Content {
-    kind: feed::MediaType,
-    content: Vec<u8>,
 }
 
 impl<S, B, I> Subscriber<S, B, I>
@@ -140,7 +135,7 @@ where
     I: TryStream,
     I::Ok: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    type Item = Result<(String, Content), I::Error>;
+    type Item = Result<(String, Feed), I::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         log::trace!("Subscriber::poll_next");
@@ -157,12 +152,6 @@ where
                 }
             }
         }
-    }
-}
-
-impl Content {
-    pub fn parse_feed(&self) -> Option<Feed> {
-        Feed::parse(self.kind, &self.content)
     }
 }
 
@@ -206,6 +195,7 @@ mod tests {
     use hyper::{service, Client};
     use sha1::Sha1;
 
+    use crate::feed;
     use crate::util::connection::{Connector, Listener};
     use crate::util::consts::{
         APPLICATION_ATOM_XML, APPLICATION_WWW_FORM_URLENCODED, HUB_SIGNATURE,
@@ -435,6 +425,15 @@ mod tests {
         .unwrap();
         listener.enter(|cx, listener| assert!(listener.poll_next(cx).is_pending()));
 
+        // `subscriber` yields the contents of `feed.xml`.
+        assert_eq!(
+            subscriber.next().await.unwrap().unwrap(),
+            (
+                TOPIC.to_owned(),
+                Feed::parse(feed::MediaType::Xml, FEED.as_bytes()).unwrap()
+            )
+        );
+
         let (topic, hubs) = task.timeout().await.unwrap().unwrap();
         assert_eq!(topic, TOPIC);
         let hubs = hubs.unwrap().collect::<Vec<_>>();
@@ -493,9 +492,12 @@ mod tests {
         let res = res.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
 
-        let (topic, content) = update.unwrap().unwrap();
+        let (topic, feed) = update.unwrap().unwrap();
         assert_eq!(topic, TOPIC);
-        assert_eq!(str::from_utf8(&content.content).unwrap(), FEED);
+        assert_eq!(
+            feed,
+            Feed::parse(feed::MediaType::Xml, FEED.as_bytes()).unwrap()
+        );
 
         // Subscription renewal.
 
