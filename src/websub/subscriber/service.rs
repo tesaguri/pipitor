@@ -122,10 +122,7 @@ where
                             .into_iter()
                             .filter(|link| link.rel == "hub")
                             .map(|link| link.href),
-                        RawFeed::Rss(channel) => rss_hub_links(&channel)
-                            .map(ToOwned::to_owned)
-                            .collect::<Vec<_>>()
-                            .into_iter(),
+                        RawFeed::Rss(channel) => rss_hub_links(channel),
                     };
                     Ok((topic, Some(hubs)))
                 } else {
@@ -447,28 +444,32 @@ where
     }
 }
 
-fn rss_hub_links(channel: &rss::Channel) -> impl Iterator<Item = &str> {
+fn rss_hub_links(channel: rss::Channel) -> impl Iterator<Item = String> {
+    let namespaces = channel.namespaces;
     channel
-        .extensions()
-        .iter()
-        .flat_map(|(prefix, map)| map.iter().map(move |(name, elms)| (prefix, name, elms)))
-        .filter(|(_, name, _)| *name == "link")
-        .flat_map(|(prefix, _, elms)| elms.iter().map(move |elm| (prefix, elm)))
-        .filter(move |(prefix, elm)| {
-            if let Some((_, ns)) = elm
-                .attrs()
-                .iter()
-                .find(|(k, _)| k.starts_with("xmlns:") && k[6..] == **prefix)
-            {
-                ns == util::consts::NS_ATOM
-            } else {
-                channel.namespaces().get(*prefix).map(|s| &**s) == Some(util::consts::NS_ATOM)
-            }
+        .extensions
+        .into_iter()
+        .flat_map(move |(prefix, map)| {
+            let prefix_is_atom = namespaces
+                .get(&*prefix)
+                .map_or(false, |s| s == util::consts::NS_ATOM);
+            map.into_iter()
+                .filter_map(|(name, elms)| (name == "link").then(move || elms))
+                .flatten()
+                .filter(move |elm| {
+                    if let Some((_, ns)) = elm
+                        .attrs
+                        .iter()
+                        .find(|(k, _)| k.starts_with("xmlns:") && k[6..] == *prefix)
+                    {
+                        ns == util::consts::NS_ATOM
+                    } else {
+                        prefix_is_atom
+                    }
+                })
+                .filter(|elm| elm.attrs.get("rel").map(|s| &**s) == Some("hub"))
+                .flat_map(|mut elm| elm.attrs.remove("href"))
         })
-        .map(|(_, elm)| elm)
-        .filter(|elm| elm.attrs().get("rel").map(|s| &**s) == Some("hub"))
-        .flat_map(|elm| elm.attrs().get("href"))
-        .map(|href| &**href)
 }
 
 fn log_and_discard_error<T, E>(result: Result<T, E>)
