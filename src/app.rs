@@ -40,6 +40,7 @@ use self::twitter_request_ext::TwitterRequestExt;
 pub struct App<S, B, I = socket::Listener>
 where
     S: HttpService<B>,
+    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
 {
     #[pin]
     core: Core<Service<S>>,
@@ -263,6 +264,7 @@ where
         struct Guard<'a, S, B, I>
         where
             S: HttpService<B>,
+            <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
         {
             this: &'a mut App<S, B, I>,
             old: Option<Manifest>,
@@ -272,6 +274,7 @@ where
         impl<S, B, I> Guard<'_, S, B, I>
         where
             S: HttpService<B>,
+            <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
         {
             fn rollback(&mut self) -> Manifest {
                 let old = self.old.take().unwrap();
@@ -290,6 +293,7 @@ where
         impl<S, B, I> Drop for Guard<'_, S, B, I>
         where
             S: HttpService<B>,
+            <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
         {
             fn drop(&mut self) {
                 self.rollback();
@@ -454,7 +458,10 @@ where
     }
 }
 
-impl<S: HttpService<B>, B, I> App<S, B, I> {
+impl<S: HttpService<B>, B, I> App<S, B, I>
+where
+    <S::ResponseBody as Body>::Error: Error + Send + Sync + 'static,
+{
     pub fn manifest(&self) -> &Manifest {
         self.core.manifest()
     }

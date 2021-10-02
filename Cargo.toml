@@ -94,6 +94,3 @@ hyper = { version = "0.14", default-features = false, features = ["tcp"] }
 tokio = { version = "1", features = ["macros"] }
 tokio-test = "0.4"
 tower-test = "0.4"
-
-[patch.crates-io]
-tower-http = { git = "https://github.com/tower-rs/tower-http", rev = "36157ce3ed7cbf30d2c8016ec8054b703308c585" }
