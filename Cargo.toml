@@ -1,15 +1,24 @@
 [package]
 name = "pipitor"
 version = "0.3.0-alpha.13"
-edition = "2018"
 authors = ["Daiki Mizukami <tesaguriguma@gmail.com>"]
-license = "AGPL-3.0-only"
-readme = "README.md"
-repository = "https://github.com/tesaguri/pipitor"
-documentation = "https://docs.rs/pipitor/0.3.0-alpha.13/pipitor/"
+edition = "2018"
 description = """
 A Twitter bot that gathers, filters and Retweets Tweets automatically.
 """
+documentation = "https://docs.rs/pipitor/0.3.0-alpha.13/pipitor/"
+readme = "README.md"
+repository = "https://github.com/tesaguri/pipitor"
+license = "AGPL-3.0-only"
+keywords = ["twitter", "bot"]
+categories = ["command-line-utilities"]
+include = [
+    "LICENSE",
+    "/README.md",
+    "/migrations/*/",
+    "/src/",
+    "/tests/",
+]
 
 [[bin]]
 name = "pipitor"
