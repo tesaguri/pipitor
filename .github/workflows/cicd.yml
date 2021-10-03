@@ -4,7 +4,7 @@ on:
   push:
     branches: '*'
     tags-ignore:
-      - dhall-schema-*
+      - dhall-package-*
   pull_request: {}
 
 jobs:

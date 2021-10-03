@@ -28,7 +28,7 @@ For more information, please refer to <http://unlicense.org/>
 -- A Dhall type definition for the Pipitor manifest file.
 -- The following is a recommended way of importing the file:
 -- let Pipitor =
---       https://github.com/tesaguri/pipitor/raw/dhall-schema-v0.3.0-alpha.13/schema.dhall sha256:7cda9e784009d372f4b6272be2487647cfa02587faceb2c746b94927c4dec3fc
+--       https://github.com/tesaguri/pipitor/raw/dhall-package-v0.3.0-alpha.14/package.dhall sha256:7cda9e784009d372f4b6272be2487647cfa02587faceb2c746b94927c4dec3fc
 let Bool/not =
       https://prelude.dhall-lang.org/v20.2.0/Bool/not.dhall sha256:723df402df24377d8a853afed08d9d69a0a6d86e2e5b2bac8960b0d4756c7dc4
 
