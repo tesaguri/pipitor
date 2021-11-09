@@ -6,7 +6,9 @@ use diesel::sqlite::Sqlite;
 use crate::schema::*;
 
 #[derive(QueryId)]
-pub struct PragmaForeignKeysOn;
+pub struct PragmaForeignKeysOn {
+    _priv: (),
+}
 
 impl QueryFragment<Sqlite> for PragmaForeignKeysOn {
     fn walk_ast(&self, mut out: AstPass<'_, Sqlite>) -> QueryResult<()> {
@@ -27,7 +29,7 @@ pub fn expires_at() -> Order<
 }
 
 pub fn pragma_foreign_keys_on() -> PragmaForeignKeysOn {
-    PragmaForeignKeysOn
+    PragmaForeignKeysOn { _priv: () }
 }
 
 pub fn renewing_subs(
