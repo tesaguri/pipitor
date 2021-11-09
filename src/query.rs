@@ -15,6 +15,11 @@ pub struct PragmaForeignKeysOn {
     _priv: (),
 }
 
+#[derive(QueryId)]
+pub struct PragmaJournalModeWal {
+    _priv: (),
+}
+
 impl QueryFragment<Sqlite> for PragmaBusyTimeout {
     fn walk_ast(&self, mut out: AstPass<'_, Sqlite>) -> QueryResult<()> {
         out.push_sql("PRAGMA busy_timeout=");
@@ -36,6 +41,15 @@ impl QueryFragment<Sqlite> for PragmaForeignKeysOn {
 
 impl RunQueryDsl<SqliteConnection> for PragmaForeignKeysOn {}
 
+impl QueryFragment<Sqlite> for PragmaJournalModeWal {
+    fn walk_ast(&self, mut out: AstPass<'_, Sqlite>) -> QueryResult<()> {
+        out.push_sql("PRAGMA journal_mode=WAL");
+        Ok(())
+    }
+}
+
+impl RunQueryDsl<SqliteConnection> for PragmaJournalModeWal {}
+
 pub fn expires_at() -> Order<
     Select<websub_active_subscriptions::table, websub_active_subscriptions::expires_at>,
     Asc<websub_active_subscriptions::expires_at>,
@@ -51,6 +65,10 @@ pub fn pragma_busy_timeout(milliseconds: u32) -> PragmaBusyTimeout {
 
 pub fn pragma_foreign_keys_on() -> PragmaForeignKeysOn {
     PragmaForeignKeysOn { _priv: () }
+}
+
+pub fn pragma_journal_mode_wal() -> PragmaJournalModeWal {
+    PragmaJournalModeWal { _priv: () }
 }
 
 pub fn renewing_subs(

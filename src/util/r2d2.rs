@@ -14,6 +14,7 @@ impl CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for ConnectionCu
             // <https://github.com/rusqlite/rusqlite/commit/05b03ae2cec9f9f630095d5c0e89682da334f4a4>
             query::pragma_busy_timeout(5000).execute(conn)?;
             query::pragma_foreign_keys_on().execute(conn)?;
+            query::pragma_journal_mode_wal().execute(conn)?;
             Ok(())
         })()
         .map_err(diesel::r2d2::Error::QueryError)
