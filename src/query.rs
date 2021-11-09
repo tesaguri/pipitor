@@ -6,9 +6,26 @@ use diesel::sqlite::Sqlite;
 use crate::schema::*;
 
 #[derive(QueryId)]
+pub struct PragmaBusyTimeout {
+    milliseconds: u32,
+}
+
+#[derive(QueryId)]
 pub struct PragmaForeignKeysOn {
     _priv: (),
 }
+
+impl QueryFragment<Sqlite> for PragmaBusyTimeout {
+    fn walk_ast(&self, mut out: AstPass<'_, Sqlite>) -> QueryResult<()> {
+        out.push_sql("PRAGMA busy_timeout=");
+        // Bind variables seems not to be unusable here.
+        let mut buf = itoa::Buffer::new();
+        out.push_sql(buf.format(self.milliseconds));
+        Ok(())
+    }
+}
+
+impl RunQueryDsl<SqliteConnection> for PragmaBusyTimeout {}
 
 impl QueryFragment<Sqlite> for PragmaForeignKeysOn {
     fn walk_ast(&self, mut out: AstPass<'_, Sqlite>) -> QueryResult<()> {
@@ -26,6 +43,10 @@ pub fn expires_at() -> Order<
     websub_active_subscriptions::table
         .select(websub_active_subscriptions::expires_at)
         .order(websub_active_subscriptions::expires_at.asc())
+}
+
+pub fn pragma_busy_timeout(milliseconds: u32) -> PragmaBusyTimeout {
+    PragmaBusyTimeout { milliseconds }
 }
 
 pub fn pragma_foreign_keys_on() -> PragmaForeignKeysOn {

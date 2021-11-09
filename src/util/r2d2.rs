@@ -8,10 +8,15 @@ struct ConnectionCustomizer;
 
 impl CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for ConnectionCustomizer {
     fn on_acquire(&self, conn: &mut SqliteConnection) -> Result<(), diesel::r2d2::Error> {
-        query::pragma_foreign_keys_on()
-            .execute(conn)
-            .map(|_| ())
-            .map_err(diesel::r2d2::Error::QueryError)
+        (|| {
+            // The value of `5000` ms is taken from `rusqlite`'s default.
+            // <https://github.com/diesel-rs/diesel/issues/2365#issuecomment-719467312>
+            // <https://github.com/rusqlite/rusqlite/commit/05b03ae2cec9f9f630095d5c0e89682da334f4a4>
+            query::pragma_busy_timeout(5000).execute(conn)?;
+            query::pragma_foreign_keys_on().execute(conn)?;
+            Ok(())
+        })()
+        .map_err(diesel::r2d2::Error::QueryError)
     }
 }
 

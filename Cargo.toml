@@ -45,6 +45,7 @@ http = "0.2.5"
 http-body = "0.4.2"
 http-serde = "1"
 hyper = { version = "0.14", features = ["client", "http1", "http2", "server", "stream"] }
+itoa = "0.4"
 json = { version = "1", package = "serde_json" }
 listenfd = "0.3"
 log = "0.4.6"
