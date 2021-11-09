@@ -482,7 +482,7 @@ mod tests {
 
         // Content distribution.
 
-        let mut mac = Hmac::<Sha1>::new_varkey(secret.as_bytes()).unwrap();
+        let mut mac = Hmac::<Sha1>::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(FEED.as_bytes());
         let signature = mac.finalize().into_bytes();
         let req = Request::post(&callback)

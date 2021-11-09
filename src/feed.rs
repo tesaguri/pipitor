@@ -49,7 +49,7 @@ impl From<RawFeed> for Feed {
 impl From<atom::Feed> for Feed {
     fn from(feed: atom::Feed) -> Self {
         Feed {
-            title: feed.title,
+            title: feed.title.value,
             id: feed.id,
             entries: feed.entries.into_iter().map(Into::into).collect(),
         }
@@ -77,10 +77,10 @@ impl From<atom::Entry> for Entry {
         }
         .map(|l| l.href);
         Entry {
-            title: Some(entry.title),
+            title: Some(entry.title.value),
             id: Some(entry.id),
             link,
-            summary: entry.summary,
+            summary: entry.summary.map(|text| text.value),
             content: entry.content.and_then(|c| c.value),
             updated: Some(entry.updated.timestamp()),
         }

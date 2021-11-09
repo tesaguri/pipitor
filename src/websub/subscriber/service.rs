@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::Debug;
@@ -317,7 +317,7 @@ where
                     .body(Full::default())
                     .unwrap();
             };
-            let mac = Hmac::<Sha1>::new_varkey(secret.as_bytes()).unwrap();
+            let mac = Hmac::<Sha1>::new_from_slice(secret.as_bytes()).unwrap();
             (topic, mac)
         };
 
@@ -467,7 +467,7 @@ where
 
 fn rss_hub_links(
     extensions: rss::extension::ExtensionMap,
-    namespaces: HashMap<String, String>,
+    namespaces: BTreeMap<String, String>,
 ) -> impl Iterator<Item = String> {
     extensions.into_iter().flat_map(move |(prefix, map)| {
         let prefix_is_atom = namespaces

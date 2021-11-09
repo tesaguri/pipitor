@@ -27,7 +27,7 @@ path = "src/bin/pipitor/main.rs"
 [dependencies]
 anyhow = "1"
 atoi = "0.4"
-atom = { version = "0.9", package = "atom_syndication" }
+atom = { version = "0.11", package = "atom_syndication", default-features = false }
 auto_enums = "0.7"
 base64 = "0.13"
 bytes = "1"
@@ -35,12 +35,12 @@ cfg-if = "1"
 diesel = { version = "1.4.7", default-features = false, features = ["r2d2", "sqlite"] }
 diesel_migrations = { version = "1", default-features = false, features = ["sqlite"] }
 dotenv = "0.15"
-env_logger = "0.8"
+env_logger = "0.9"
 flate2 = "1"
 fs2 = "0.4"
 futures = { version = "0.3", default-features = false, features = ["async-await", "std"] }
 hex = "0.4"
-hmac = "0.10"
+hmac = "0.11"
 http = "0.2.5"
 http-body = "0.4.2"
 http-serde = "1"
@@ -54,7 +54,7 @@ oauth-credentials = { version = "0.3", features = ["serde"] }
 pin-project = "1"
 rand = "0.8"
 regex = "1.0.3"
-rss = "1.10"
+rss = { version = "2", default-features = false }
 serde = { version = "1.0.34", features = ["derive", "rc"] }
 serde_derive = "1.0.34"
 serde_urlencoded = "0.7"
