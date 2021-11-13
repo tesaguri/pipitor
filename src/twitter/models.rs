@@ -49,7 +49,7 @@ pub struct AccessToken {
 impl<'de> Deserialize<'de> for Tweet {
     fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
-        struct Prototype {
+        struct Tweet {
             id: i64,
             #[serde(alias = "full_text")]
             text: String,
@@ -74,20 +74,20 @@ impl<'de> Deserialize<'de> for Tweet {
             entities: Option<Entities>,
         }
 
-        Prototype::deserialize(d).map(|p| {
-            let (text, entities) = (p.text, p.entities);
-            let text = p.extended_tweet.map_or_else(
+        Tweet::deserialize(d).map(|t| {
+            let (text, entities) = (t.text, t.entities);
+            let text = t.extended_tweet.map_or_else(
                 || expand_urls(text, entities),
                 |e| expand_urls(e.full_text, e.entities),
             )?;
-            Ok(Tweet {
-                id: p.id,
+            Ok(Self {
+                id: t.id,
                 text,
-                in_reply_to_status_id: p.in_reply_to_status_id,
-                in_reply_to_user_id: p.in_reply_to_user_id,
-                user: p.user,
-                quoted_status: p.quoted_status,
-                retweeted_status: p.retweeted_status,
+                in_reply_to_status_id: t.in_reply_to_status_id,
+                in_reply_to_user_id: t.in_reply_to_user_id,
+                user: t.user,
+                quoted_status: t.quoted_status,
+                retweeted_status: t.retweeted_status,
             })
         })?
     }

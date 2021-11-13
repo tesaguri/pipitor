@@ -237,7 +237,8 @@ impl Manifest {
 impl<'de> Deserialize<'de> for Manifest {
     fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
-        pub struct Prototype {
+        #[serde(remote = "self::Manifest")]
+        pub struct Manifest {
             #[serde(default)]
             pub database_url: Option<Box<str>>,
             pub rule: Box<[Rule]>,
@@ -249,15 +250,7 @@ impl<'de> Deserialize<'de> for Manifest {
             pub skip_duplicate: bool,
         }
 
-        let p = Prototype::deserialize(d)?;
-        let ret = Manifest {
-            database_url: p.database_url,
-            rule: p.rule,
-            websub: p.websub,
-            twitter: p.twitter,
-            skip_duplicate: p.skip_duplicate,
-        };
-
+        let ret = Manifest::deserialize(d)?;
         if let Some(e) = ret.validate_() {
             return Err(de::Error::custom(e));
         }
@@ -280,7 +273,7 @@ impl<'de> Deserialize<'de> for Rule {
         // ```
 
         #[derive(Deserialize)]
-        struct Prototype {
+        struct Rule {
             #[serde(default)]
             filter: Option<Filter>,
             #[serde(default)]
@@ -290,15 +283,15 @@ impl<'de> Deserialize<'de> for Rule {
             topics: Box<[TopicId<'static>]>,
         }
 
-        Prototype::deserialize(d).map(|p| {
+        Rule::deserialize(d).map(|r| {
             let route = Arc::new(Route {
-                filter: p.filter,
-                exclude: p.exclude,
-                outbox: p.outbox,
+                filter: r.filter,
+                exclude: r.exclude,
+                outbox: r.outbox,
             });
-            Rule {
+            Self {
                 route,
-                topics: p.topics,
+                topics: r.topics,
             }
         })
     }
@@ -358,15 +351,15 @@ impl<'de> Deserialize<'de> for Filter {
 
             fn visit_map<A: de::MapAccess<'de>>(self, a: A) -> Result<Filter, A::Error> {
                 #[derive(Deserialize)]
-                pub struct FilterPrototype {
+                pub struct Filter {
                     title: Serde<Regex>,
                     #[serde(default)]
                     text: Option<Serde<Regex>>,
                 }
 
-                FilterPrototype::deserialize(MapAccessDeserializer(a)).map(|p| Filter {
-                    title: p.title.0,
-                    text: p.text.map(|s| s.0),
+                Filter::deserialize(MapAccessDeserializer(a)).map(|f| self::Filter {
+                    title: f.title.0,
+                    text: f.text.map(|s| s.0),
                 })
             }
 
