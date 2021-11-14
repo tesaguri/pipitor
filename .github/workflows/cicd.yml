@@ -116,7 +116,7 @@ jobs:
           - aarch64-apple-darwin
           - x86_64-apple-darwin
           - x86_64-pc-windows-msvc
-          - x86_64-unknown-freebsd
+          # - x86_64-unknown-freebsd
         include:
           - os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
@@ -130,8 +130,8 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             features: [winsqlite3]
-          - target: x86_64-unknown-freebsd
-            use_cross: true
+          # - target: x86_64-unknown-freebsd
+          #   use_cross: true
     env:
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
