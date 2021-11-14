@@ -37,6 +37,7 @@ pub mod consts {
     pub const APPLICATION_ATOM_XML: HeaderValue = HeaderValue::from_static("application/atom+xml");
     pub const HUB_SIGNATURE: &str = "x-hub-signature";
     pub const NS_ATOM: &str = "http://www.w3.org/2005/Atom";
+    pub const NS_MRSS: &str = "http://search.yahoo.com/mrss/";
 }
 
 #[cfg(test)]

@@ -1,4 +1,8 @@
+use std::collections::BTreeMap;
+
 use mime::Mime;
+
+use crate::util;
 
 #[derive(Debug, PartialEq)]
 pub struct Feed {
@@ -51,7 +55,11 @@ impl From<atom::Feed> for Feed {
         Feed {
             title: feed.title.value,
             id: feed.id,
-            entries: feed.entries.into_iter().map(Into::into).collect(),
+            entries: feed
+                .entries
+                .into_iter()
+                .map(|entry| Entry::from_atom(entry, &feed.namespaces))
+                .collect(),
         }
     }
 }
@@ -61,13 +69,17 @@ impl From<rss::Channel> for Feed {
         Feed {
             title: channel.title,
             id: channel.link,
-            entries: channel.items.into_iter().map(Into::into).collect(),
+            entries: channel
+                .items
+                .into_iter()
+                .map(|item| Entry::from_rss(item, &channel.namespaces))
+                .collect(),
         }
     }
 }
 
-impl From<atom::Entry> for Entry {
-    fn from(entry: atom::Entry) -> Self {
+impl Entry {
+    fn from_atom(mut entry: atom::Entry, namespaces: &BTreeMap<String, String>) -> Self {
         let mut links = entry.links.into_iter();
         let link = links.next();
         let link = if link.as_ref().map_or(false, |l| l.rel == "alternate") {
@@ -80,15 +92,16 @@ impl From<atom::Entry> for Entry {
             title: Some(entry.title.value),
             id: Some(entry.id),
             link,
-            summary: entry.summary.map(|text| text.value),
+            summary: entry
+                .summary
+                .map(|text| text.value)
+                .or_else(|| take_media_description_atom(&mut entry.extensions, namespaces)),
             content: entry.content.and_then(|c| c.value),
             updated: Some(entry.updated.timestamp()),
         }
     }
-}
 
-impl From<rss::Item> for Entry {
-    fn from(item: rss::Item) -> Self {
+    fn from_rss(mut item: rss::Item, namespaces: &BTreeMap<String, String>) -> Self {
         let guid = item.guid;
         let link = item.link.or_else(|| {
             guid.as_ref()
@@ -100,7 +113,9 @@ impl From<rss::Item> for Entry {
             title: item.title,
             id: guid.map(|g| g.value),
             link,
-            summary: item.description,
+            summary: item
+                .description
+                .or_else(|| take_media_description_rss(&mut item.extensions, namespaces)),
             content: item.content,
             updated: None,
         }
@@ -147,5 +162,98 @@ impl std::str::FromStr for MediaType {
         } else {
             Err(())
         }
+    }
+}
+
+macro_rules! def_take_media_description {
+    ($name:ident, $Extension:ty) => {
+        /// Takes `media:description` string from the entry/item.
+        ///
+        /// <https://www.rssboard.org/media-rss#media-description>
+        fn $name(
+            extensions: &mut BTreeMap<String, BTreeMap<String, Vec<$Extension>>>,
+            namespaces: &BTreeMap<String, String>,
+        ) -> Option<String> {
+            fn take_description(elms: &mut Vec<$Extension>) -> Option<String> {
+                elms.iter_mut().flat_map(|elm| elm.value.take()).next()
+            }
+
+            fn take_content_description(elms: &mut Vec<$Extension>) -> Option<String> {
+                for elm in elms {
+                    for (name, elms) in &mut elm.children {
+                        if name == "description" {
+                            return take_description(elms);
+                        }
+                    }
+                }
+                None
+            }
+
+            let mut entry_description = None;
+            let mut group_description = None;
+
+            for (prefix, map) in extensions {
+                if namespaces
+                    .get(prefix)
+                    .map_or(false, |s| s == util::consts::NS_MRSS)
+                {
+                    for (name, elms) in map {
+                        match &name[..] {
+                            "description" => {
+                                if let Some(v) = take_description(elms) {
+                                    entry_description.get_or_insert(v);
+                                }
+                            }
+                            "content" => {
+                                if let Some(v) = take_content_description(elms) {
+                                    // `media:content`'s description takes the strongest precedence.
+                                    return Some(v);
+                                }
+                            }
+                            "group" => {
+                                for elm in elms {
+                                    for (name, elms) in &mut elm.children {
+                                        match &name[..] {
+                                            "description" => {
+                                                if let Some(v) = take_description(elms) {
+                                                    group_description.get_or_insert(v);
+                                                }
+                                            }
+                                            "content" => {
+                                                if let Some(v) = take_content_description(elms) {
+                                                    return Some(v);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            group_description.or(entry_description)
+        }
+    };
+}
+
+def_take_media_description!(take_media_description_atom, atom::extension::Extension);
+def_take_media_description!(take_media_description_rss, rss::extension::Extension);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn media_description() {
+        let feed = atom::Feed::read_from(&include_bytes!("feed/testcases/videos.xml")[..]).unwrap();
+        let feed = Feed::from(feed);
+        let expected =
+            atom::Feed::read_from(&include_bytes!("feed/testcases/expected.xml")[..]).unwrap();
+        let expected = Feed::from(expected);
+        assert_eq!(feed, expected);
     }
 }
