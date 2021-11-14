@@ -551,12 +551,17 @@ fn resolve_database_uri(uri: &str, base: &str) -> Option<Box<str>> {
     // <https://sqlite.org/c3ref/open.html>.
     if uri.starts_with("file:///")
         || uri.starts_with("file://localhost/")
-        || (uri.starts_with("file:/") && !uri[6..].starts_with('/'))
+        || (uri
+            .strip_prefix("file:/")
+            .map_or(false, |s| !s.starts_with('/')))
         || uri == ":memory:"
     {
         // Absolute URI filename or in-memory database.
         None
-    } else if uri.starts_with("file:") && !uri[5..].starts_with("//") {
+    } else if uri
+        .strip_prefix("file:")
+        .map_or(false, |s| !s.starts_with("//"))
+    {
         // Relative URI filename
         let path = &uri[5..];
         let i = path

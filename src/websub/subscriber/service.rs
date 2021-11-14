@@ -480,7 +480,7 @@ fn rss_hub_links(
                 if let Some((_, ns)) = elm
                     .attrs
                     .iter()
-                    .find(|(k, _)| k.starts_with("xmlns:") && k[6..] == *prefix)
+                    .find(|(k, _)| k.strip_prefix("xmlns:") == Some(&prefix))
                 {
                     ns == util::consts::NS_ATOM
                 } else {

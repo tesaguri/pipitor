@@ -203,7 +203,7 @@ impl<'de> de::Deserialize<'de> for Addr {
 
             fn visit_string<E: de::Error>(self, mut v: String) -> Result<Addr, E> {
                 if v.starts_with("unix://") {
-                    v.drain(..7);
+                    v.drain(.."unix://".len());
                     Ok(Addr::Unix(PathBuf::from(v)))
                 } else {
                     self.visit_str(&v)
