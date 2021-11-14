@@ -28,24 +28,30 @@ For more information, please refer to <http://unlicense.org/>
 -- A Dhall type definition for the Pipitor manifest file.
 -- The following is a recommended way of importing the file:
 -- let Pipitor =
---       https://github.com/tesaguri/pipitor/raw/dhall-package-v0.3.0-alpha.14/package.dhall sha256:7cda9e784009d372f4b6272be2487647cfa02587faceb2c746b94927c4dec3fc
+--       https://github.com/tesaguri/pipitor/raw/dhall-package-v0.3.0-alpha.15/package.dhall sha256:7cda9e784009d372f4b6272be2487647cfa02587faceb2c746b94927c4dec3fc
 let Bool/not =
-      https://prelude.dhall-lang.org/v20.2.0/Bool/not.dhall sha256:723df402df24377d8a853afed08d9d69a0a6d86e2e5b2bac8960b0d4756c7dc4
+      https://prelude.dhall-lang.org/v21.0.0/Bool/not.dhall
+        sha256:723df402df24377d8a853afed08d9d69a0a6d86e2e5b2bac8960b0d4756c7dc4
 
 let List/concatMap =
-      https://prelude.dhall-lang.org/v20.2.0/List/concatMap.dhall sha256:3b2167061d11fda1e4f6de0522cbe83e0d5ac4ef5ddf6bb0b2064470c5d3fb64
+      https://prelude.dhall-lang.org/v21.0.0/List/concatMap.dhall
+        sha256:3b2167061d11fda1e4f6de0522cbe83e0d5ac4ef5ddf6bb0b2064470c5d3fb64
 
 let List/map =
-      https://prelude.dhall-lang.org/v20.2.0/List/map.dhall sha256:dd845ffb4568d40327f2a817eb42d1c6138b929ca758d50bc33112ef3c885680
+      https://prelude.dhall-lang.org/v21.0.0/List/map.dhall
+        sha256:dd845ffb4568d40327f2a817eb42d1c6138b929ca758d50bc33112ef3c885680
 
 let List/null =
-      https://prelude.dhall-lang.org/v20.2.0/List/null.dhall sha256:2338e39637e9a50d66ae1482c0ed559bbcc11e9442bfca8f8c176bbcd9c4fc80
+      https://prelude.dhall-lang.org/v21.0.0/List/null.dhall
+        sha256:2338e39637e9a50d66ae1482c0ed559bbcc11e9442bfca8f8c176bbcd9c4fc80
 
 let List/unpackOptionals =
-      https://prelude.dhall-lang.org/v20.2.0/List/unpackOptionals.dhall sha256:0cbaa920f429cf7fc3907f8a9143203fe948883913560e6e1043223e6b3d05e4
+      https://prelude.dhall-lang.org/v21.0.0/List/unpackOptionals.dhall
+        sha256:0cbaa920f429cf7fc3907f8a9143203fe948883913560e6e1043223e6b3d05e4
 
 let Optional/null =
-      https://prelude.dhall-lang.org/v20.2.0/Optional/null.dhall sha256:3871180b87ecaba8b53fffb2a8b52d3fce98098fab09a6f759358b9e8042eedc
+      https://prelude.dhall-lang.org/v21.0.0/Optional/null.dhall
+        sha256:3871180b87ecaba8b53fffb2a8b52d3fce98098fab09a6f759358b9e8042eedc
 
 let Duration = { secs : Natural, nanos : Natural }
 
