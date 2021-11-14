@@ -2,7 +2,7 @@
 name = "pipitor"
 version = "0.3.0-alpha.14"
 authors = ["Daiki Mizukami <tesaguriguma@gmail.com>"]
-edition = "2018"
+edition = "2021"
 description = """
 A Twitter bot that gathers, filters and Retweets Tweets automatically.
 """
@@ -64,7 +64,7 @@ smallvec = { version = "1", features = ["serde"] }
 string = { version = "0.2", default-features = false }
 structopt = "0.3"
 thiserror = "1.0.29"
-tokio = { version = "1", features = ["io-std", "io-util", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
 tower = { version = "0.4", default-features = false, features = ["util"] }
 tower-http = { version = "0.1", features = ["decompression-br", "decompression-gzip"] }
 tower-service = "0.3"
