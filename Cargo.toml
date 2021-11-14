@@ -66,7 +66,7 @@ structopt = "0.3"
 thiserror = "1.0.29"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
 tower = { version = "0.4", default-features = false, features = ["util"] }
-tower-http = { version = "0.1", features = ["decompression-br", "decompression-gzip"] }
+tower-http = { version = "0.1.2", features = ["decompression-br", "decompression-gzip"] }
 tower-service = "0.3"
 toml = "0.5"
 twitter-client = "0.0.1"
