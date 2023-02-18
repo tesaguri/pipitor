@@ -1,28 +1,22 @@
+/// Generates specified `Visitor` methods to visit bytes by delegating to corresponding methods
+/// to visit a string.
 macro_rules! serde_delegate {
-    (visit_str $($rest:tt)*) => {
-        fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
-            self.visit_bytes(s.as_bytes())
-        }
-    };
-    (visit_bytes $($rest:tt)*) => {
+    (visit_bytes) => {
         fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
             std::str::from_utf8(v).map_err(E::custom).and_then(|s| self.visit_str(s))
         }
-        serde_delegate!($($rest)*);
     };
-    (visit_borrowed_bytes $($rest:tt)*) => {
+    (visit_borrowed_bytes) => {
         fn visit_borrowed_bytes<E: de::Error>(self, v: &'de [u8]) -> Result<Self::Value, E> {
             std::str::from_utf8(v).map_err(E::custom).and_then(|s| self.visit_borrowed_str(s))
         }
-        serde_delegate!($($rest)*);
     };
-    (visit_byte_buf $($rest:tt)*) => {
+    (visit_byte_buf) => {
         fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
             String::from_utf8(v).map_err(E::custom).and_then(|s| self.visit_string(s))
         }
-        serde_delegate!($($rest)*);
     };
-    () => {};
+    ($($method:tt)*) => { $(serde_delegate!($method);)* };
 }
 
 pub mod consts {
