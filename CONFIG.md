@@ -143,19 +143,18 @@ usage (without this, the bot would end up getting 200 Tweets every second, most
 of which are duplicate).
 
 However, the Tweet IDs are not completely sorted in chronological order.
-Instead, they are _roughly sorted_, and a new Tweet with smaller ID than the
-above `since_id` may appear after the last request. To catch such Tweets,
-the bot may subtract a small amount of time from `since_id` as follows:
-`since_id := min(since_id, now() - delay)`, where `now()` represents the current
-timestamp in the Snowflake ID space.
+Instead, they are _roughly sorted_, and new Tweets with IDs smaller than the
+said `since_id` may appear after the last request. To catch such Tweets,
+the bot may subtract a small amount of time from `since_id` like the following:
+`since_id := clamp(time2sf(last_retrieved - delay), time2sf(sf2time(since_id) - delay), since_id)`,
+where `last_retrieved` is the time of the last request, `time2sf()` is a
+Snowflake ID corresponding to the given time and `sf2time()` is its reverse.
 
-More accurately, Tweet IDs are k-sorted: for every two Tweets posted within
-k seconds of each other, their IDs fall in the same k-second frame in the ID
-space. Twitter has said in [their blog][announcing-snowflake] (over 10 years
-before this writing though) that they were aiming to keep the k below 1 second. So `twitter.list.delay` value of 1 second should be sufficient, provided that
-the local time is in sync with Twitter's server time.
+For further details, see the article
+_[Your Timelines Are Leaky: A Slipperiness of Twitter's Snowflake IDs and `since_id` ❄️][leaky-snowflake]_.
+The configuration option corresponds to $k$ value in the article.
 
-[announcing-snowflake]: https://blog.twitter.com/engineering/en_us/a/2010/announcing-snowflake.html
+[leaky-snowflake]: <https://github.com/tesaguri/leaky-snowflake/blob/main/README.md>
 
 Defaults to 1 second.
 

@@ -60,6 +60,7 @@ where
     sender: Arc<RequestSender<S, B>>,
     #[pin]
     response: twitter_client::response::ResponseFuture<Vec<Tweet>, S::Future>,
+    requested_at: SystemTime,
 }
 
 impl<S, B> ListTimeline<S, B>
@@ -103,6 +104,7 @@ where
                 since_id,
                 response,
                 sender: sender.clone(),
+                requested_at: system_time_now(),
             });
         }
 
@@ -191,13 +193,15 @@ where
             return Poll::Ready(());
         }
 
-        this.sender.set_since_id(tweets.first().unwrap().id);
+        this.sender
+            .set_since_id(tweets.first().unwrap().id, *this.requested_at);
 
         let res = super::lists::Statuses::new(this.sender.list_id)
             .since_id(Some(*this.since_id))
             .max_id(Some(tweets.last().unwrap().id - 1))
             .send(&this.sender.token, &mut this.sender.http.clone());
         this.response.set(res);
+        *this.requested_at = system_time_now();
 
         if let Err(e) = this.sender.tx.clone().start_send(tweets) {
             debug_assert!(e.is_disconnected());
@@ -229,6 +233,7 @@ where
         });
         let count = if since_id.is_some() { 200 } else { 1 };
 
+        let requested_at = system_time_now();
         let task = super::lists::Statuses::new(self.list_id)
             .count(Some(count))
             .include_rts(Some(false))
@@ -243,7 +248,7 @@ where
                                 debug_assert!(e.is_disconnected());
                                 return;
                             }
-                            self.set_since_id(id);
+                            self.set_since_id(id, requested_at);
                         }
                         resp.rate_limit
                     }
@@ -272,7 +277,15 @@ where
 }
 
 impl<S, B> RequestSender<S, B> {
-    fn set_since_id(&self, since_id: i64) {
+    fn set_since_id(&self, since_id: i64, requested_at: SystemTime) {
+        // Adjust the ID to prevent "timeline leaks".
+        // See <https://github.com/tesaguri/leaky-snowflake/blob/main/README.md> for details.
+        let lower = ((((since_id >> 22) as u128).saturating_sub(self.delay.as_millis()) as i64)
+            << 22)
+            .saturating_sub(1);
+        let since_id = i64::try_from(system_time_to_snowflake(requested_at - self.delay) - 1)
+            .unwrap()
+            .clamp(lower, since_id);
         self.since_id.fetch_max(since_id, Ordering::AcqRel);
     }
 }
