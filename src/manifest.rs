@@ -538,7 +538,7 @@ fn resolve_path(path: &str, base: &str) -> Option<Box<str>> {
         None
     } else {
         let new = Path::new(base)
-            .join(&path)
+            .join(path)
             .into_os_string()
             .into_string()
             .unwrap()
@@ -567,7 +567,7 @@ fn resolve_database_uri(uri: &str, base: &str) -> Option<Box<str>> {
         let i = path
             .find('?')
             .or_else(|| path.find('#'))
-            .unwrap_or_else(|| path.len());
+            .unwrap_or(path.len());
         let (path, query_and_fragment) = path.split_at(i);
         resolve_path(path, base).map(|new| {
             ["file:", &new, query_and_fragment]

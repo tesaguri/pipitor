@@ -77,7 +77,7 @@ where
                             hub,
                             topic.clone(),
                             client.clone(),
-                            &*conn,
+                            &conn,
                         ));
                     }
                 }
@@ -474,7 +474,7 @@ fn rss_hub_links(
             .get(&*prefix)
             .map_or(false, |s| s == util::consts::NS_ATOM);
         map.into_iter()
-            .filter_map(|(name, elms)| (name == "link").then(move || elms))
+            .filter_map(|(name, elms)| (name == "link").then_some(elms))
             .flatten()
             .filter(move |elm| {
                 if let Some((_, ns)) = elm

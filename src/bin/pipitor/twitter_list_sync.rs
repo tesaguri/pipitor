@@ -54,7 +54,7 @@ pub async fn main(opt: &crate::Opt, _subopt: Opt) -> anyhow::Result<()> {
     let res = res_fut
         .await
         .context("failed to retrieve the list from Twitter")?;
-    let list: HashSet<i64> = (*res).users.iter().map(|u| u.id).collect();
+    let list: HashSet<i64> = res.users.iter().map(|u| u.id).collect();
     // `res` is actually a cursored response, but we have set `count` parameter to `5000`,
     // which is the maximum # of members of a list, so we needn't check cursor here.
 

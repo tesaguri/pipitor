@@ -25,11 +25,11 @@ impl Router {
         let mut ret = Router { map };
 
         for rule in &*manifest.rule {
-            let &Rule {
+            let Rule {
                 ref topics,
                 ref route,
                 ..
-            } = rule;
+            } = *rule;
             for topic in &**topics {
                 ret.append(topic.clone(), route.clone());
             }

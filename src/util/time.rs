@@ -124,7 +124,7 @@ pub fn instant_from_unix(unix: Duration) -> Instant {
     if now_unix < unix {
         now_i + (unix - now_unix)
     } else {
-        now_i - (now_unix - unix)
+        now_i.checked_sub(now_unix - unix).unwrap()
     }
 }
 

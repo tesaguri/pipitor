@@ -125,12 +125,12 @@ impl Entry {
 impl RawFeed {
     pub fn parse(kind: MediaType, content: &[u8]) -> Option<Self> {
         match kind {
-            MediaType::Atom => atom::Feed::read_from(&*content).ok().map(RawFeed::Atom),
-            MediaType::Rss => rss::Channel::read_from(&*content).ok().map(RawFeed::Rss),
-            MediaType::Xml => atom::Feed::read_from(&*content)
+            MediaType::Atom => atom::Feed::read_from(content).ok().map(RawFeed::Atom),
+            MediaType::Rss => rss::Channel::read_from(content).ok().map(RawFeed::Rss),
+            MediaType::Xml => atom::Feed::read_from(content)
                 .ok()
                 .map(RawFeed::Atom)
-                .or_else(|| rss::Channel::read_from(&*content).ok().map(RawFeed::Rss)),
+                .or_else(|| rss::Channel::read_from(content).ok().map(RawFeed::Rss)),
         }
     }
 }
@@ -174,7 +174,7 @@ macro_rules! def_take_media_description {
             extensions: &mut BTreeMap<String, BTreeMap<String, Vec<$Extension>>>,
             namespaces: &BTreeMap<String, String>,
         ) -> Option<String> {
-            fn take_description(elms: &mut Vec<$Extension>) -> Option<String> {
+            fn take_first_value(elms: &mut [$Extension]) -> Option<String> {
                 elms.iter_mut().flat_map(|elm| elm.value.take()).next()
             }
 
@@ -182,7 +182,7 @@ macro_rules! def_take_media_description {
                 for elm in elms {
                     for (name, elms) in &mut elm.children {
                         if name == "description" {
-                            return take_description(elms);
+                            return take_first_value(elms);
                         }
                     }
                 }
@@ -200,7 +200,7 @@ macro_rules! def_take_media_description {
                     for (name, elms) in map {
                         match &name[..] {
                             "description" => {
-                                if let Some(v) = take_description(elms) {
+                                if let Some(v) = take_first_value(elms) {
                                     entry_description.get_or_insert(v);
                                 }
                             }
@@ -215,7 +215,7 @@ macro_rules! def_take_media_description {
                                     for (name, elms) in &mut elm.children {
                                         match &name[..] {
                                             "description" => {
-                                                if let Some(v) = take_description(elms) {
+                                                if let Some(v) = take_first_value(elms) {
                                                     group_description.get_or_insert(v);
                                                 }
                                             }
