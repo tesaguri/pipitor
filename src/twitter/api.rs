@@ -50,9 +50,6 @@ macro_rules! api_requests {
     () => ();
 }
 
-pub mod account;
-pub mod lists;
-pub mod oauth;
 pub mod statuses;
 
 use std::borrow::Borrow;
@@ -122,8 +119,6 @@ where
     Body(#[source] BE),
     #[error("Twitter returned error(s)")]
     Twitter(#[source] TwitterErrors),
-    #[error("Unexpected error occured.")]
-    Unexpected,
 }
 
 #[derive(Debug)]
@@ -244,12 +239,6 @@ where
     }
 }
 
-impl TwitterErrors {
-    pub fn codes<'a>(&'a self) -> impl Iterator<Item = u32> + 'a {
-        self.errors.iter().map(|e| e.code)
-    }
-}
-
 impl Display for TwitterErrors {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "status: {}", self.status)?;
@@ -267,13 +256,6 @@ impl Display for TwitterErrors {
 }
 
 impl error::Error for TwitterErrors {}
-
-impl ErrorCode {
-    pub const YOU_ARENT_ALLOWED_TO_ADD_MEMBERS_TO_THIS_LIST: u32 = 104;
-    pub const CANNOT_FIND_SPECIFIED_USER: u32 = 108;
-    pub const NO_STATUS_FOUND_WITH_THAT_ID: u32 = 144;
-    pub const YOU_HAVE_ALREADY_RETWEETED_THIS_TWEET: u32 = 327;
-}
 
 impl Display for ErrorCode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {

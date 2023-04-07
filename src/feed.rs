@@ -109,12 +109,12 @@ impl From<rss::Item> for Entry {
 impl RawFeed {
     pub fn parse(kind: MediaType, content: &[u8]) -> Option<Self> {
         match kind {
-            MediaType::Atom => atom::Feed::read_from(&*content).ok().map(RawFeed::Atom),
-            MediaType::Rss => rss::Channel::read_from(&*content).ok().map(RawFeed::Rss),
-            MediaType::Xml => atom::Feed::read_from(&*content)
+            MediaType::Atom => atom::Feed::read_from(content).ok().map(RawFeed::Atom),
+            MediaType::Rss => rss::Channel::read_from(content).ok().map(RawFeed::Rss),
+            MediaType::Xml => atom::Feed::read_from(content)
                 .ok()
                 .map(RawFeed::Atom)
-                .or_else(|| rss::Channel::read_from(&*content).ok().map(RawFeed::Rss)),
+                .or_else(|| rss::Channel::read_from(content).ok().map(RawFeed::Rss)),
         }
     }
 }

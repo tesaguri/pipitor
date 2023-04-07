@@ -71,7 +71,7 @@ where
                             hub,
                             topic.clone(),
                             client.clone(),
-                            &*conn,
+                            &conn,
                         ));
                     }
                 }
@@ -168,7 +168,7 @@ where
         log::info!("Renewing {} expiring subscription(s)", expiring.len());
 
         for (id, hub, topic) in expiring {
-            tokio::spawn(self.renew(id, hub, topic, &conn).map(log_and_discard_error));
+            tokio::spawn(self.renew(id, hub, topic, conn).map(log_and_discard_error));
         }
     }
 

@@ -7,7 +7,6 @@ use smallvec::SmallVec;
 
 use crate::feed::Entry;
 use crate::manifest::{Manifest, Outbox, Route, Rule, TopicId};
-use crate::twitter::Tweet;
 
 #[derive(Clone, Default)]
 pub struct Router {
@@ -25,11 +24,11 @@ impl Router {
         let mut ret = Router { map };
 
         for rule in &*manifest.rule {
-            let &Rule {
+            let Rule {
                 ref topics,
                 ref route,
                 ..
-            } = rule;
+            } = *rule;
             for topic in &**topics {
                 ret.append(topic.clone(), route.clone());
             }
@@ -80,17 +79,6 @@ impl Router {
             .filter(move |r| {
                 r.filter.as_ref().map_or(true, |f| f.matches_entry(entry))
                     && r.exclude.as_ref().map_or(true, |e| !e.matches_entry(entry))
-            })
-            .flat_map(|r| r.outbox())
-    }
-
-    pub fn route_tweet<'a>(&'a self, tweet: &'a Tweet) -> impl Iterator<Item = &'a Outbox> {
-        self.get(&TopicId::Twitter(tweet.user.id))
-            .into_iter()
-            .flatten()
-            .filter(move |r| {
-                r.filter.as_ref().map_or(true, |f| f.matches_tweet(tweet))
-                    && r.exclude.as_ref().map_or(true, |e| !e.matches_tweet(tweet))
             })
             .flat_map(|r| r.outbox())
     }

@@ -10,26 +10,24 @@ use std::mem;
 use std::pin::Pin;
 use std::str;
 use std::task::{Context, Poll};
-use std::time::SystemTime;
 
 use anyhow::Context as _;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::SqliteConnection;
-use futures::{future, ready, Future, FutureExt, Stream, TryStream};
+use futures::{future, Future, FutureExt, Stream, TryStream};
 use http_body::Body;
 use listenfd::ListenFd;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
-use twitter_stream::TwitterStream;
 
 use crate::credentials::Credentials;
-use crate::manifest::{Manifest, TopicId};
+use crate::manifest::Manifest;
 use crate::router::Router;
 use crate::schema::*;
 use crate::socket;
-use crate::twitter;
-use crate::util::{self, open_credentials, snowflake_to_system_time, HttpService, Maybe};
+
+use crate::util::{self, open_credentials, HttpService};
 use crate::websub;
 
 use self::core::Core;
@@ -43,10 +41,6 @@ where
 {
     #[pin]
     core: Core<S>,
-    #[pin]
-    twitter_list: twitter::ListTimeline<S, B>,
-    #[pin]
-    twitter: Option<TwitterStream<S::ResponseBody>>,
     #[pin]
     websub: Option<websub::Subscriber<S, B, I>>,
     sender: Sender<S, B>,
@@ -135,13 +129,9 @@ where
     {
         let core = Core::new(manifest, client)?;
         let websub = Self::init_websub(&core, make_unix_incoming)?;
-        let twitter = core.init_twitter().await?;
-        let twitter_list = core.init_twitter_list()?;
 
         let app = App {
             core,
-            twitter_list,
-            twitter,
             websub,
             sender: Sender::new(),
         };
@@ -203,22 +193,12 @@ where
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
-        let mut this = self.project();
-        while let Some(tweets) = ready!(this.twitter_list.as_mut().poll_next_backfill(cx)) {
-            this.sender.send_tweets(tweets, &this.core)?;
-        }
+        let this = self.project();
         this.core.poll_shutdown(cx).map(|()| Ok(()))
     }
 
-    pub async fn reset(mut self: Pin<&mut Self>) -> anyhow::Result<()> {
-        if self.twitter.is_none() {
-            let mut this = self.as_mut().project();
-            this.twitter.set(this.core.init_twitter().await?);
-        }
-
-        self.as_mut().shutdown().await?;
-
-        Ok(())
+    pub async fn reset(self: Pin<&mut Self>) -> anyhow::Result<()> {
+        self.shutdown().await
     }
 
     /// Replaces the `App`'s manifest.
@@ -298,32 +278,12 @@ where
             old_pool,
         };
         let this = &mut *guard.this;
-        let (ref old, ref old_credentials) = *guard.old.as_ref().unwrap();
 
-        let catch = async {
-            this.core.load_twitter_tokens()?;
-
-            let new = this.manifest();
-            if this.credentials().twitter.client.identifier
-                != old_credentials.twitter.client.identifier
-                || new.twitter.user != old.twitter.user
-                || new
-                    .twitter_topics()
-                    .any(|user| !old.has_topic(&TopicId::Twitter(user)))
-            {
-                let twitter = this.core.init_twitter().await?;
-                let twitter_list = this.core.init_twitter_list()?;
-                this.twitter = twitter;
-                this.twitter_list = twitter_list;
-            }
-
-            this.sync_websub_subscriptions()?;
-
-            Ok(())
-        }
-        .await;
-
-        match catch {
+        let result = this
+            .core
+            .load_twitter_tokens()
+            .and_then(|()| this.sync_websub_subscriptions());
+        match result {
             Ok(()) => {
                 let old = guard.old.take().unwrap().0;
                 mem::forget(guard);
@@ -336,60 +296,6 @@ where
                 Err((e, manifest))
             }
         }
-    }
-
-    fn poll_twitter(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
-        let mut this = self.project();
-
-        let mut twitter = if let Some(twitter) = this.twitter.as_mut().as_pin_mut() {
-            twitter
-        } else {
-            return Poll::Ready(Ok(()));
-        };
-
-        while let Poll::Ready(v) = twitter.as_mut().poll_next(cx) {
-            let result = if let Some(r) = v {
-                r
-            } else {
-                this.twitter.set(None);
-                return Poll::Ready(Ok(()));
-            };
-
-            let json = match result.context("error while listening to Twitter's Streaming API") {
-                Ok(json) => json,
-                Err(e) => {
-                    this.twitter.set(None);
-                    return Poll::Ready(Err(e));
-                }
-            };
-
-            let tweet = if let Maybe::Just(t) = json::from_str::<Maybe<twitter::Tweet>>(&json)? {
-                t
-            } else {
-                continue;
-            };
-
-            if log_enabled!(log::Level::Trace) {
-                let created_at = snowflake_to_system_time(tweet.id as u64);
-                match SystemTime::now().duration_since(created_at) {
-                    Ok(latency) => trace!("Twitter stream latency: {:.2?}", latency),
-                    Err(e) => trace!("Twitter stream latency: -{:.2?}", e.duration()),
-                }
-            }
-
-            let from = tweet.user.id;
-            // Prevent the later closure from capturing `this`, which is borrowed mutably by the loop.
-            let core = this.core.as_mut();
-            let will_process = core.manifest().has_topic(&TopicId::Twitter(from))
-                && tweet
-                    .in_reply_to_user_id
-                    .map_or(true, |to| core.manifest().has_topic(&TopicId::Twitter(to)));
-            if will_process {
-                this.sender.send_tweet(tweet, &core)?;
-            }
-        }
-
-        Poll::Pending
     }
 
     fn sync_websub_subscriptions(&self) -> anyhow::Result<()> {
@@ -480,11 +386,7 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<anyhow::Result<()>> {
         trace_fn!(App::<S, B, I>::poll);
 
-        let mut this = self.as_mut().project();
-
-        while let Poll::Ready(Some(tweets)) = this.twitter_list.as_mut().poll_next(cx)? {
-            this.sender.send_tweets(tweets, &this.core)?;
-        }
+        let this = self.as_mut().project();
 
         if let Some(mut websub) = this.websub.as_pin_mut() {
             while let Poll::Ready(Some((topic, content))) = websub.as_mut().poll_next(cx)? {
@@ -493,12 +395,6 @@ where
                 } else {
                     log::warn!("Failed to parse an updated content of topic {}", topic);
                 }
-            }
-        }
-
-        if self.manifest().twitter.stream {
-            if let Poll::Ready(result) = self.as_mut().poll_twitter(cx) {
-                return Poll::Ready(result);
             }
         }
 

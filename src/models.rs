@@ -75,15 +75,3 @@ impl<'a> From<&'a TwitterToken> for oauth_credentials::Credentials<&'a str> {
         Self::new(&token.access_token, &token.access_token_secret)
     }
 }
-
-impl<'a> From<&'a crate::twitter::Tweet> for NewTweet<'a> {
-    fn from(tweet: &'a crate::twitter::Tweet) -> Self {
-        NewTweet {
-            id: tweet.id,
-            text: &tweet.text,
-            user_id: tweet.user.id,
-            in_reply_to_status_id: tweet.in_reply_to_status_id,
-            quoted_status_id: tweet.quoted_status.as_ref().map(|q| q.id),
-        }
-    }
-}

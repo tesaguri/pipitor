@@ -82,9 +82,10 @@ pub struct Response {
     pub code: ResponseCode,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub enum ResponseCode {
     #[serde(rename = "SUCCESS")]
+    #[default]
     Success,
     #[serde(rename = "INTERNAL_ERROR")]
     InternalError,
@@ -126,12 +127,6 @@ impl ResponseCode {
             ResponseCode::InternalError => "INTERNAL_ERROR",
             ResponseCode::RequestUnrecognized => "REQUEST_UNRECOGNIZED",
         }
-    }
-}
-
-impl Default for ResponseCode {
-    fn default() -> Self {
-        ResponseCode::Success
     }
 }
 

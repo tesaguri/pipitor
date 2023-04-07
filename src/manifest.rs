@@ -12,7 +12,6 @@ use serde::{de, Deserialize};
 use smallvec::SmallVec;
 
 use crate::feed::Entry;
-use crate::twitter::Tweet;
 use crate::util::{MapAccessDeserializer, SeqAccessDeserializer, Serde};
 
 #[non_exhaustive]
@@ -190,7 +189,7 @@ impl Manifest {
         })
     }
 
-    pub fn twitter_topics<'a>(&'a self) -> impl Iterator<Item = i64> + 'a {
+    pub fn twitter_topics(&self) -> impl Iterator<Item = i64> + '_ {
         self.topics().filter_map(|topic| match *topic {
             TopicId::Twitter(user) => Some(user),
             _ => None,
@@ -274,16 +273,8 @@ impl Filter {
                     .as_ref()
                     .into_iter()
                     .chain(entry.summary.as_ref())
-                    .any(|c| t.is_match(&c))
+                    .any(|c| t.is_match(c))
             })
-    }
-
-    pub fn matches_tweet(&self, tweet: &Tweet) -> bool {
-        self.title.is_match(&tweet.text)
-            || self
-                .text
-                .as_ref()
-                .map_or(false, |t| t.is_match(&tweet.text))
     }
 }
 
@@ -477,7 +468,7 @@ fn resolve_path(path: &str, base: &str) -> Option<Box<str>> {
         None
     } else {
         let new = Path::new(base)
-            .join(&path)
+            .join(path)
             .into_os_string()
             .into_string()
             .unwrap()
@@ -501,7 +492,7 @@ fn resolve_database_uri(uri: &str, base: &str) -> Option<Box<str>> {
         let i = path
             .find('?')
             .or_else(|| path.find('#'))
-            .unwrap_or_else(|| path.len());
+            .unwrap_or(path.len());
         let (path, query_and_fragment) = path.split_at(i);
         resolve_path(path, base).map(|new| {
             ["file:", &new, query_and_fragment]

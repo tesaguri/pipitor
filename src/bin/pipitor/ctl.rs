@@ -54,7 +54,7 @@ pub async fn main(opt: &crate::Opt, subopt: Opt) -> anyhow::Result<()> {
         .search_manifest(|path| fs::metadata(path))
         .context("unable to access the manifest")?
         .1;
-    let ipc_path = ipc_path(&manifest_path);
+    let ipc_path = ipc_path(manifest_path);
     let mut ipc = connect(&ipc_path).await?;
 
     let req = match subopt.cmd {

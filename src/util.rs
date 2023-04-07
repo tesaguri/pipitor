@@ -51,13 +51,12 @@ use std::fs;
 use std::io;
 use std::marker::PhantomData;
 use std::mem;
-use std::ops::Range;
+
 use std::pin::Pin;
 use std::str;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
 use bytes::Buf;
@@ -98,7 +97,7 @@ pub enum Never {}
 
 macro_rules! trace_fn {
     (@heading $path:path) => {
-        concat!(file!(), ':', line!(), ':', column!(), ' ', stringify!($path));
+        concat!(file!(), ':', line!(), ':', column!(), ' ', stringify!($path))
     };
     ($path:path) => {{
         // Ensure that at least the symbol `$path` exists.
@@ -193,45 +192,6 @@ impl tokio::io::AsyncWrite for Never {
     }
 }
 
-pub fn replace_char_range(
-    s: &mut String,
-    base_byte_offset: usize,
-    range: Range<usize>,
-    replace_with: &str,
-) -> Option<usize> {
-    let start = if let Some(i) = char_index_to_byte_index(&s[base_byte_offset..], range.start) {
-        base_byte_offset + i
-    } else {
-        return None;
-    };
-    let end = if let Some(i) = char_index_to_byte_index(&s[start..], range.end - range.start) {
-        start + i
-    } else {
-        return None;
-    };
-
-    s.replace_range(start..end, replace_with);
-
-    Some(start)
-}
-
-pub fn char_index_to_byte_index(s: &str, char_index: usize) -> Option<usize> {
-    if char_index == 0 {
-        return Some(0);
-    }
-
-    let (mut bi, mut ci) = (0, 0);
-    for c in s.chars() {
-        bi += c.len_utf8();
-        ci += 1;
-        if ci == char_index {
-            return Some(bi);
-        }
-    }
-
-    None
-}
-
 pub fn deserialize_from_str<'de, T, D>(d: D) -> Result<T, D::Error>
 where
     T: FromStr,
@@ -265,36 +225,4 @@ pub fn open_credentials(path: &str) -> anyhow::Result<Credentials> {
         .context("failed to open the credentials file")
         .and_then(|buf| toml::from_slice(&buf).context("failed to parse the credentials file"))?;
     Ok(ret)
-}
-
-pub fn snowflake_to_system_time(id: u64) -> SystemTime {
-    // timestamp_ms = (snowflake >> 22) + 1_288_834_974_657
-    let snowflake_time_ms = id >> 22;
-    let timestamp = Duration::new(
-        snowflake_time_ms / 1_000 + 1_288_834_974,
-        (snowflake_time_ms as u32 % 1_000 + 657) * 1_000 * 1_000,
-    );
-    UNIX_EPOCH + timestamp
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn replace() {
-        let mut s = String::from("Pipitor the Twitter bot");
-        let start = replace_char_range(&mut s, 0, 12..19, "social media");
-        assert_eq!(s, "Pipitor the social media bot");
-        assert_eq!(start, Some(12));
-
-        s = String::from("メロスは激怒した。");
-        let start = replace_char_range(&mut s, 0, 5..8, "おこ");
-        assert_eq!(s, "メロスは激おこ。");
-        assert_eq!(start, Some(15));
-
-        let start = replace_char_range(&mut s, 15, 0..2, "怒");
-        assert_eq!(s, "メロスは激怒。");
-        assert_eq!(start, Some(15));
-    }
 }
