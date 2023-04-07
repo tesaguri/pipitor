@@ -89,7 +89,7 @@ where
                 Outbox::Twitter(user) => {
                     let shared = shared.clone();
                     let conn = conn.take().map(Ok).unwrap_or_else(|| core.conn())?;
-                    let fut = twitter::statuses::Update::new(&text)
+                    let fut = twitter::tweets::Post::new(&text)
                         .send(core, user)
                         .map(move |result| -> anyhow::Result<()> {
                             result?;

@@ -9,7 +9,7 @@ macro_rules! api_requests {
         $($rest:tt)*
     ) => {
         $(#[$attr])*
-        #[derive(oauth1::Request)]
+        #[derive(serde::Serialize)]
         $vis struct $Name $(<$($lt),*>)? {
             $($(#[$req_attr])* $required: $req_ty,)*
             $($(#[$opt_attr])* $optional: $opt_ty,)*
@@ -50,7 +50,7 @@ macro_rules! api_requests {
     () => ();
 }
 
-pub mod statuses;
+pub mod tweets;
 
 use std::borrow::Borrow;
 use std::error;
@@ -134,7 +134,7 @@ pub struct ErrorCode {
     pub message: String,
 }
 
-pub trait Request: oauth1::Request {
+pub trait Request: serde::Serialize {
     type Data: de::DeserializeOwned;
 
     const METHOD: Method;
@@ -301,13 +301,13 @@ fn prepare_request<R>(
     token: Credentials<&str>,
 ) -> http::Request<Vec<u8>>
 where
-    R: oauth1::Request + ?Sized,
+    R: serde::Serialize + ?Sized,
 {
     let form = method == Method::POST;
 
     let mut oauth = oauth1::Builder::new(client, oauth1::HmacSha1);
     oauth.token(token);
-    let authorization = oauth.build(method.as_str(), uri, req);
+    let authorization = oauth.build(method.as_str(), uri, &());
 
     trace!("{} {}", method, uri);
 
@@ -317,7 +317,7 @@ where
         .header(AUTHORIZATION, authorization);
 
     if form {
-        let data = oauth1::to_form_urlencoded(req).into_bytes();
+        let data = json::to_vec(req).unwrap();
         http.uri(Uri::from_static(uri))
             .header(
                 CONTENT_TYPE,
@@ -326,8 +326,7 @@ where
             .body(data)
             .unwrap()
     } else {
-        let uri = oauth1::to_uri_query(uri.to_owned(), req);
-        http.uri(uri).body(Vec::default()).unwrap()
+        todo!();
     }
 }
 
@@ -410,7 +409,7 @@ mod tests {
     #[tokio::test]
     async fn parse_errors() {
         api_requests! {
-            GET "https://api.twitter.com/1.1/test/foo.json" => de::IgnoredAny;
+            POST "https://api.twitter.com/1.1/test/foo.json" => de::IgnoredAny;
             struct Foo {
                 param: u32;
             }
