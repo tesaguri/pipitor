@@ -12,14 +12,14 @@ jobs:
         os:
           - ubuntu-latest
           - macos-latest
-          - windows-latest
+          # - windows-latest
         toolchain:
           - stable
           - beta
           - nightly
         features:
           - []
-          - [native-tls, dhall]
+          - [native-tls]
           - [rustls]
         include:
           - toolchain: stable
@@ -29,9 +29,14 @@ jobs:
             features: []
             components: clippy,rustfmt
     continue-on-error: ${{ matrix.toolchain == 'nightly' }}
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEBUG_DEBUG: 0
+      RUSTFLAGS: --deny warnings
+      RUST_BACKTRACE: 1
     steps:
       - uses: actions/checkout@v2
-      - name: Install extern libraries (Linux)
+      - name: Install `libsqlite3-dev`
         if: runner.os == 'Linux'
         run: sudo apt-get install libsqlite3-dev
       - name: Install extern libraries (Windows)
@@ -122,29 +127,36 @@ jobs:
       || startsWith(github.event.ref, 'refs/tags/v8')
       || startsWith(github.event.ref, 'refs/tags/v9')
       || github.event.ref == 'refs/heads/release-test'
-    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         target:
-          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
           - armv7-unknown-linux-gnueabihf
+          - x86_64-unknown-linux-gnu
+          - aarch64-apple-darwin
           - x86_64-apple-darwin
           - x86_64-pc-windows-msvc
-          - x86_64-unknown-freebsd
+          # - x86_64-unknown-freebsd
         include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-          - target: armv7-unknown-linux-gnueabihf
-            os: ubuntu-latest
+          - os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
             use_cross: true
+          - target: armv7-unknown-linux-gnueabihf
+            use_cross: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
           - target: x86_64-apple-darwin
             os: macos-latest
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-          - target: x86_64-unknown-freebsd
-            os: ubuntu-latest
-            use_cross: true
+          # - target: x86_64-unknown-freebsd
+          #   use_cross: true
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
+      CARGO_PROFILE_RELEASE_LTO: fat
+      RUST_BACKTRACE: 1
     steps:
       - uses: actions/checkout@v2
       - name: Install packages (x86_64-unknown-linux-gnu)
@@ -159,7 +171,8 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
           profile: minimal
-        id: toolchain
+      - uses: Swatinem/rust-cache@v1
+        if: github.event.ref == 'refs/heads/release-test'
       - name: Install `cross`
         if: matrix.use_cross
         uses: actions-rs/install@v0.1
@@ -170,30 +183,51 @@ jobs:
         if: runner.os == 'Windows'
       - run: echo "SQLITE3_LIB_DIR=/usr/local/x86_64-unknown-freebsd10/lib" >> $GITHUB_ENV
         if: matrix.target == 'x86_64-unknown-freebsd'
+      # Workaround for <https://github.com/rust-embedded/cross/issues/466>.
+      - name: Install `cross`
+        if: matrix.use_cross && join(matrix.features) == ''
+        run: |
+          REV=8ea5d4600fe65dd0797509cfc2e1786638a0327f
+          curl -fLOsS "https://github.com/rust-embedded/cross/archive/$REV.zip"
+          unzip "$REV.zip"
+          cargo install --path="cross-$REV"
+        env:
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
+          CARGO_PROFILE_RELEASE_LTO: thin
+      - name: Set opt-level
+        if: github.event.ref == 'refs/heads/release-test'
+        run: |
+          cat <<ENV >> "$GITHUB_ENV"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+          CARGO_PROFILE_RELEASE_LTO=false
+          CARGO_PROFILE_RELEASE_OPT_LEVEL=0
+          ENV
+        shell: bash
       - name: Build
         uses: actions-rs/cargo@v1
         with:
-          command: rustc
-          args: --verbose --bin pipitor --release --target '${{ matrix.target }}' --no-default-features --features=rustls -- -C lto
+          command: build
+          args: --verbose --bin pipitor --release '--features=${{ join(matrix.features) }}' '--target=${{ matrix.target }}'
           use-cross: ${{ matrix.use_cross }}
         env:
-          CARGO_INCREMENTAL: 0
-          RUSTFLAGS: -C codegen-units=1 -C embed-bitcode
+          # Work around <https://github.com/actions/virtual-environments/issues/2557>.
+          SDKROOT: /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
       - name: Archive the binary
         id: archive
         run: |
-          TAG=$(echo '${{ github.ref }}' | sed -E 's/^refs\/[^\/]+\///')
-          NAME="pipitor-$TAG-${{ matrix.target }}"
+          set -o errexit
+          tag="${GITHUB_REF##*/}"
+          name="pipitor-$tag-${{ matrix.target }}"
           if [ '${{ runner.os }}' = Windows ]; then
-            ASSET_NAME=$NAME.zip
+            asset_name="$name.zip"
             ln 'target/${{ matrix.target }}/release/pipitor.exe' .
-            7z a $ASSET_NAME pipitor.exe
+            7z a "$asset_name" pipitor.exe
           else
-            ASSET_NAME=$NAME.gz
+            asset_name="$name.tar.gz"
             ln 'target/${{ matrix.target }}/release/pipitor' .
-            tar -czf $ASSET_NAME pipitor
+            tar -czf "$asset_name" pipitor
           fi
-          echo "::set-output name=asset::$ASSET_NAME"
+          echo "::set-output name=asset::$asset_name"
         shell: bash
       - name: Upload artifact
         uses: actions/upload-artifact@v2
@@ -202,27 +236,46 @@ jobs:
 
   release:
     name: Create GitHub release
-    needs: build
+    needs: [test, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions/download-artifact@v2
-      - name: Create release and upload assets
-        # Reference: <https://github.com/actions/upload-release-asset/issues/28#issuecomment-617208601>
-        run: |
-          set -x
-          assets=()
-          for asset in *.{gz,zip}; do
-            assets+=('--attach' "$asset")
-          done
-          tag_name="${GITHUB_REF##*/}"
-          if [[ "$GITHUB_REF" == 'refs/tags/'* ]]; then
-            # Fetch the tagging message
-            git tag -d "$tag_name"
-            git fetch --no-tags origin "$tag_name:$GITHUB_REF"
-            message=$(git tag -l --format='%(contents)' "$tag_name" | sed -n '/^-----BEGIN PGP SIGNATURE-----$/q;p')
-          fi
-          hub release create "${assets[@]}" --message "${message:-Test release}" "$tag_name"
+      - name: Sign release assets
         working-directory: artifact
+        run: |
+          set -o errexit -o xtrace
+          gpg --batch --import <<< "$PRIVATE_KEY"
+          for f in *; do
+            gpg --batch --local-user C90F234F43B5075A0D96C6D5986E104E7F079F61 --armor --detach-sign "$f"
+          done
+          gpg --batch --yes --delete-secret-keys C90F234F43B5075A0D96C6D5986E104E7F079F61
+        shell: bash
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      - name: Get the tag info
+        id: tag
+        run: |
+          set -o errexit
+          if [[ "$GITHUB_REF" == 'refs/tags/'* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            git tag -d "$tag"
+            git fetch --no-tags origin "$tag:$GITHUB_REF"
+            echo "::set-output name=subject::$(git tag --list --format='%(contents:subject)' "$tag")"
+            git tag -l --format='%(contents:body)' "$tag" |
+              sed -n '/^-----BEGIN PGP SIGNATURE-----$/q; p' \
+              > body.txt
+          else
+            echo "::set-output name=subject::Test release"
+            touch body.txt
+          fi
+        shell: bash
+      - name: Create release
+        uses: tesaguri/action-gh-release@draft-wo-tag
+        with:
+          body_path: body.txt
+          name: ${{ steps.tag.outputs.subject }}
+          draft: ${{ github.event.ref == 'refs/heads/release-test' }}
+          files: artifact/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

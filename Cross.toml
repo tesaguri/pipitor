@@ -4,8 +4,12 @@ passthrough = [
     "RUSTFLAGS",
 ]
 
+[target.aarch64-unknown-linux-gnu]
+image = "ghcr.io/tesaguri/pipitor/cross:aarch64-unknown-linux-gnu"
+
 [target.armv7-unknown-linux-gnueabihf]
-image = "tesaguri/pipitor:armv7-unknown-linux-gnueabihf-0.1.0"
+image = "ghcr.io/tesaguri/pipitor/cross:armv7-unknown-linux-gnueabihf"
 
 [target.x86_64-unknown-freebsd]
-image = "tesaguri/pipitor:x86_64-unknown-freebsd-0.1.0"
+# Work around <https://github.com/rust-embedded/cross/issues/520>.
+image = "ghcr.io/tesaguri/cross-freebsd-diesel_migrations-test/cross:x86_64-unknown-freebsd"
