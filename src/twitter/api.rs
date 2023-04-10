@@ -9,7 +9,7 @@ macro_rules! api_requests {
         $($rest:tt)*
     ) => {
         $(#[$attr])*
-        #[derive(serde::Serialize)]
+        #[derive(oauth1::Request, serde::Serialize)]
         $vis struct $Name $(<$($lt),*>)? {
             $($(#[$req_attr])* $required: $req_ty,)*
             $($(#[$opt_attr])* $optional: $opt_ty,)*
@@ -134,7 +134,7 @@ pub struct ErrorCode {
     pub message: String,
 }
 
-pub trait Request: serde::Serialize {
+pub trait Request: oauth1::Request + serde::Serialize {
     type Data: de::DeserializeOwned;
 
     const METHOD: Method;
@@ -301,32 +301,34 @@ fn prepare_request<R>(
     token: Credentials<&str>,
 ) -> http::Request<Vec<u8>>
 where
-    R: serde::Serialize + ?Sized,
+    R: oauth1::Request + serde::Serialize + ?Sized,
 {
     let form = method == Method::POST;
 
     let mut oauth = oauth1::Builder::new(client, oauth1::HmacSha1);
     oauth.token(token);
-    let authorization = oauth.build(method.as_str(), uri, &());
 
     trace!("{} {}", method, uri);
 
     let http = http::Request::builder()
         .method(method)
-        .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
-        .header(AUTHORIZATION, authorization);
+        .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
 
     if form {
+        let authorization = oauth.build(method.as_str(), uri, &req);
         let data = json::to_vec(req).unwrap();
         http.uri(Uri::from_static(uri))
-            .header(
-                CONTENT_TYPE,
-                HeaderValue::from_static("application/x-www-form-urlencoded"),
-            )
+            .header(AUTHORIZATION, authorization)
+            .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
             .body(data)
             .unwrap()
     } else {
-        todo!();
+        let authorization = oauth.build(method.as_str(), uri, &());
+        let uri = oauth1::to_uri_query(uri.to_owned(), req);
+        http.uri(uri)
+            .header(AUTHORIZATION, authorization)
+            .body(Vec::default())
+            .unwrap()
     }
 }
 

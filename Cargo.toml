@@ -40,7 +40,7 @@ json = { version = "1", package = "serde_json" }
 listenfd = "0.3"
 log = "0.4.6"
 mime = "0.3"
-oauth1 = { version = "0.4", package = "oauth1-request", default-features = false, features = ["hmac-sha1"] }
+oauth1 = { version = "0.4", package = "oauth1-request" }
 oauth-credentials = { version = "0.2", features = ["serde"] }
 pin-project = "1"
 rand = "0.7"
