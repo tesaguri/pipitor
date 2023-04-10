@@ -10,7 +10,7 @@ use anyhow::Context;
 use futures::future::{self, Future, FutureExt};
 use futures::{Stream, StreamExt};
 use hyper::client::{connect::Connect, Client};
-use pipitor::Manifest;
+use pipitor::{Credentials, Manifest};
 
 #[derive(Clone, structopt::StructOpt)]
 pub struct Opt {
@@ -98,6 +98,18 @@ fn ipc_path_(manifest_path: &Path) -> PathBuf {
     sock.push(name);
     sock.push(".sock");
     manifest_path.with_file_name(sock)
+}
+
+pub fn open_credentials(opt: &Opt, manifest: &Manifest) -> anyhow::Result<Credentials> {
+    if opt.manifest_path.is_none() && manifest.credentials.is_none() {
+        let buf = fs::read("credentials.toml").context("could not open `credentials.toml`")?;
+        return toml::from_slice(&buf).context("failed to parse `credentials.toml`");
+    }
+
+    let path = manifest.credentials_path();
+    let buf =
+        fs::read(path).with_context(|| format!("could not open the credentials at {}", path))?;
+    toml::from_slice(&buf).context("failed to parse the credentials file")
 }
 
 cfg_if::cfg_if! {

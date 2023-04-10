@@ -50,7 +50,9 @@ macro_rules! api_requests {
     () => ();
 }
 
+pub mod oauth;
 pub mod tweets;
+pub mod users;
 
 use std::borrow::Borrow;
 use std::error;
@@ -119,6 +121,8 @@ where
     Body(#[source] BE),
     #[error("Twitter returned error(s)")]
     Twitter(#[source] TwitterErrors),
+    #[error("Unexpected error occured.")]
+    Unexpected,
 }
 
 #[derive(Debug)]

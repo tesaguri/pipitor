@@ -10,6 +10,7 @@ mod ctl;
 mod migration;
 mod run;
 mod setup;
+mod twitter_login;
 
 use std::process;
 
@@ -35,6 +36,8 @@ enum Cmd {
     Run(run::Opt),
     #[structopt(name = "setup")]
     Setup(setup::Opt),
+    #[structopt(name = "twitter-login")]
+    TwitterLogin(twitter_login::Opt),
 }
 
 fn main() {
@@ -57,6 +60,7 @@ fn run() -> anyhow::Result<()> {
             match cmd {
                 Cmd::Ctl(subopt) => ctl::main(&opt, subopt).await,
                 Cmd::Setup(subopt) => setup::main(&opt, subopt).await,
+                Cmd::TwitterLogin(subopt) => twitter_login::main(&opt, subopt).await,
                 Cmd::Migration(_) | Cmd::Run(_) => unreachable!(),
             }
         }),
