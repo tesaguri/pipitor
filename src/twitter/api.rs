@@ -319,7 +319,7 @@ where
         .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
 
     if form {
-        let authorization = oauth.build(method.as_str(), uri, &req);
+        let authorization = oauth.build(method.as_str(), uri, &());
         let data = json::to_vec(req).unwrap();
         http.uri(Uri::from_static(uri))
             .header(AUTHORIZATION, authorization)
@@ -327,7 +327,7 @@ where
             .body(data)
             .unwrap()
     } else {
-        let authorization = oauth.build(method.as_str(), uri, &());
+        let authorization = oauth.build(method.as_str(), uri, &req);
         let uri = oauth1::to_uri_query(uri.to_owned(), req);
         http.uri(uri)
             .header(AUTHORIZATION, authorization)
