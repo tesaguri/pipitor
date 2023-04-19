@@ -278,7 +278,7 @@ where
     SE: std::error::Error + Send + Sync,
     BE: std::error::Error + Send + Sync,
 {
-    if let StatusCode::OK = status {
+    if status.is_success() {
         parse(body).map(|data| Response { data, rate_limit })
     } else {
         #[derive(Default, Deserialize)]
